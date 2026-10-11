@@ -287,7 +287,7 @@
   "HDR_QUALITY_QUALITY": "Qualität",
   "HDR_QUALITY_BALANCED": "Ausgewogen",
   "HDR_QUALITY_PERFORMANCE": "Leistung",
-  "HDR_QUALITY_DESC": "Qualität behält die volle Präzision. Ausgewogen nutzt kompakte Puffer. Leistung reduziert zusätzlich HDR10-Bewegungsdetails und Farbumwandlungen. Die Ausgabeauflösung bleibt unverändert. Wird im Spiel mit einem kurzen Ruckler angewendet.",
+  "HDR_QUALITY_DESC": "Bildqualität und Leistung abwägen. Änderungen werden im Spiel mit einem kurzen Ruckler angewendet.",
   "CONFIG_ENABLE_HDR": "HDR aktivieren (Neustart)",
   "CONFIG_ENABLE_HDR_DESC": "Für externe HDR-Displays. HDR muss auch im Spiel aktiviert sein. Standardmäßig ausgeschaltet.",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI (Neustart)",

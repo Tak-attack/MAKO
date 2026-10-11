@@ -79,8 +79,10 @@ export function CompatibilityConfigurationGroup({
                 label={t("HDR_QUALITY", "HDR Quality")}
                 description={t(
                   "HDR_QUALITY_DESC",
-                  "Quality keeps full precision. Balanced uses compact buffers. Performance also reduces HDR10 motion detail and colour-conversion work. Output resolution stays unchanged. Applies live with a brief hitch.",
+                  "Balance image quality and speed. Applies live with a brief hitch.",
                 )}
+                childrenLayout="below"
+                childrenContainerWidth="max"
               >
                 <Dropdown
                   selectedOption={config.hdr_quality}

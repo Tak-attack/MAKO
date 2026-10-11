@@ -287,7 +287,7 @@
   "HDR_QUALITY_QUALITY": "品質",
   "HDR_QUALITY_BALANCED": "バランス",
   "HDR_QUALITY_PERFORMANCE": "パフォーマンス",
-  "HDR_QUALITY_DESC": "品質は完全な精度を維持します。バランスはコンパクトなバッファーを使用します。パフォーマンスは HDR10 の動きの細部と色変換処理も削減します。出力解像度は変わりません。実行中に適用され、一時的に途切れることがあります。",
+  "HDR_QUALITY_DESC": "画質と速度のバランスを選びます。実行中に適用され、一瞬途切れることがあります。",
   "CONFIG_ENABLE_HDR": "HDR を有効化 （再起動）",
   "CONFIG_ENABLE_HDR_DESC": "外部 HDR ディスプレイ向けです。ゲーム側でも HDR を有効にしてください。既定ではオフです。",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI（再起動）",

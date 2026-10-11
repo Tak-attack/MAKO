@@ -287,7 +287,7 @@
   "HDR_QUALITY_QUALITY": "품질",
   "HDR_QUALITY_BALANCED": "균형",
   "HDR_QUALITY_PERFORMANCE": "성능",
-  "HDR_QUALITY_DESC": "품질은 전체 정밀도를 유지합니다. 균형은 소형 버퍼를 사용합니다. 성능은 HDR10 움직임의 세부 정보와 색상 변환 작업도 줄입니다. 출력 해상도는 유지됩니다. 실행 중 적용되며 잠깐 끊길 수 있습니다.",
+  "HDR_QUALITY_DESC": "화질과 속도의 균형을 선택합니다. 실행 중 적용되며 잠깐 끊길 수 있습니다.",
   "CONFIG_ENABLE_HDR": "HDR 활성화 (재시작)",
   "CONFIG_ENABLE_HDR_DESC": "외부 HDR 디스플레이용입니다. 게임에서도 HDR을 활성화해야 합니다. 기본값은 꺼짐입니다.",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI (재시작)",

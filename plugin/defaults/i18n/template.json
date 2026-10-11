@@ -287,7 +287,7 @@
   "HDR_QUALITY_QUALITY": "Quality",
   "HDR_QUALITY_BALANCED": "Balanced",
   "HDR_QUALITY_PERFORMANCE": "Performance",
-  "HDR_QUALITY_DESC": "Quality keeps full precision. Balanced uses compact buffers. Performance also reduces HDR10 motion detail and colour-conversion work. Output resolution stays unchanged. Applies live with a brief hitch.",
+  "HDR_QUALITY_DESC": "Balance image quality and speed. Applies live with a brief hitch.",
   "CONFIG_ENABLE_HDR": "Enable HDR (Restart)",
   "CONFIG_ENABLE_HDR_DESC": "For external HDR displays. HDR must also be enabled in the game. Off by default.",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI (Restart)",

@@ -287,7 +287,7 @@
   "HDR_QUALITY_QUALITY": "质量",
   "HDR_QUALITY_BALANCED": "平衡",
   "HDR_QUALITY_PERFORMANCE": "性能",
-  "HDR_QUALITY_DESC": "质量保留完整精度。平衡使用紧凑缓冲区。性能还会降低 HDR10 运动细节并减少颜色转换。输出分辨率保持不变。实时应用时可能短暂卡顿。",
+  "HDR_QUALITY_DESC": "平衡画质与速度。实时应用时可能短暂卡顿。",
   "CONFIG_ENABLE_HDR": "启用 HDR （重启）",
   "CONFIG_ENABLE_HDR_DESC": "适用于外接 HDR 显示器。还需在游戏中启用 HDR。默认关闭。",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI（重启）",

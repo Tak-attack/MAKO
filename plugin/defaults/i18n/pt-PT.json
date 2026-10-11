@@ -287,7 +287,7 @@
   "HDR_QUALITY_QUALITY": "Qualidade",
   "HDR_QUALITY_BALANCED": "Equilibrado",
   "HDR_QUALITY_PERFORMANCE": "Desempenho",
-  "HDR_QUALITY_DESC": "Qualidade mantém a precisão total. Equilibrado usa buffers compactos. Desempenho também reduz os detalhes de movimento HDR10 e as conversões de cor. A resolução de saída não muda. Aplicado durante o jogo com uma breve pausa.",
+  "HDR_QUALITY_DESC": "Equilibre qualidade de imagem e desempenho. Aplica durante o jogo com uma breve pausa.",
   "CONFIG_ENABLE_HDR": "Ativar HDR (Reiniciar)",
   "CONFIG_ENABLE_HDR_DESC": "Para ecrãs externos com HDR. Ative também o HDR no jogo. Desativado por predefinição.",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI (Reiniciar)",
