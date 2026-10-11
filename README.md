@@ -59,7 +59,7 @@ Published Renderer packages currently target x86_64 Linux hosts and include laye
 - **Per-game shaders:** Live sharpening, anti-aliasing, colour, cinematic, and retro effects through bundled vkBasalt.
 - **Adaptive Frame Generation:** Target 30–240 FPS with a selectable 2x–5x generation ceiling.
 - **Display-aware pacing:** Adapts frame delivery to the presentation plan and Gamescope VRR state.
-- **Experimental HDR (disabled by default):** HDR support for Scaling, Frame Generation, and Shaders through Gamescope.
+- **Experimental HDR:** HDR support for Scaling, Frame Generation, and Shaders through Gamescope.
 - **64-bit and 32-bit x86 support:** Matching Vulkan layers for native and Flatpak games.
 - **Gamescope recovery:** Preserves real frames during presentation pressure and Steam-menu transitions.
 - **Automatic profiles:** Saves per-game renderer and compatibility settings, matched by Steam app ID or process.
