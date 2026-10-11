@@ -1,5 +1,11 @@
 import { GamepadButton, PanelSectionRow } from "@decky/ui";
-import { useRef, useState, type CSSProperties } from "react";
+import {
+  createRef,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 import {
   FiFastForward,
   FiLayers,
@@ -10,7 +16,7 @@ import {
 } from "react-icons/fi";
 import type { IconType } from "react-icons";
 import t from "../i18n/i18n";
-import { MakoFocusable } from "./MakoUi";
+import { MakoFocusable, type MakoNavigationHandle } from "./MakoUi";
 
 export type ModalityId =
   | "frame-generation"
@@ -79,6 +85,7 @@ export function ModalityTabs({
   onModalityChange,
 }: ModalityTabsProps) {
   const selector = useRef<HTMLDivElement>(null);
+  const navigation = useRef<RefObject<MakoNavigationHandle>[]>([]);
   const [revealedModality, setRevealedModality] = useState<ModalityId | null>(
     null,
   );
@@ -129,6 +136,7 @@ export function ModalityTabs({
     index: number,
     key: string | undefined,
     event: Pick<Event, "preventDefault" | "stopPropagation">,
+    button?: GamepadButton,
   ) => {
     const columns = 3;
     let next = index;
@@ -138,13 +146,23 @@ export function ModalityTabs({
     if (key === "ArrowDown") next += columns;
     // Leave outer edges to Steam so focus can leave the settings grid.
     if (next === index || next < 0 || next >= options.length) return;
-    const target = selector.current?.querySelector<HTMLElement>(
-      `[data-modality="${options[next].id}"]`,
-    );
-    if (!target) return;
+    const handle = navigation.current[next]?.current;
+    let moved = false;
+    if (handle) {
+      // In-game Steam trees use virtual focus; DOM focus alone cannot move it.
+      moved = handle.TakeFocus(button);
+    } else if (button === undefined) {
+      // Keep keyboard navigation working in a browser without a Steam tree.
+      const target = selector.current?.querySelector<HTMLElement>(
+        `[data-modality="${options[next].id}"]`,
+      );
+      target?.focus({ preventScroll: true });
+      moved = !!target && target.ownerDocument.activeElement === target;
+    }
+    // Let Steam handle the input if its navigation node cannot take focus.
+    if (!moved) return;
     event.preventDefault();
     event.stopPropagation();
-    target.focus({ preventScroll: true });
   };
 
   return (
@@ -183,9 +201,12 @@ export function ModalityTabs({
             const active = activeModality === option.id;
             const revealed = revealedModality === option.id;
             const Icon = option.icon;
+            const navRef = (navigation.current[index] ??=
+              createRef<MakoNavigationHandle>());
             return (
               <MakoFocusable
                 key={option.id}
+                navRef={navRef}
                 role="tab"
                 id={`mako-modality-tab-${option.id}`}
                 aria-label={option.label}
@@ -214,6 +235,7 @@ export function ModalityTabs({
                       [GamepadButton.DIR_DOWN]: "ArrowDown",
                     }[event.detail.button],
                     event,
+                    event.detail.button,
                   )
                 }
                 onMouseEnter={() => setRevealedModality(option.id)}

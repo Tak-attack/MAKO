@@ -1,6 +1,11 @@
 import { MakoInfo } from "./MakoInfo";
-import { Focusable, PanelSectionRow, Spinner } from "@decky/ui";
-import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import {
+  Focusable,
+  PanelSectionRow,
+  Spinner,
+  type GamepadButton,
+} from "@decky/ui";
+import type { ComponentProps, CSSProperties, ReactNode, Ref } from "react";
 import { FiAlertTriangle, FiInfo, FiLink } from "react-icons/fi";
 
 interface MakoSectionHeaderProps {
@@ -27,14 +32,20 @@ interface MakoExperimentalSettingLabelProps {
 type SteamFocusFlow =
   "column" | "column-reverse" | "row" | "row-reverse" | "grid" | "geometric";
 
+export interface MakoNavigationHandle {
+  TakeFocus(button?: GamepadButton): boolean;
+}
+
 type MakoFocusableProps = Omit<
   ComponentProps<typeof Focusable>,
   "flow-children"
 > & {
   "flow-children"?: SteamFocusFlow;
+  // Steam's Focusable supports navRef, including in virtual-focus trees.
+  navRef?: Ref<MakoNavigationHandle>;
 };
 
-/** Restrict Decky's open string type to directions supported by Steam. */
+/** Type Steam's focus layout and navigation handle omitted by Decky. */
 export function MakoFocusable(props: MakoFocusableProps) {
   return <Focusable {...props} />;
 }

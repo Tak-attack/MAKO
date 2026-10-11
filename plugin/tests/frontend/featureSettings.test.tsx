@@ -9,6 +9,14 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { GamepadButton, type GamepadEvent } from "@decky/ui";
 
+const navigation = vi.hoisted(() => ({
+  virtualFocus: false,
+  handlesAvailable: true,
+  canTakeFocus: true,
+  focused: null as HTMLElement | null,
+  takeFocus: vi.fn(),
+}));
+
 vi.mock("@decky/ui", () => ({
   GamepadButton: { DIR_UP: 9, DIR_DOWN: 10, DIR_LEFT: 11, DIR_RIGHT: 12 },
   PanelSectionRow: ({ children }: { children: React.ReactNode }) => (
@@ -44,8 +52,9 @@ vi.mock("../../src/components/MakoUi", () => ({
     onActivate,
     onKeyDown,
     onButtonDown,
-    onGamepadFocus: _onGamepadFocus,
-    onGamepadBlur: _onGamepadBlur,
+    onGamepadFocus,
+    onGamepadBlur,
+    navRef,
     noFocusRing: _noFocusRing,
     "flow-children": flowChildren,
     ...props
@@ -54,20 +63,49 @@ vi.mock("../../src/components/MakoUi", () => ({
     onButtonDown?: (event: GamepadEvent) => void;
     onGamepadFocus?: () => void;
     onGamepadBlur?: () => void;
+    navRef?: React.Ref<{ TakeFocus: (button?: GamepadButton) => boolean }>;
     noFocusRing?: boolean;
     "flow-children"?: string;
   }) => {
     const ref = React.useRef<HTMLDivElement>(null);
+    React.useImperativeHandle(
+      navigation.handlesAvailable ? navRef : undefined,
+      () => ({
+        TakeFocus(button) {
+          const element = ref.current!;
+          navigation.takeFocus(element, button);
+          if (!navigation.canTakeFocus || element.closest("[hidden]"))
+            return false;
+          const previous = navigation.focused;
+          navigation.focused = element;
+          previous?.dispatchEvent(new CustomEvent("vgp_onblur"));
+          element.dispatchEvent(new CustomEvent("vgp_onfocus"));
+          if (!navigation.virtualFocus) element.focus();
+          return true;
+        },
+      }),
+    );
     React.useEffect(() => {
       const element = ref.current!;
       const handle = (event: Event) => onButtonDown?.(event as GamepadEvent);
+      const activate = () => onActivate?.();
+      const focus = () => onGamepadFocus?.();
+      const blur = () => onGamepadBlur?.();
       element.addEventListener("vgp_onbuttondown", handle);
-      return () => element.removeEventListener("vgp_onbuttondown", handle);
-    }, [onButtonDown]);
+      element.addEventListener("vgp_onok", activate);
+      element.addEventListener("vgp_onfocus", focus);
+      element.addEventListener("vgp_onblur", blur);
+      return () => {
+        element.removeEventListener("vgp_onbuttondown", handle);
+        element.removeEventListener("vgp_onok", activate);
+        element.removeEventListener("vgp_onfocus", focus);
+        element.removeEventListener("vgp_onblur", blur);
+      };
+    }, [onActivate, onButtonDown, onGamepadFocus, onGamepadBlur]);
     return (
       <div
         ref={ref}
-        tabIndex={0}
+        tabIndex={navigation.virtualFocus ? undefined : 0}
         data-focus-flow={flowChildren}
         {...props}
         onKeyDown={(event) => {
@@ -113,6 +151,11 @@ import { EMPTY_RUNTIME_SCALING_UI_STATE } from "../../src/utils/runtimeScalingUt
 beforeEach(() => {
   localStorage.clear();
   window.SP_REACT = React;
+  navigation.virtualFocus = false;
+  navigation.handlesAvailable = true;
+  navigation.canTakeFocus = true;
+  navigation.focused = null;
+  navigation.takeFocus.mockClear();
 });
 
 afterEach(cleanup);
@@ -127,16 +170,29 @@ test.each([
   (key, button, destinations) => {
     window.SP_REACT = React;
     const select = vi.fn();
-    render(
+    const { rerender } = render(
       <ModalityTabs
         activeModality="frame-generation"
         onModalityChange={select}
       />,
     );
-    const tabs = screen.getAllByRole("tab");
-    for (const gamepad of [false, true]) {
+    for (const mode of ["keyboard", "gamepad", "virtual"] as const) {
+      const gamepad = mode !== "keyboard";
+      navigation.virtualFocus = mode === "virtual";
+      rerender(
+        <ModalityTabs
+          activeModality="frame-generation"
+          onModalityChange={select}
+        />,
+      );
+      const tabs = screen.getAllByRole("tab");
       destinations.forEach((destination, index) => {
-        act(() => tabs[index].focus());
+        if (gamepad) {
+          navigation.focused = tabs[index];
+          fireEvent(tabs[index], new CustomEvent("vgp_onfocus"));
+        } else {
+          act(() => tabs[index].focus());
+        }
         const event = gamepad
           ? new CustomEvent("vgp_onbuttondown", {
               bubbles: true,
@@ -149,7 +205,11 @@ test.each([
               cancelable: true,
             });
         fireEvent(tabs[index], event);
-        expect(document.activeElement).toBe(tabs[destination ?? index]);
+        if (gamepad) {
+          expect(navigation.focused).toBe(tabs[destination ?? index]);
+        } else {
+          expect(document.activeElement).toBe(tabs[destination ?? index]);
+        }
         expect(event.defaultPrevented).toBe(destination !== null);
       });
     }
@@ -188,6 +248,130 @@ test("held direction continues navigation while activation remains explicit", ()
   expect(select).toHaveBeenCalledExactlyOnceWith("shaders");
 });
 
+test("controller navigation moves virtual focus when browser focus cannot move", () => {
+  navigation.virtualFocus = true;
+  const select = vi.fn();
+  render(
+    <ModalityTabs activeModality="frame-generation" onModalityChange={select} />,
+  );
+  const tabs = screen.getAllByRole("tab");
+  navigation.focused = tabs[0];
+  fireEvent(tabs[0], new CustomEvent("vgp_onfocus"));
+  const browserFocus = document.activeElement;
+  // Steam's in-game tree uses virtual focus: these divs have no DOM tabIndex.
+  tabs[1].focus();
+  expect(document.activeElement).toBe(browserFocus);
+
+  for (const [button, destination] of [
+    [GamepadButton.DIR_RIGHT, 1],
+    [GamepadButton.DIR_DOWN, 4],
+    [GamepadButton.DIR_LEFT, 3],
+    [GamepadButton.DIR_UP, 0],
+    [GamepadButton.DIR_DOWN, 3],
+  ] as const) {
+    const event = new CustomEvent("vgp_onbuttondown", {
+      bubbles: true,
+      cancelable: true,
+      detail: { button, source: 0 },
+    });
+    fireEvent(navigation.focused!, event);
+    expect(navigation.focused).toBe(tabs[destination]);
+    expect(navigation.takeFocus).toHaveBeenLastCalledWith(
+      tabs[destination],
+      button,
+    );
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(browserFocus);
+  }
+  expect(select).not.toHaveBeenCalled();
+  fireEvent(navigation.focused!, new CustomEvent("vgp_onok"));
+  expect(select).toHaveBeenCalledExactlyOnceWith("performance");
+});
+
+test.each(["missing", "rejected"] as const)(
+  "does not swallow gamepad directions when Steam navigation is %s",
+  (availability) => {
+    navigation.virtualFocus = true;
+    navigation.handlesAvailable = availability !== "missing";
+    navigation.canTakeFocus = availability !== "rejected";
+    const select = vi.fn();
+    render(
+      <ModalityTabs activeModality="frame-generation" onModalityChange={select} />,
+    );
+    const tab = screen.getByRole("tab", { name: "Frame-gen" });
+    navigation.focused = tab;
+    const steamNavigation = vi.fn();
+    screen
+      .getByRole("tablist")
+      .addEventListener("vgp_onbuttondown", steamNavigation);
+    const event = new CustomEvent("vgp_onbuttondown", {
+      bubbles: true,
+      cancelable: true,
+      detail: { button: GamepadButton.DIR_RIGHT, source: 0 },
+    });
+    fireEvent(tab, event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(steamNavigation).toHaveBeenCalledOnce();
+    expect(navigation.focused).toBe(tab);
+    expect(select).not.toHaveBeenCalled();
+  },
+);
+
+test("keyboard navigation works without a Steam tree", () => {
+  navigation.handlesAvailable = false;
+  render(
+    <ModalityTabs activeModality="frame-generation" onModalityChange={vi.fn()} />,
+  );
+  const first = screen.getByRole("tab", { name: "Frame-gen" });
+  act(() => first.focus());
+  fireEvent.keyDown(first, { key: "ArrowRight" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("tab", { name: "Scaling" }),
+  );
+});
+
+test("virtual tab focus survives a profile reload and runtime panel insertion", () => {
+  navigation.virtualFocus = true;
+  const change = vi.fn(async () => undefined);
+  const settings = (running: boolean, loading: boolean) => (
+    <>
+      {running && <div>Live Status</div>}
+      <div hidden={loading}>
+        <FeatureSettings
+          config={getDefaults()}
+          runtimeState={EMPTY_RUNTIME_SCALING_UI_STATE}
+          profileName={running ? "running-game" : "mako"}
+          vkBasaltConfigPath="/home/deck/.config/vkBasalt/vkBasalt.conf"
+          onConfigChange={change}
+          onConfigUpdate={change}
+        />
+      </div>
+    </>
+  );
+  const { rerender } = render(settings(false, false));
+  const frameGeneration = screen.getByRole("tab", { name: "Frame-gen" });
+  navigation.focused = frameGeneration;
+  fireEvent(frameGeneration, new CustomEvent("vgp_onfocus"));
+  rerender(settings(true, true));
+  rerender(settings(true, false));
+
+  fireEvent(
+    navigation.focused!,
+    new CustomEvent("vgp_onbuttondown", {
+      bubbles: true,
+      cancelable: true,
+      detail: { button: GamepadButton.DIR_DOWN, source: 0 },
+    }),
+  );
+  expect(navigation.focused).toBe(
+    screen.getByRole("tab", { name: "Performance" }),
+  );
+  fireEvent(navigation.focused!, new CustomEvent("vgp_onok"));
+  expect(screen.getByText("FG performance controls")).toBeTruthy();
+  expect(localStorage.getItem("mako-active-modality")).toBe("performance");
+  expect(change).not.toHaveBeenCalled();
+});
+
 describe("primary feature organization", () => {
   test("opens Frame-gen by default and switches six settings tabs in a three-column grid", () => {
     window.SP_REACT = React;
@@ -202,7 +386,10 @@ describe("primary feature organization", () => {
       />,
     );
 
-    expect(screen.queryByRole("heading")).toBeNull();
+    const sectionHeading = screen.getByRole("heading", {
+      name: "Image Processing",
+    });
+    expect(screen.getAllByRole("heading")).toHaveLength(1);
     const sharedPerformanceInfo = screen.getByText(
       "Combining Frame Generation, Scaling, and Shaders may cost performance. Disable unused features; changing display mode can change input resolution and GPU cost.",
     );
@@ -233,6 +420,10 @@ describe("primary feature organization", () => {
       "Tweaks",
     ]);
     const tablist = screen.getByRole("tablist", { name: "Image Processing" });
+    expect(
+      sectionHeading.compareDocumentPosition(tablist) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
     expect(tablist.style.gridTemplateColumns).toBe("repeat(3, minmax(0, 1fr))");
     expect(tablist.getAttribute("data-focus-flow")).toBe("grid");
     expect(
@@ -340,6 +531,7 @@ describe("primary feature organization", () => {
     expect(screen.getByText("FG performance controls")).toBeTruthy();
     expect(screen.queryByText("Compatibility controls")).toBeNull();
     expect(screen.getAllByRole("tab", { selected: true })).toHaveLength(1);
+    expect(screen.getAllByRole("heading")).toEqual([sectionHeading]);
   });
 });
 

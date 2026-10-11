@@ -9,7 +9,7 @@ import { ScalingControl } from "./ScalingControl";
 import { PerformanceConfigurationGroup } from "./settings/PerformanceConfigurationGroup";
 import { ShadersConfigurationGroup } from "./settings/ShadersConfigurationGroup";
 import { ConfigurationSection } from "./ConfigurationSection";
-import { MakoInlineTip } from "./MakoUi";
+import { MakoInlineTip, MakoSectionHeader } from "./MakoUi";
 import { DEFAULT_PROFILE_NAME } from "../config/configSchema";
 import { ModalityTabs, type ModalityId } from "./ModalityTabs";
 
@@ -71,6 +71,9 @@ export function FeatureSettings({
 
   return (
     <>
+      <MakoSectionHeader>
+        {t("CONTENT_IMAGE_PROCESSING", "Image Processing")}
+      </MakoSectionHeader>
       <PanelSectionRow>
         <div data-mako-image-processing-tip="true" style={{ marginTop: "3px" }}>
           <MakoInlineTip tone="info">

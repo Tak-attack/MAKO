@@ -118,7 +118,7 @@ class ProductBrandingTests(unittest.TestCase):
             first_highlight = next(line for line in notes.splitlines() if line.startswith("- **"))
             self.assertIn("HDR", first_highlight)
             self.assertIn("experimental", first_highlight.lower())
-            self.assertIn("disabled by default", first_highlight.lower())
+            self.assertNotIn("disabled by default", first_highlight.lower())
 
         self.assertIn(
             "https://github.com/eugeniosegala/MAKO/blob/main/plugin/docs/LAUNCHERS.md",
