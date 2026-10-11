@@ -336,11 +336,7 @@ describe("Configuration controls", () => {
         /Enable before launch for bundled sharpening, anti-aliasing, and shaders/,
       ),
     ).toBeTruthy();
-    expect(
-      screen
-        .getByText("Experimental")
-        .getAttribute("data-mako-experimental-badge"),
-    ).toBe("true");
+    expect(screen.queryByText("Experimental")).toBeNull();
     expect(screen.getByText("Sharpening")).toBeTruthy();
     expect(screen.getByText("Sharpness (55%)")).toBeTruthy();
     expect(screen.getByText("DLS Denoise (20%)")).toBeTruthy();

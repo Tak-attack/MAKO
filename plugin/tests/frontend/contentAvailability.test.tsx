@@ -255,7 +255,7 @@ test.each([false, true])(
 
     fireEvent.click(screen.getByRole("tab", { name: "Shaders" }));
     const shaders = screen.getByRole("button", {
-      name: "Enable Shaders (Restart) Experimental",
+      name: "Enable Shaders (Restart)",
     });
     expect((shaders as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(shaders);

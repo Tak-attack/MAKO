@@ -55,7 +55,6 @@ import {
 import t from "../../i18n/i18n";
 import { MakoInfo } from "../MakoInfo";
 import {
-  MakoExperimentalSettingLabel,
   MakoFocusable,
   MakoInlineTip,
   makoDialogButtonStyle,
@@ -282,12 +281,7 @@ export function ShadersConfigurationGroup({
     <>
       <PanelSectionRow>
         <ToggleField
-          label={
-            <MakoExperimentalSettingLabel
-              label={t("CONFIG_ENABLE_VKBASALT", "Enable Shaders (Restart)")}
-              badgeLabel={t("EXPERIMENTAL_LABEL", "Experimental")}
-            />
-          }
+          label={t("CONFIG_ENABLE_VKBASALT", "Enable Shaders (Restart)")}
           description={t(
             "CONFIG_ENABLE_VKBASALT_DESC",
             "Enable before launch for bundled sharpening, anti-aliasing, and shaders. No separate install. If effects are invisible, try Windowed or Borderless Fullscreen mode.",

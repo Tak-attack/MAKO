@@ -719,7 +719,6 @@ ApplicationWindow {
                     GroupEntry {
                         title: t.enableShaders
                         description: t.enableShadersDesc
-                        experimentalLabel: t.experimentalLabel
                         compactRestartMarker: true
 
                         CheckBox {
