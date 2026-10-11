@@ -6,7 +6,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { GamepadButton, type GamepadEvent } from "@decky/ui";
 
 vi.mock("@decky/ui", () => ({
@@ -109,6 +109,11 @@ import { FeatureSettings } from "../../src/components/FeatureSettings";
 import { ModalityTabs } from "../../src/components/ModalityTabs";
 import { getDefaults } from "../../src/config/configSchema";
 import { EMPTY_RUNTIME_SCALING_UI_STATE } from "../../src/utils/runtimeScalingUtils";
+
+beforeEach(() => {
+  localStorage.clear();
+  window.SP_REACT = React;
+});
 
 afterEach(cleanup);
 
@@ -335,5 +340,94 @@ describe("primary feature organization", () => {
     expect(screen.getByText("FG performance controls")).toBeTruthy();
     expect(screen.queryByText("Compatibility controls")).toBeNull();
     expect(screen.getAllByRole("tab", { selected: true })).toHaveLength(1);
+  });
+});
+
+describe("tab selection persistence", () => {
+  const settings = (profileName = "mako") => (
+    <FeatureSettings
+      config={getDefaults()}
+      runtimeState={EMPTY_RUNTIME_SCALING_UI_STATE}
+      profileName={profileName}
+      vkBasaltConfigPath="/home/deck/.config/vkBasalt/vkBasalt.conf"
+      onConfigChange={vi.fn(async () => undefined)}
+      onConfigUpdate={vi.fn(async () => undefined)}
+    />
+  );
+
+  test.each([
+    "Frame-gen",
+    "Scaling",
+    "Shaders",
+    "Performance",
+    "Advanced",
+    "Tweaks",
+  ])("remembers %s after reopening and across profiles", (name) => {
+    const initial = render(settings());
+    fireEvent.click(screen.getByRole("tab", { name: "Performance" }));
+    fireEvent.keyDown(screen.getByRole("tab", { name }), { key: "Enter" });
+    initial.rerender(settings("another-game"));
+    expect(
+      screen.getByRole("tab", { selected: true }).getAttribute("aria-label"),
+    ).toBe(name);
+    initial.unmount();
+
+    render(settings("another-game"));
+    const selected = screen.getByRole("tab", { selected: true });
+    expect(selected.getAttribute("aria-label")).toBe(name);
+    expect(selected.getAttribute("aria-controls")).toBe(
+      screen.getByRole("tabpanel").id,
+    );
+  });
+
+  test("moving focus does not replace the remembered selection", () => {
+    const initial = render(settings());
+    const shaders = screen.getByRole("tab", { name: "Shaders" });
+    fireEvent.click(shaders);
+    act(() => shaders.focus());
+    fireEvent.keyDown(shaders, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(
+      screen.getByRole("tab", { name: "Tweaks" }),
+    );
+    initial.unmount();
+
+    render(settings());
+    expect(
+      screen.getByRole("tab", { name: "Shaders", selected: true }),
+    ).toBeTruthy();
+  });
+
+  test.each(["", "removed-tab", "null", "{}", "toString", "__proto__"])(
+    "falls back to Frame-gen for an invalid stored tab: %s",
+    (value) => {
+      localStorage.setItem("mako-active-modality", value);
+      render(settings());
+      expect(
+        screen.getByRole("tab", { name: "Frame-gen", selected: true }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("tab", { name: "Scaling" }));
+      expect(
+        screen.getByRole("tab", { name: "Scaling", selected: true }),
+      ).toBeTruthy();
+    },
+  );
+
+  test("settings remain usable when browser storage is unavailable", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const props = settings().props;
+    render(<FeatureSettings {...props} />);
+    expect(
+      screen.getByRole("tab", { name: "Frame-gen", selected: true }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Shaders" }));
+    expect(screen.getByText("Shader controls")).toBeTruthy();
+    expect(props.onConfigChange).not.toHaveBeenCalled();
+    expect(props.onConfigUpdate).not.toHaveBeenCalled();
   });
 });

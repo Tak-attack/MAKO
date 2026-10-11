@@ -15,7 +15,7 @@ Without live metrics, **Live Status** shows **Off** when Frame Generation and Sc
 
 Use **Performance** (shown as **Perf** on focus), **Advanced**, and **Tweaks** for additional controls; Tweaks contains compatibility options. **External Tools** and **Manual Overrides** are below the launch instructions.
 
-Use Left/Right to move across tabs and Up/Down between rows. Press A to open the focused tab. The grid centres when you enter it.
+Use Left/Right to move across tabs and Up/Down between rows. Press A to open the focused tab. The grid centres when you enter it. MAKO remembers the last tab you opened.
 
 Try one feature at a time. If it does not work, try Fullscreen, Borderless Fullscreen, and Windowed. Compare V-Sync on and off and keep the smoother option.
 

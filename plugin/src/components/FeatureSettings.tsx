@@ -13,6 +13,8 @@ import { MakoInlineTip } from "./MakoUi";
 import { DEFAULT_PROFILE_NAME } from "../config/configSchema";
 import { ModalityTabs, type ModalityId } from "./ModalityTabs";
 
+const ACTIVE_MODALITY_STORAGE_KEY = "mako-active-modality";
+
 interface FeatureSettingsProps extends ConfigurationEditorProps {
   runtimeState: RuntimeScalingUiState;
   profileName: string;
@@ -35,8 +37,6 @@ export function FeatureSettings({
   onConfigChange,
   onConfigUpdate,
 }: FeatureSettingsProps) {
-  const [activeModality, setActiveModality] =
-    useState<ModalityId>("frame-generation");
   const modalityLabels: Record<ModalityId, string> = {
     performance: t("CONTENT_PERFORMANCE_SETTINGS", "Performance Settings"),
     "frame-generation": t("CONTENT_FPS_MULTIPLIER", "Frame Generation"),
@@ -44,6 +44,29 @@ export function FeatureSettings({
     shaders: t("CONTENT_SHADERS", "Shaders"),
     advanced: t("CONFIG_SECTION_TITLE", "Advanced Rendering Settings"),
     compatibility: t("CONFIG_WORKAROUNDS_TITLE", "Compatibility Settings"),
+  };
+  const [activeModality, setActiveModality] = useState<ModalityId>(() => {
+    try {
+      const saved = localStorage.getItem(ACTIVE_MODALITY_STORAGE_KEY);
+      if (
+        saved &&
+        Object.prototype.hasOwnProperty.call(modalityLabels, saved)
+      ) {
+        return saved as ModalityId;
+      }
+    } catch {
+      // Unavailable storage must not prevent opening the settings.
+    }
+    return "frame-generation";
+  });
+
+  const selectModality = (modality: ModalityId) => {
+    setActiveModality(modality);
+    try {
+      localStorage.setItem(ACTIVE_MODALITY_STORAGE_KEY, modality);
+    } catch (error) {
+      console.warn("Failed to save active settings tab:", error);
+    }
   };
 
   return (
@@ -60,7 +83,7 @@ export function FeatureSettings({
       </PanelSectionRow>
       <ModalityTabs
         activeModality={activeModality}
-        onModalityChange={setActiveModality}
+        onModalityChange={selectModality}
       />
 
       <div

@@ -215,6 +215,7 @@ vi.mock("virtual:mako-release-info", () => ({
 
 import { Content } from "../../src/components/Content";
 beforeEach(() => {
+  localStorage.clear();
   window.SP_REACT = React;
 });
 afterEach(() => {
