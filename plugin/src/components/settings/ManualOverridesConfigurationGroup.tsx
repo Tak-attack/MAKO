@@ -17,11 +17,13 @@ export function ManualOverridesConfigurationGroup({
         {t("CONFIG_MANUAL_OVERRIDES_TITLE", "Manual Overrides")}
       </MakoSectionHeader>
 
-      <CollapseControl
-        containerClassName="MAKO_ManualOverridesCollapseButton_Container"
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
+      {onToggle && (
+        <CollapseControl
+          containerClassName="MAKO_ManualOverridesCollapseButton_Container"
+          collapsed={collapsed}
+          onToggle={onToggle}
+        />
+      )}
 
       {!collapsed && (
         <PanelSectionRow>

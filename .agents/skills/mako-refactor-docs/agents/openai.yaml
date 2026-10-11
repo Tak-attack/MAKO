@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refactor MAKO Docs"
+  short_description: "Review docs for clarity, duplication, and outdated information"
+  default_prompt: "Use $mako-refactor-docs to review MAKO Markdown files one by one, excluding skill Markdown, remove filler and duplicated detail, correct outdated information, and keep human-facing guides easy to follow."

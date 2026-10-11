@@ -96,7 +96,7 @@ describe("Performance Settings", () => {
       />,
     );
 
-    expect(screen.getByText("Performance Settings")).toBeTruthy();
+    expect(screen.queryByText("Performance Settings")).toBeNull();
     const overlay = screen.getByText("Disable Steam Overlay (Restart)");
     expect(overlay.getAttribute("data-checked")).toBe("true");
     expect(screen.getByText(/may affect Steam Input/)).toBeTruthy();

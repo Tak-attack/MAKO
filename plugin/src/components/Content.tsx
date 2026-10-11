@@ -331,7 +331,7 @@ export function Content() {
               config={config}
               onConfigChange={handleConfigChange}
               onConfigUpdate={handleConfigChanges}
-              includeAdvancedRendering={false}
+              groups={["external-tools", "manual-overrides"]}
             />
           </div>
         )}

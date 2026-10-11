@@ -21,11 +21,13 @@ export function ExternalToolsConfigurationGroup({
         {t("CONFIG_EXTERNAL_TOOLS_TITLE", "External Tools")}
       </MakoSectionHeader>
 
-      <CollapseControl
-        containerClassName="MAKO_ExternalToolsCollapseButton_Container"
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
+      {onToggle && (
+        <CollapseControl
+          containerClassName="MAKO_ExternalToolsCollapseButton_Container"
+          collapsed={collapsed}
+          onToggle={onToggle}
+        />
+      )}
 
       {!collapsed && (
         <>

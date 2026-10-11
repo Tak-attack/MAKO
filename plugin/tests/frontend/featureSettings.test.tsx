@@ -33,11 +33,11 @@ vi.mock("../../src/components/MakoUi", () => ({
   ),
   MakoFocusable: ({
     children,
-    onActivate: _onActivate,
+    onActivate,
     onGamepadFocus: _onGamepadFocus,
     onGamepadBlur: _onGamepadBlur,
     noFocusRing: _noFocusRing,
-    "flow-children": _flowChildren,
+    "flow-children": flowChildren,
     ...props
   }: React.HTMLAttributes<HTMLDivElement> & {
     onActivate?: () => void;
@@ -46,7 +46,14 @@ vi.mock("../../src/components/MakoUi", () => ({
     noFocusRing?: boolean;
     "flow-children"?: string;
   }) => (
-    <div tabIndex={0} {...props}>
+    <div
+      tabIndex={0}
+      data-focus-flow={flowChildren}
+      {...props}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") onActivate?.();
+      }}
+    >
       {children}
     </div>
   ),
@@ -65,7 +72,12 @@ vi.mock("../../src/components/settings/ShadersConfigurationGroup", () => ({
   ShadersConfigurationGroup: () => <div>Shader controls</div>,
 }));
 vi.mock("../../src/components/ConfigurationSection", () => ({
-  FrameGenerationConfigurationSection: () => <div>FG advanced controls</div>,
+  ConfigurationSection: ({ groups }: { groups: string[] }) => (
+    <div>
+      {groups.includes("advanced") && <div>FG advanced controls</div>}
+      {groups.includes("compatibility") && <div>Compatibility controls</div>}
+    </div>
+  ),
 }));
 vi.mock("../../src/i18n/i18n", () => ({
   default: (_key: string, fallback: string) => fallback,
@@ -78,7 +90,7 @@ import { EMPTY_RUNTIME_SCALING_UI_STATE } from "../../src/utils/runtimeScalingUt
 afterEach(cleanup);
 
 describe("primary feature organization", () => {
-  test("switches the three modalities while keeping lower settings visible", () => {
+  test("opens Frame-gen by default and switches six settings tabs in a three-column grid", () => {
     window.SP_REACT = React;
     const { container } = render(
       <FeatureSettings
@@ -91,7 +103,7 @@ describe("primary feature organization", () => {
       />,
     );
 
-    expect(screen.getByText("Image Processing")).toBeTruthy();
+    expect(screen.queryByRole("heading")).toBeNull();
     const sharedPerformanceInfo = screen.getByText(
       "Combining Frame Generation, Scaling, and Shaders may cost performance. Disable unused features; changing display mode can change input resolution and GPU cost.",
     );
@@ -111,7 +123,37 @@ describe("primary feature organization", () => {
         screen.getByRole("tablist", { name: "Image Processing" }),
       ) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(
+      screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label")),
+    ).toEqual([
+      "Frame-gen",
+      "Scaling",
+      "Shaders",
+      "Performance",
+      "Advanced",
+      "Tweaks",
+    ]);
+    const tablist = screen.getByRole("tablist", { name: "Image Processing" });
+    expect(tablist.style.gridTemplateColumns).toBe("repeat(3, minmax(0, 1fr))");
+    expect(tablist.getAttribute("data-focus-flow")).toBe("grid");
+    expect(
+      screen
+        .getByRole("tab", { name: "Frame-gen" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("tabpanel", { name: "Frame Generation" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Frame Generation controls")).toBeTruthy();
+    expect(screen.queryByText("FG performance controls")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Performance" }));
+    expect(screen.getByText("FG performance controls")).toBeTruthy();
+    expect(screen.queryByText("Frame Generation controls")).toBeNull();
+    expect(screen.queryByText("FG advanced controls")).toBeNull();
+    expect(screen.queryByText("Compatibility controls")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Frame-gen" }));
     expect(
       screen
         .getByRole("tab", { name: "Frame-gen" })
@@ -139,8 +181,8 @@ describe("primary feature organization", () => {
       .querySelector("svg") as SVGElement;
     expect(frameGenerationIcon.style.transform).toBe("translateY(0) scale(1)");
     expect(screen.getByText("Frame Generation controls")).toBeTruthy();
-    expect(screen.getByText("FG performance controls")).toBeTruthy();
-    expect(screen.getByText("FG advanced controls")).toBeTruthy();
+    expect(screen.queryByText("FG performance controls")).toBeNull();
+    expect(screen.queryByText("FG advanced controls")).toBeNull();
     expect(screen.queryByText("Upscaling controls")).toBeNull();
     expect(screen.queryByText("Shader controls")).toBeNull();
 
@@ -166,8 +208,8 @@ describe("primary feature organization", () => {
     expect(screen.getByText("Upscaling controls")).toBeTruthy();
     expect(screen.queryByText("Shader controls")).toBeNull();
     expect(spatialTab.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText("FG performance controls")).toBeTruthy();
-    expect(screen.getByText("FG advanced controls")).toBeTruthy();
+    expect(screen.queryByText("FG performance controls")).toBeNull();
+    expect(screen.queryByText("FG advanced controls")).toBeNull();
 
     const shadersTab = screen.getByRole("tab", { name: "Shaders" });
     fireEvent.click(shadersTab);
@@ -180,15 +222,24 @@ describe("primary feature organization", () => {
       '[data-mako-modality-panel="shaders"]',
     ) as HTMLElement;
     expect(modalityPanel.style.marginTop).toBe("4px");
-    const performance = screen.getByText("FG performance controls");
-    const advanced = screen.getByText("FG advanced controls");
-    expect(
-      modalityPanel.compareDocumentPosition(performance) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
-    expect(
-      performance.compareDocumentPosition(advanced) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
+    const advancedTab = screen.getByRole("tab", { name: "Advanced" });
+    fireEvent.keyDown(advancedTab, { key: "Enter" });
+    expect(screen.getByText("FG advanced controls")).toBeTruthy();
+    expect(screen.queryByText("Shader controls")).toBeNull();
+    expect(screen.queryByText("FG performance controls")).toBeNull();
+    expect(advancedTab.getAttribute("aria-selected")).toBe("true");
+
+    const compatibilityTab = screen.getByRole("tab", { name: "Tweaks" });
+    fireEvent.click(compatibilityTab);
+    expect(screen.getByText("Compatibility controls")).toBeTruthy();
+    expect(screen.queryByText("FG advanced controls")).toBeNull();
+    expect(compatibilityTab.getAttribute("aria-controls")).toBe(
+      screen.getByRole("tabpanel").id,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Performance" }));
+    expect(screen.getByText("FG performance controls")).toBeTruthy();
+    expect(screen.queryByText("Compatibility controls")).toBeNull();
+    expect(screen.getAllByRole("tab", { selected: true })).toHaveLength(1);
   });
 });

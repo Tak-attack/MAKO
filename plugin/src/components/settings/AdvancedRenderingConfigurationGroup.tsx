@@ -17,7 +17,7 @@ import {
   isFractionalAdaptivePresetEnabled,
 } from "../../config/fractionalAdaptivePreset";
 import t from "../../i18n/i18n";
-import { MakoSectionHeader, MakoSettingRelationship } from "../MakoUi";
+import { MakoSettingRelationship } from "../MakoUi";
 import type { ConfigurationUpdateGroupProps } from "./types";
 import { CollapseControl } from "./CollapseControl";
 
@@ -53,15 +53,13 @@ export function AdvancedRenderingConfigurationGroup({
 
   return (
     <>
-      <MakoSectionHeader>
-        {t("CONFIG_SECTION_TITLE", "Advanced Rendering Settings")}
-      </MakoSectionHeader>
-
-      <CollapseControl
-        containerClassName="MAKO_ConfigCollapseButton_Container"
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
+      {onToggle && (
+        <CollapseControl
+          containerClassName="MAKO_ConfigCollapseButton_Container"
+          collapsed={collapsed}
+          onToggle={onToggle}
+        />
+      )}
 
       {!collapsed && (
         <>

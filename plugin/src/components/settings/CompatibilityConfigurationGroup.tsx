@@ -16,7 +16,6 @@ import {
   MakoExperimentalSettingLabel,
   MakoInlineTip,
   MakoRestartLabel,
-  MakoSectionHeader,
   MakoSettingRelationship,
 } from "../MakoUi";
 import type { ConfigurationUpdateGroupProps } from "./types";
@@ -47,15 +46,13 @@ export function CompatibilityConfigurationGroup({
 
   return (
     <>
-      <MakoSectionHeader>
-        {t("CONFIG_WORKAROUNDS_TITLE", "Compatibility Settings")}
-      </MakoSectionHeader>
-
-      <CollapseControl
-        containerClassName="MAKO_WorkaroundsCollapseButton_Container"
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
+      {onToggle && (
+        <CollapseControl
+          containerClassName="MAKO_WorkaroundsCollapseButton_Container"
+          collapsed={collapsed}
+          onToggle={onToggle}
+        />
+      )}
 
       {!collapsed && (
         <>

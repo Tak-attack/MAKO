@@ -14,7 +14,7 @@ export interface ConfigurationEditorProps extends ConfigurationControlProps {
 
 export interface ConfigurationGroupProps extends ConfigurationControlProps {
   collapsed: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
 }
 
 export interface ConfigurationUpdateGroupProps

@@ -8,8 +8,8 @@ import { FpsMultiplierControl } from "./FpsMultiplierControl";
 import { ScalingControl } from "./ScalingControl";
 import { PerformanceConfigurationGroup } from "./settings/PerformanceConfigurationGroup";
 import { ShadersConfigurationGroup } from "./settings/ShadersConfigurationGroup";
-import { FrameGenerationConfigurationSection } from "./ConfigurationSection";
-import { MakoInlineTip, MakoSectionHeader } from "./MakoUi";
+import { ConfigurationSection } from "./ConfigurationSection";
+import { MakoInlineTip } from "./MakoUi";
 import { DEFAULT_PROFILE_NAME } from "../config/configSchema";
 import { ModalityTabs, type ModalityId } from "./ModalityTabs";
 
@@ -37,18 +37,17 @@ export function FeatureSettings({
 }: FeatureSettingsProps) {
   const [activeModality, setActiveModality] =
     useState<ModalityId>("frame-generation");
-  const activeModalityLabel =
-    activeModality === "frame-generation"
-      ? t("CONTENT_FPS_MULTIPLIER", "Frame Generation")
-      : activeModality === "spatial"
-        ? t("CONTENT_SCALING", "Spatial Settings")
-        : t("CONTENT_SHADERS", "Shaders");
+  const modalityLabels: Record<ModalityId, string> = {
+    performance: t("CONTENT_PERFORMANCE_SETTINGS", "Performance Settings"),
+    "frame-generation": t("CONTENT_FPS_MULTIPLIER", "Frame Generation"),
+    spatial: t("CONTENT_SCALING", "Spatial Settings"),
+    shaders: t("CONTENT_SHADERS", "Shaders"),
+    advanced: t("CONFIG_SECTION_TITLE", "Advanced Rendering Settings"),
+    compatibility: t("CONFIG_WORKAROUNDS_TITLE", "Compatibility Settings"),
+  };
 
   return (
     <>
-      <MakoSectionHeader>
-        {t("CONTENT_IMAGE_PROCESSING", "Image Processing")}
-      </MakoSectionHeader>
       <PanelSectionRow>
         <div data-mako-image-processing-tip="true" style={{ marginTop: "3px" }}>
           <MakoInlineTip tone="info">
@@ -68,7 +67,7 @@ export function FeatureSettings({
         key={activeModality}
         id={`mako-modality-panel-${activeModality}`}
         role="tabpanel"
-        aria-label={activeModalityLabel}
+        aria-label={modalityLabels[activeModality]}
         data-mako-modality-panel={activeModality}
         style={{
           marginTop: "4px",
@@ -107,6 +106,25 @@ export function FeatureSettings({
             onConfigChange={onConfigChange}
           />
         )}
+
+        {activeModality === "performance" && (
+          <PerformanceConfigurationGroup
+            config={config}
+            onConfigChange={onConfigChange}
+            onConfigUpdate={onConfigUpdate}
+          />
+        )}
+
+        {(activeModality === "advanced" ||
+          activeModality === "compatibility") && (
+          <ConfigurationSection
+            groups={[activeModality]}
+            collapsible={false}
+            config={config}
+            onConfigChange={onConfigChange}
+            onConfigUpdate={onConfigUpdate}
+          />
+        )}
       </div>
 
       <style>{`
@@ -115,18 +133,6 @@ export function FeatureSettings({
           to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
-
-      <PerformanceConfigurationGroup
-        config={config}
-        onConfigChange={onConfigChange}
-        onConfigUpdate={onConfigUpdate}
-      />
-
-      <FrameGenerationConfigurationSection
-        config={config}
-        onConfigChange={onConfigChange}
-        onConfigUpdate={onConfigUpdate}
-      />
     </>
   );
 }

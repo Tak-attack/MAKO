@@ -34,7 +34,7 @@ class ProductBrandingTests(unittest.TestCase):
         self.assertIn('{" · MAKO Renderer "}', content)
 
         configuration = (
-            PLUGIN_DIR / "src/components/settings/AdvancedRenderingConfigurationGroup.tsx"
+            PLUGIN_DIR / "src/components/FeatureSettings.tsx"
         ).read_text(encoding="utf-8")
         self.assertIn("Advanced Rendering Settings", configuration)
 

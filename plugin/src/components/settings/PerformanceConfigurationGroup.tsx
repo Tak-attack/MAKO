@@ -10,7 +10,7 @@ import {
 } from "../../config/configSchema";
 import { ultraPerformanceChanges } from "../../config/ultraPerformancePreset";
 import t from "../../i18n/i18n";
-import { MakoInlineTip, MakoRestartLabel, MakoSectionHeader } from "../MakoUi";
+import { MakoInlineTip, MakoRestartLabel } from "../MakoUi";
 import type { ConfigurationEditorProps } from "./types";
 
 export function PerformanceConfigurationGroup({
@@ -20,10 +20,6 @@ export function PerformanceConfigurationGroup({
 }: ConfigurationEditorProps) {
   return (
     <>
-      <MakoSectionHeader>
-        {t("CONTENT_PERFORMANCE_SETTINGS", "Performance Settings")}
-      </MakoSectionHeader>
-
       <PanelSectionRow>
         <ToggleField
           label={

@@ -1,11 +1,24 @@
 import { PanelSectionRow } from "@decky/ui";
 import { useState, type CSSProperties } from "react";
-import { FiFastForward, FiLayers, FiMaximize2 } from "react-icons/fi";
+import {
+  FiFastForward,
+  FiLayers,
+  FiMaximize2,
+  FiSettings,
+  FiShield,
+  FiZap,
+} from "react-icons/fi";
 import type { IconType } from "react-icons";
 import t from "../i18n/i18n";
 import { MakoFocusable } from "./MakoUi";
 
-export type ModalityId = "frame-generation" | "spatial" | "shaders";
+export type ModalityId =
+  | "frame-generation"
+  | "spatial"
+  | "shaders"
+  | "performance"
+  | "advanced"
+  | "compatibility";
 
 interface ModalityTabsProps {
   activeModality: ModalityId;
@@ -87,6 +100,24 @@ export function ModalityTabs({
       ribbonLabel: t("CONTENT_TAB_SHADERS", "Shaders"),
       icon: FiLayers,
     },
+    {
+      id: "performance",
+      label: t("CONTENT_TAB_PERFORMANCE", "Performance"),
+      ribbonLabel: t("CONTENT_TAB_PERFORMANCE_SHORT", "Perf"),
+      icon: FiZap,
+    },
+    {
+      id: "advanced",
+      label: t("CONTENT_TAB_ADVANCED", "Advanced"),
+      ribbonLabel: t("CONTENT_TAB_ADVANCED", "Advanced"),
+      icon: FiSettings,
+    },
+    {
+      id: "compatibility",
+      label: t("CONTENT_TAB_COMPATIBILITY", "Tweaks"),
+      ribbonLabel: t("CONTENT_TAB_COMPATIBILITY", "Tweaks"),
+      icon: FiShield,
+    },
   ];
 
   const hideRibbon = (modality: ModalityId) => {
@@ -113,11 +144,13 @@ export function ModalityTabs({
         <MakoFocusable
           role="tablist"
           aria-label={t("CONTENT_IMAGE_PROCESSING", "Image Processing")}
-          flow-children="row"
+          flow-children="grid"
+          data-mako-focus-scroll="nearest"
           noFocusRing
           style={{
             width: "100%",
-            display: "flex",
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
             alignItems: "stretch",
             gap: "7px",
           }}

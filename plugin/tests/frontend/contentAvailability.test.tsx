@@ -182,8 +182,9 @@ vi.mock("../../src/components/RemotePlaySection", () => ({
   RemotePlaySection: () => null,
 }));
 vi.mock("../../src/components/ConfigurationSection", () => ({
-  ConfigurationSection: () => null,
-  FrameGenerationConfigurationSection: () => null,
+  ConfigurationSection: ({ groups }: { groups: string[] }) => (
+    <div data-testid="configuration-groups">{groups.join(",")}</div>
+  ),
 }));
 vi.mock("../../src/components/UsageInstructions", () => ({
   UsageInstructions: () => null,
@@ -233,6 +234,15 @@ test.each([false, true])(
     expect(Boolean(screen.queryByText("MAKO Renderer update required"))).toBe(
       updateRequired,
     );
+    expect(
+      screen
+        .getByRole("tab", { name: "Frame-gen" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(screen.getByTestId("configuration-groups").textContent).toBe(
+      "external-tools,manual-overrides",
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Frame-gen" }));
     const frameGeneration = screen.getByRole("button", {
       name: "Enable Frame-gen (Restart)",
     });
@@ -262,6 +272,9 @@ test.each([false, true])(
     expect(state.save).toHaveBeenCalledWith(
       "external_vulkan_layer",
       "vkbasalt",
+    );
+    expect(screen.getByTestId("configuration-groups").textContent).toBe(
+      "external-tools,manual-overrides",
     );
   },
 );

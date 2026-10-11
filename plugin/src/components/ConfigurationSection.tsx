@@ -5,12 +5,17 @@ import { CompatibilityConfigurationGroup } from "./settings/CompatibilityConfigu
 import { ExternalToolsConfigurationGroup } from "./settings/ExternalToolsConfigurationGroup";
 import { ManualOverridesConfigurationGroup } from "./settings/ManualOverridesConfigurationGroup";
 
+export type ConfigurationGroupId =
+  "advanced" | "compatibility" | "external-tools" | "manual-overrides";
+
 interface ConfigurationSectionProps extends ConfigurationEditorProps {
-  includeAdvancedRendering?: boolean;
+  groups?: readonly ConfigurationGroupId[];
+  collapsible?: boolean;
 }
 
-interface FrameGenerationConfigurationSectionProps extends ConfigurationSectionProps {
+interface FrameGenerationConfigurationSectionProps extends ConfigurationEditorProps {
   initiallyCollapsed?: boolean;
+  collapsible?: boolean;
 }
 
 const WORKAROUNDS_COLLAPSED_KEY = "mako-workarounds-collapsed";
@@ -38,6 +43,7 @@ export function FrameGenerationConfigurationSection({
   onConfigChange,
   onConfigUpdate,
   initiallyCollapsed = true,
+  collapsible = true,
 }: FrameGenerationConfigurationSectionProps) {
   const [configCollapsed, setConfigCollapsed] = usePersistentCollapseState(
     CONFIG_COLLAPSED_KEY,
@@ -52,8 +58,10 @@ export function FrameGenerationConfigurationSection({
         config={config}
         onConfigChange={onConfigChange}
         onConfigUpdate={onConfigUpdate}
-        collapsed={configCollapsed}
-        onToggle={() => setConfigCollapsed(!configCollapsed)}
+        collapsed={collapsible && configCollapsed}
+        onToggle={
+          collapsible ? () => setConfigCollapsed(!configCollapsed) : undefined
+        }
       />
     </>
   );
@@ -63,7 +71,8 @@ export function ConfigurationSection({
   config,
   onConfigChange,
   onConfigUpdate,
-  includeAdvancedRendering = true,
+  groups = ["advanced", "compatibility", "external-tools", "manual-overrides"],
+  collapsible = true,
 }: ConfigurationSectionProps) {
   const [workaroundsCollapsed, setWorkaroundsCollapsed] =
     usePersistentCollapseState(WORKAROUNDS_COLLAPSED_KEY, true, "workarounds");
@@ -103,36 +112,55 @@ export function ConfigurationSection({
         }
       `}</style>
 
-      {includeAdvancedRendering && (
+      {groups.includes("advanced") && (
         <FrameGenerationConfigurationSection
           config={config}
           onConfigChange={onConfigChange}
           onConfigUpdate={onConfigUpdate}
           initiallyCollapsed={false}
+          collapsible={collapsible}
         />
       )}
 
-      <CompatibilityConfigurationGroup
-        config={config}
-        onConfigChange={onConfigChange}
-        onConfigUpdate={onConfigUpdate}
-        collapsed={workaroundsCollapsed}
-        onToggle={() => setWorkaroundsCollapsed(!workaroundsCollapsed)}
-      />
+      {groups.includes("compatibility") && (
+        <CompatibilityConfigurationGroup
+          config={config}
+          onConfigChange={onConfigChange}
+          onConfigUpdate={onConfigUpdate}
+          collapsed={collapsible && workaroundsCollapsed}
+          onToggle={
+            collapsible
+              ? () => setWorkaroundsCollapsed(!workaroundsCollapsed)
+              : undefined
+          }
+        />
+      )}
 
-      <ExternalToolsConfigurationGroup
-        config={config}
-        onConfigChange={onConfigChange}
-        collapsed={externalToolsCollapsed}
-        onToggle={() => setExternalToolsCollapsed(!externalToolsCollapsed)}
-      />
+      {groups.includes("external-tools") && (
+        <ExternalToolsConfigurationGroup
+          config={config}
+          onConfigChange={onConfigChange}
+          collapsed={collapsible && externalToolsCollapsed}
+          onToggle={
+            collapsible
+              ? () => setExternalToolsCollapsed(!externalToolsCollapsed)
+              : undefined
+          }
+        />
+      )}
 
-      <ManualOverridesConfigurationGroup
-        config={config}
-        onConfigChange={onConfigChange}
-        collapsed={manualOverridesCollapsed}
-        onToggle={() => setManualOverridesCollapsed(!manualOverridesCollapsed)}
-      />
+      {groups.includes("manual-overrides") && (
+        <ManualOverridesConfigurationGroup
+          config={config}
+          onConfigChange={onConfigChange}
+          collapsed={collapsible && manualOverridesCollapsed}
+          onToggle={
+            collapsible
+              ? () => setManualOverridesCollapsed(!manualOverridesCollapsed)
+              : undefined
+          }
+        />
+      )}
     </>
   );
 }

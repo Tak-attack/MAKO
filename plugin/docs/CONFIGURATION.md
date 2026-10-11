@@ -10,8 +10,10 @@ Without live metrics, **Live Status** shows **Off** when Frame Generation and Sc
 
 1. Add `/home/deck/.local/bin/mako-run %command%` to the game's Steam launch options. For other launchers, follow [launcher setup](LAUNCHERS.md).
 2. Start the game and select **Save profile for &lt;game&gt;** after gameplay loads.
-3. Choose Frame Generation, Scaling, and/or Shaders under **Image Processing**.
+3. Use the **Frame-gen**, **Scaling**, and/or **Shaders** tabs to choose features.
 4. Restart after changing a **Restart** option, then check **Live Status**.
+
+The settings have two rows of three tabs: **Frame-gen**, **Scaling**, and **Shaders**, then **Performance**, **Advanced**, and **Tweaks**. Frame-gen opens by default. Hover or focus a tab to see its name on one line; Performance uses **Perf**. Tweaks contains compatibility controls. Tab names identify the controls without extra section headings. Selecting a tab shows its controls directly; **External Tools** and **Manual Overrides** remain collapsible sections below the launch instructions.
 
 Try one feature at a time. If it does not work, try Fullscreen, Borderless Fullscreen, and Windowed. Compare V-Sync on and off and keep the smoother option.
 

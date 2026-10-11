@@ -274,7 +274,7 @@ describe("Configuration controls", () => {
     vi.clearAllMocks();
   });
 
-  test("uses consistent spacing before configuration section headers", () => {
+  test("retains section headers and spacing for Tools and Overrides", () => {
     render(
       <ConfigurationSection
         config={getDefaults()}
@@ -285,12 +285,12 @@ describe("Configuration controls", () => {
 
     expect(
       screen
-        .getByText("Advanced Rendering Settings")
+        .getByText("External Tools")
         .getAttribute("data-top-margin"),
     ).toBe("26px");
     expect(
       screen
-        .getByText("Compatibility Settings")
+        .getByText("Manual Overrides")
         .getAttribute("data-top-margin"),
     ).toBe("26px");
   });
@@ -311,6 +311,67 @@ describe("Configuration controls", () => {
 
     expect(screen.queryByText("Flow Scale (70%)")).toBeNull();
     expect(screen.queryByText("Allow FP16 (Restart)")).toBeNull();
+  });
+
+  test.each([
+    ["advanced", "Advanced Rendering Settings", "Base FPS Cap (Off)"],
+    ["compatibility", "Compatibility Settings", "Gamescope WSI (Restart)"],
+  ] as const)(
+    "opens the %s tab's controls even with a saved collapsed state",
+    (group, title, control) => {
+      localStorage.setItem("mako-config-collapsed", "true");
+      localStorage.setItem("mako-workarounds-collapsed", "true");
+      const onConfigChange = vi.fn(async () => undefined);
+      const { container } = render(
+        <ConfigurationSection
+          groups={[group]}
+          collapsible={false}
+          config={getDefaults()}
+          onConfigChange={onConfigChange}
+          onConfigUpdate={vi.fn(async () => undefined)}
+        />,
+      );
+      expect(screen.queryByText(title)).toBeNull();
+      expect(screen.getByText(control)).toBeTruthy();
+      expect(screen.queryByText("External Tools")).toBeNull();
+      expect(screen.queryByText("Manual Overrides")).toBeNull();
+      expect(
+        container.querySelector('[class$="CollapseButton_Container"]'),
+      ).toBeNull();
+      if (group === "compatibility") {
+        fireEvent.click(screen.getByText(control));
+        expect(onConfigChange).toHaveBeenCalledWith(
+          GAMESCOPE_WSI_COMPATIBILITY,
+          true,
+        );
+      }
+    },
+  );
+
+  test("retains collapsible Tools and Overrides below the tabs", () => {
+    const { container } = render(
+      <ConfigurationSection
+        groups={["external-tools", "manual-overrides"]}
+        config={getDefaults()}
+        onConfigChange={vi.fn(async () => undefined)}
+        onConfigUpdate={vi.fn(async () => undefined)}
+      />,
+    );
+    expect(screen.getByText("External Tools")).toBeTruthy();
+    expect(screen.getByText("Manual Overrides")).toBeTruthy();
+    expect(screen.queryByText("Advanced Rendering Settings")).toBeNull();
+    expect(screen.queryByText("Compatibility Settings")).toBeNull();
+    expect(screen.queryByText("Enable MangoHud (Restart)")).toBeNull();
+    const toolsToggle = container.querySelector(
+      ".MAKO_ExternalToolsCollapseButton_Container button",
+    ) as HTMLButtonElement;
+    fireEvent.click(toolsToggle);
+    expect(screen.getByText("Enable MangoHud (Restart)")).toBeTruthy();
+    const overridesToggle = container.querySelector(
+      ".MAKO_ManualOverridesCollapseButton_Container button",
+    ) as HTMLButtonElement;
+    fireEvent.click(overridesToggle);
+    expect(screen.getByText("Lossless.dll Path (Restart)")).toBeTruthy();
   });
 
   test("shows automatic per-game vkBasalt controls and the editable path", () => {
