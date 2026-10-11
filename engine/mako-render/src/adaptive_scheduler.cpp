@@ -635,6 +635,13 @@ AdaptiveScheduler::observeCadence(
     );
     if (instantaneousBaseFps > fastBurstThresholdFps) {
         this->cancelPacedLoadValidation("fast-cadence-burst");
+        // This native-only interval is untrusted cadence evidence, but it can
+        // finish draining the captured presentation horizon. The next whole
+        // interval is then measurable instead of needlessly discarded too.
+        auto& nativeProbe = this->state.nativeCadenceProbe;
+        if (nativeProbe.active && nativeProbe.drainUntil &&
+                now >= *nativeProbe.drainUntil)
+            nativeProbe.drainUntil.reset();
         // Do not manufacture generated work for a transient that is already
         // faster than the requested output. Preserve the proven gameplay
         // baseline and pause evaluation windows which require real generated

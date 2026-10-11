@@ -4621,6 +4621,70 @@ namespace {
         }
     }
 
+    void testDynamicCadenceBurstCanFinishQueuedDrain() {
+        for (const bool steady : {false, true}) {
+            for (const uint32_t target : {60U, 120U, 240U}) {
+                for (const size_t multiplier : {2U, 3U, 5U}) {
+                    for (const auto [recovers, burstFinishesDrain] : {
+                            std::pair{false, false}, std::pair{false, true},
+                            std::pair{true, false}, std::pair{true, true}}) {
+                        Harness harness(target, multiplier, steady,
+                            AdaptiveRecoveryPolicy::OrderedSdr, true, 100ms);
+                        harness.start();
+                        const auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                            std::chrono::duration<double>(1.0 / target));
+                        const double base = static_cast<double>(target) / multiplier;
+                        harness.runAtFps(base, 15s);
+                        for (size_t frame = 0; frame < 100 &&
+                                harness.scheduler.snapshot().nativeCadenceProbeActive; ++frame)
+                            harness.deliveredFrameAtFps(base);
+                        require(!harness.scheduler.snapshot().nativeCadenceProbeActive,
+                            "precondition failed: earlier native probe did not end");
+                        const auto probes = harness.diagnostics.count("dynamic-cadence-probe-start");
+                        for (size_t frame = 0; frame < 2000 &&
+                                harness.diagnostics.count("dynamic-cadence-probe-start") == probes;
+                                ++frame) {
+                            harness.queuedPresentationDeadline = harness.now + 6 * interval;
+                            harness.deliveredFrameAtFps(base);
+                        }
+                        require(harness.scheduler.snapshot().nativeCadenceProbeActive,
+                            "precondition failed: queued native probe did not begin");
+                        const auto horizon = *harness.queuedPresentationDeadline;
+                        const auto recoveries = harness.diagnostics.count("dynamic-cadence-recovered");
+                        const auto rejected = harness.diagnostics.count("dynamic-cadence-probe-rejected");
+                        do {
+                            require(harness.frameAtFps(target * 4.0).empty(),
+                                "queue drain generated work during an untrusted source burst");
+                        } while (burstFinishesDrain && harness.now < horizon);
+                        require(harness.diagnostics.count("dynamic-cadence-recovered") == recoveries,
+                            "an untrusted burst qualified native recovery");
+                        if (!burstFinishesDrain) {
+                            require(harness.now < horizon,
+                                "precondition failed: short burst exhausted queue drain");
+                            require(harness.frame(horizon - harness.now).empty() &&
+                                    harness.diagnostics.count("dynamic-cadence-probe-rejected") == rejected &&
+                                    harness.diagnostics.count("dynamic-cadence-recovered") == recoveries,
+                                "short burst prematurely cleared the drain or counted its crossing sample");
+                        }
+                        if (!recovers) {
+                            const auto restored = harness.deliveredFrameAtFps(base);
+                            require(!restored.empty() &&
+                                    harness.diagnostics.count("dynamic-cadence-probe-rejected") == rejected + 1,
+                                "a burst-cleared queue discarded an entirely post-drain slow sample");
+                        } else {
+                            for (size_t sample = 0; sample < 3; ++sample) {
+                                harness.deliveredFrameAtFps(base * 1.5);
+                                require(harness.diagnostics.count("dynamic-cadence-recovered") ==
+                                        recoveries + (sample == 2 ? 1 : 0),
+                                    "burst-cleared drain changed the three-valid-sample recovery boundary");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     void testDynamicCadenceProbeCannotSpanGeneratedAcquireBackoff() {
         for (const bool steady : {false, true}) {
             for (const uint32_t target : {30U, 60U, 90U, 120U, 240U}) {
@@ -5899,6 +5963,7 @@ int main() {
         {"dynamic cadence recovers a self-hidden native rate", testDynamicCadenceRecoversSelfHiddenNativeRateIncrease},
         {"dynamic cadence discards interrupted native samples", testDynamicCadenceProbeCannotSpanGeneratedAcquireBackoff},
         {"dynamic cadence drains only previously queued output", testDynamicCadenceDrainsPreviouslyQueuedOutput},
+        {"dynamic cadence finishes drain across untrusted bursts", testDynamicCadenceBurstCanFinishQueuedDrain},
         {"dynamic cadence queued drain rejects true low rates", testDynamicCadenceQueuedDrainRejectsTrueLowRate},
         {"dynamic cadence tolerates native qualification turnover", testDynamicCadenceQualificationSurvivesQueueTurnover},
         {"dynamic cadence qualifies across the target boundary", testDynamicCadenceQualifiesAcrossTargetBoundary},

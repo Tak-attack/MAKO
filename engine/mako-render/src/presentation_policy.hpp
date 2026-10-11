@@ -955,6 +955,14 @@ namespace mako::layer {
             const auto batchDuration = interval * static_cast<int64_t>(outputBatchSize);
             const auto sourceOverrun = std::max(Clock::duration::zero(),
                 this->batchInterval - batchDuration);
+            // React to a source-cost jump before the two-interval filter
+            // confirms it, but do not extend the queue for sub-refresh
+            // jitter. Reserve at most one refresh, never the full hitch.
+            const auto unconfirmedRise =
+                this->previousBatchInterval.value_or(this->batchInterval) -
+                    this->batchInterval;
+            const auto abruptRise = unconfirmedRise > refreshPeriod
+                ? refreshPeriod : Clock::duration::zero();
             // The first interval can be optimistic while the GPU queue fills.
             // Keep one startup refresh until both retained intervals follow
             // that first interval. The same bounded priming follows stalls
@@ -963,7 +971,7 @@ namespace mako::layer {
                 (this->sourceIntervals < 3 ? 4 : 3) * refreshPeriod;
             const auto readiness = this->lastBatchSerial
                 ? std::max(minimumReadiness, this->batchInterval + refreshPeriod +
-                    std::min(refreshPeriod, sourceOverrun))
+                    std::min(refreshPeriod, sourceOverrun) + abruptRise)
                 : 2 * refreshPeriod;
             const auto lead = generationEnabled
                 ? std::max(readiness, batchDuration)

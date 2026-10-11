@@ -306,12 +306,36 @@ void testBridgeSourceBatchReadiness() {
     transition.observeSourceBatch(start + 32ms, 2);
     transition.observeSourceBatch(start + 112ms, 3);
     const auto hitch = transition.schedule(start + 112ms, 120, 120, 2);
-    expect(hitch->presentAt == start + 112ms + 3 * period,
-        "one CPU hitch inflated bridge readiness");
+    expect(hitch->presentAt == start + 128ms + 2 * period,
+        "one CPU hitch exceeded the bounded one-refresh allowance");
     transition.observeSourceBatch(start + 128ms, 4);
     const auto resumed = transition.schedule(start + 128ms, 120, 120, 2);
     expect(resumed->presentAt == start + 128ms + 3 * period,
         "one CPU hitch polluted the next source batch");
+
+    for (const double refresh : {60., 90., 120., 240.}) {
+        const auto tick = std::chrono::duration_cast<Clock::duration>(
+            std::chrono::duration<double>(1.0 / refresh));
+        for (const auto rise : {tick / 4, tick, tick + 1ns, 2 * tick}) {
+            OrderedPresentTimeline rising;
+            auto arrival = start;
+            for (uint64_t serial = 0; serial < 4; ++serial) {
+                rising.observeSourceBatch(arrival, serial);
+                arrival += 2 * tick;
+            }
+            arrival += rise;
+            rising.observeSourceBatch(arrival, 4);
+            const auto pending = rising.schedule(arrival, refresh, refresh, 2);
+            expect(pending->presentAt == arrival +
+                    (rise > tick ? 4 : 3) * tick,
+                "bridge jitter acquired extra lead or abrupt pressure lost its allowance");
+            arrival += 2 * tick;
+            rising.observeSourceBatch(arrival, 5);
+            const auto recovered = rising.schedule(arrival, refresh, refresh, 2);
+            expect(recovered->presentAt == arrival + 3 * tick,
+                "abrupt-rise allowance survived a recovered source interval");
+        }
+    }
     transition.observeSourceBatch(start + 154ms, 5);
     transition.observeSourceBatch(start + 180ms, 6);
     const auto slower = transition.schedule(start + 180ms, 120, 120, 2);
