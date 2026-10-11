@@ -114,7 +114,7 @@ Keep defaults unless a game needs a change.
 | **Force ALSA** | Audio or Zink compatibility problems. |
 | **MangoHud (Restart)** | Host games only; requires installed MangoHud and cannot run alongside MAKO Shaders for the same profile. |
 
-**Disable HDR (Restart)** is on by default. See [HDR setup](#hdr) to enable experimental HDR.
+**Enable HDR (Restart)** is off by default because HDR is experimental. See [HDR setup](#hdr) to opt in.
 
 ## When changes apply
 
@@ -134,6 +134,6 @@ For help, see [troubleshooting](TROUBLESHOOTING.md) or [collect diagnostics](COL
 
 **HDR is experimental and disabled by default.** It works with Scaling, Frame Generation and Shaders in Gaming Mode on Steam Deck OLED or an HDR-capable external display, with HDR allowed in Gamescope. The Steam Deck LCD’s built-in display is SDR.
 
-In the game profile, keep **Gamescope WSI** off and turn off **Disable HDR (Restart)**, restart the game, then enable HDR in its settings. Restart after changing MAKO’s HDR toggle or switching between HDR and SDR displays.
+In the game profile, keep **Gamescope WSI** off and turn on **Enable HDR (Restart)**, restart the game, then enable HDR in its settings. Restart after changing MAKO’s HDR toggle or switching between HDR and SDR displays.
 
 **Reduced HDR Precision** is on by default; saved choices are preserved. It uses coarser HDR10 motion analysis and approximate interpolation for speed, while retaining full output resolution. It can add moving-edge artifacts, banding or altered shader effects. Turn it off for full precision. Changes apply live and may briefly hitch. See the [HDR pipeline](../../engine/docs/HDR-PIPELINE.md) for technical details.

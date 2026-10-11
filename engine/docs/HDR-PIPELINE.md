@@ -25,7 +25,7 @@ MAKO_DISABLE_HDR_EXPOSURE=1
 DXVK_HDR unset
 ```
 
-Turning **Disable HDR (Restart)** off exports `MAKO_DISABLE_HDR_EXPOSURE=0` and `DXVK_HDR=1`, retaining `DISABLE_GAMESCOPE_WSI=1`. Decky stores the choice per profile; Qt stores it globally in `launcher.conf`. A game restart applies it. HDR alone can provision the bridge without allocating Scaling or Frame Generation resources.
+Turning **Enable HDR (Restart)** on exports `MAKO_DISABLE_HDR_EXPOSURE=0` and `DXVK_HDR=1`, retaining `DISABLE_GAMESCOPE_WSI=1`. The control is off by default and displays the inverse of the existing `disable_hdr_exposure` setting, preserving saved choices and its default of `true`. Decky stores the choice per profile; Qt stores it globally in `launcher.conf`. A game restart applies it. HDR alone can provision the bridge without allocating Scaling or Frame Generation resources.
 
 With HDR disabled, the bridge performs no HDR capability query, format exposure, metadata emulation or protocol request. Scaling can still use its surface association; with both Scaling and HDR disabled, no isolated bridge connection is provisioned.
 
@@ -37,7 +37,7 @@ User opt-in, confirmed output capability and lower-driver format support are all
 
 The layer manifest declares `VK_EXT_swapchain_colorspace`. The connected HDR bridge advertises `VK_EXT_hdr_metadata`, consumes it if the driver lacks it, and forwards metadata to the owning Gamescope swapchain in CTA-861 units. It suppresses wire-identical quantized metadata before submission and flushing, ignores SDR/retired objects, and gives replacements fresh metadata ownership.
 
-With **Disable HDR** on, the isolated bridge rejects HDR swapchain creation. On other surface paths, MAKO retains the existing disabled-HDR policy: no generation for an explicit HDR swapchain, with real-frame passthrough.
+With **Enable HDR** off, the isolated bridge rejects HDR swapchain creation. On other surface paths, MAKO retains the existing disabled-HDR policy: no generation for an explicit HDR swapchain, with real-frame passthrough.
 
 Native Steam Remote Play additionally enforces SDL3 sRGB renderer creation through its process-scoped packaged helper. `MAKO_DISABLE_HDR_EXPOSURE` is MAKO policy and does not itself override an application's SDL colourspace selection. The shared [Remote Play owner](../../plugin/docs/REMOTE-PLAY.md#sdr-output) supplies that startup policy for both Decky and Qt; it does not relabel HDR pixels or change the Renderer colour classifier. HDR stream input and SDL tone mapping still require independent hardware validation.
 

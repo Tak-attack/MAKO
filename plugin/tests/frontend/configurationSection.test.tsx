@@ -959,7 +959,7 @@ describe("Configuration controls", () => {
     expect(
       screen.getByText("Enable Zink for OpenGL Games (Restart)"),
     ).toBeTruthy();
-    expect(screen.getByText("Disable HDR (Restart)")).toBeTruthy();
+    expect(screen.getByText("Enable HDR (Restart)")).toBeTruthy();
 
     fireEvent.click(
       container.querySelector<HTMLButtonElement>(
@@ -1068,7 +1068,7 @@ describe("Configuration controls", () => {
     expect(styles).not.toContain("nth-child");
   });
 
-  test("defaults precision on when HDR is allowed and labels only HDR experimental", () => {
+  test("defaults Enable HDR off, preserves saved choices, and labels only HDR experimental", () => {
     const onConfigChange = vi.fn(async () => undefined);
     const props = {
       onConfigChange,
@@ -1081,10 +1081,17 @@ describe("Configuration controls", () => {
       ".MAKO_WorkaroundsCollapseButton_Container button",
     )!);
     expect(screen.queryByText("Reduced HDR Precision")).toBeNull();
-    expect(screen.getByText("Disable HDR (Restart)").closest("button")?.textContent)
-      .toContain("Experimental");
+    const hdr = screen.getByText("Enable HDR (Restart)").closest("button")!;
+    expect(hdr.textContent).toContain("Experimental");
+    expect(hdr.getAttribute("data-checked")).toBe("false");
+    fireEvent.click(hdr);
+    expect(onConfigChange).toHaveBeenLastCalledWith("disable_hdr_exposure", false);
     const config = { ...getDefaults(), disable_hdr_exposure: false };
     rerender(<ConfigurationSection {...props} config={config} />);
+    const enabledHdr = screen.getByText("Enable HDR (Restart)").closest("button")!;
+    expect(enabledHdr.getAttribute("data-checked")).toBe("true");
+    fireEvent.click(enabledHdr);
+    expect(onConfigChange).toHaveBeenLastCalledWith("disable_hdr_exposure", true);
     const precision = screen.getByRole("button", { name: "Reduced HDR Precision" });
     expect(precision.getAttribute("data-checked")).toBe("true");
     expect(precision.textContent).not.toContain("Experimental");
@@ -1095,6 +1102,8 @@ describe("Configuration controls", () => {
     expect(onConfigChange).toHaveBeenLastCalledWith("hdr_reduced_precision", true);
     rerender(<ConfigurationSection {...props} config={{ ...config, disable_hdr_exposure: true }} />);
     expect(screen.queryByText("Reduced HDR Precision")).toBeNull();
+    expect(screen.getByText("Enable HDR (Restart)").closest("button")?.getAttribute("data-checked"))
+      .toBe("false");
   });
 
   test("warns when Gamescope WSI is enabled independently", () => {
@@ -1112,8 +1121,8 @@ describe("Configuration controls", () => {
     );
     fireEvent.click(collapseButton!);
 
-    expect(screen.getByText("Disable HDR (Restart)")).toBeTruthy();
-    fireEvent.click(screen.getByText("Disable HDR (Restart)"));
+    expect(screen.getByText("Enable HDR (Restart)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Enable HDR (Restart)"));
     expect(onConfigChange).toHaveBeenCalledWith("disable_hdr_exposure", false);
 
     expect(

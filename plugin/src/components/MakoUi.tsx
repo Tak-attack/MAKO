@@ -110,13 +110,11 @@ export function MakoRestartLabel({ label }: { label: string }) {
   );
 }
 
-/** Mark an intentionally early-access control without turning the label into a warning. */
+/** Keep early-access status visible even when optional help is hidden. */
 export function MakoExperimentalBadge({ label }: { label: string }) {
   return (
-    <MakoInfo
-      as="span"
+    <span
       data-mako-experimental-badge="true"
-      data-mako-info="true"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -135,7 +133,7 @@ export function MakoExperimentalBadge({ label }: { label: string }) {
       }}
     >
       {label}
-    </MakoInfo>
+    </span>
   );
 }
 

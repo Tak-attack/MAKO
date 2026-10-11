@@ -119,8 +119,8 @@ describe("i18n runtime", () => {
       expect(t("CONTENT_FPS_MULTIPLIER", "Frame Generation")).toBe(
         "Генерация кадров",
       );
-      expect(t("CONFIG_DISABLE_HDR_EXPOSURE", "Disable HDR (Restart)")).toBe(
-        "Отключить HDR (требуется перезапуск)",
+      expect(t("CONFIG_ENABLE_HDR", "Enable HDR (Restart)")).toBe(
+        "Включить HDR (требуется перезапуск)",
       );
       expect(
         t(

@@ -134,6 +134,6 @@ For manual TOML fields, defaults, and environment variables, see the [advanced r
 
 **HDR is experimental and disabled by default.** It works with Scaling, Frame Generation and Shaders in Gaming Mode on Steam Deck OLED or an HDR-capable external display, with HDR allowed in Gamescope. The Steam Deck LCD’s built-in display is SDR.
 
-In **Launch Settings**, turn off **Disable HDR (Restart)**, restart the game, then enable HDR in its settings. Restart after changing MAKO’s HDR toggle or switching between HDR and SDR displays.
+In **Launch Settings**, turn on **Enable HDR (Restart)**, restart the game, then enable HDR in its settings. The toggle is off by default because HDR is experimental. Restart after changing MAKO’s HDR toggle or switching between HDR and SDR displays.
 
 **Reduced HDR Precision** is on by default; saved choices are preserved. It uses coarser HDR10 motion analysis and approximate interpolation for speed, while retaining full output resolution. It can add moving-edge artifacts, banding or altered shader effects. Turn it off for full precision. Changes apply live and may briefly hitch. See the [HDR pipeline](HDR-PIPELINE.md) for technical details.

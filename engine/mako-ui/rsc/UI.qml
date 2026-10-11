@@ -1091,20 +1091,20 @@ ApplicationWindow {
                     name: t.standaloneLaunchSettings
 
                     GroupEntry {
-                        title: t.disableHdrExposure
-                        description: t.disableHdrExposureDesc
+                        title: t.enableHdr
+                        description: t.enableHdrDesc
                         experimentalLabel: t.experimentalLabel
                         compactRestartMarker: true
 
                         CheckBox {
                             Layout.alignment: Qt.AlignRight
-                            checked: backend.disable_hdr_exposure
-                            onToggled: backend.disable_hdr_exposure = checked
+                            checked: backend.enable_hdr
+                            onToggled: backend.enable_hdr = checked
                         }
                     }
 
                     GroupEntry {
-                        visible: !backend.disable_hdr_exposure
+                        visible: backend.enable_hdr
                         title: t.hdrReducedPrecision
                         description: t.hdrReducedPrecisionDesc
 

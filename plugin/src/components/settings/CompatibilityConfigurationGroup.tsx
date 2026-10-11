@@ -29,6 +29,8 @@ export function CompatibilityConfigurationGroup({
   collapsed,
   onToggle,
 }: ConfigurationUpdateGroupProps) {
+  // Keep the persisted disable flag compatible with existing profiles.
+  const hdrEnabled = config.disable_hdr_exposure === false;
   const cadenceProbeInterval = config.dynamic_cadence_probe_interval_seconds;
   const cadenceProbeIntervalValues =
     DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS_VALUES.includes(
@@ -61,20 +63,20 @@ export function CompatibilityConfigurationGroup({
             <ToggleField
               label={
                 <MakoExperimentalSettingLabel
-                  label={t("CONFIG_DISABLE_HDR_EXPOSURE", "Disable HDR (Restart)")}
+                  label={t("CONFIG_ENABLE_HDR", "Enable HDR (Restart)")}
                   badgeLabel={t("EXPERIMENTAL_LABEL", "Experimental")}
                 />
               }
               description={t(
-                "CONFIG_DISABLE_HDR_EXPOSURE_DESC",
-                "Turn off to allow game HDR through MAKO's Gamescope bridge. Requires HDR output and HDR enabled in the game.",
+                "CONFIG_ENABLE_HDR_DESC",
+                "Allow HDR on a compatible display. HDR must also be enabled in the game. Off by default.",
               )}
-              checked={config.disable_hdr_exposure}
-              onChange={(value) => onConfigChange(DISABLE_HDR_EXPOSURE, value)}
+              checked={hdrEnabled}
+              onChange={(enabled) => onConfigChange(DISABLE_HDR_EXPOSURE, !enabled)}
             />
           </PanelSectionRow>
 
-          {!config.disable_hdr_exposure && (
+          {hdrEnabled && (
             <PanelSectionRow>
               <ToggleField
                 label={t("HDR_REDUCED_PRECISION", "Reduced HDR Precision")}

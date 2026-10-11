@@ -37,9 +37,9 @@ Follow the [update steps](../../README.md#updating-mako-decky), including **Flat
 
 If profiles cannot load or save, close games and select **Install MAKO Renderer**. An invalid configuration is replaced with defaults, including its profiles. Read-only files need owner write permission first.
 
-## HDR is unavailable by design
+## HDR is unavailable in the game
 
-Frame Generation and Scaling are SDR-only. **Disable HDR** stays checked and read-only.
+HDR is experimental and off by default. On a compatible HDR display, keep **Gamescope WSI** off, turn on **Enable HDR (Restart)**, restart the game, then enable HDR in the game's settings. See [HDR setup](CONFIGURATION.md#hdr) for display requirements and supported combinations.
 
 ## Diagnostics
 

@@ -589,6 +589,7 @@ void test_shader_controls() {
                 "openVkBasaltConfig()") >= 0,
         "Qt backend does not expose the advanced shader configuration opener");
     require_property("launch_option", "QString", false, false);
+    require_property("enable_hdr", "bool", true, false);
     require_property("minimum_vkbasalt_strength", "float", false, true);
     require_property("maximum_vkbasalt_strength", "float", false, true);
 
@@ -646,7 +647,7 @@ void test_save_lifetime() {
         QByteArray(MAKO_UI_VKBASALT_SHADER_SOURCE_DIR));
     {
         mako::ui::Backend backend;
-        require(backend.getHdrReducedPrecision() && backend.getDisableHdrExposure(),
+        require(backend.getHdrReducedPrecision() && !backend.getEnableHdr(),
             "Qt must default reduced precision on while HDR remains disabled");
         backend.allowFP16Updated(false);
         for (const bool enabled : {true, false}) {
@@ -670,8 +671,9 @@ void test_save_lifetime() {
             "Priority preview did not update with Target FPS");
         require(backend.getDisableSteamOverlay(),
             "Steam overlay removal must default to enabled in the Qt UI");
-        require(backend.getDisableHdrExposure(), "HDR must remain disabled by default");
-        backend.disableHdrExposureUpdated(false);
+        require(!backend.getEnableHdr(), "HDR must remain disabled by default");
+        require(backend.setProperty("enable_hdr", true), "Enable HDR property must be writable");
+        require(backend.getEnableHdr(), "Enable HDR On must opt in to HDR");
         backend.disableSteamOverlayUpdated(false);
         backend.enableZinkUpdated(true);
         backend.enableVkBasaltUpdated(true);
@@ -688,6 +690,11 @@ void test_save_lifetime() {
             "UI timer did not save the latest edit");
         require(!ls::LaunchConfigFile(launchPath).settings().disable_hdr_exposure,
             "Qt must persist the explicit HDR opt-in");
+        {
+            mako::ui::Backend persisted;
+            require(persisted.getEnableHdr(),
+                "A saved disable_hdr_exposure=false must appear as Enable HDR On");
+        }
         require(!ls::LaunchConfigFile(launchPath).settings().disable_steam_overlay,
             "UI timer did not persist an explicit overlay opt-out");
         require(ls::LaunchConfigFile(launchPath).settings().enable_zink,
@@ -880,13 +887,15 @@ void test_save_lifetime() {
             "Idle UI rewrote the configuration");
         backend.targetFPSUpdated(165);
         backend.hdrReducedPrecisionUpdated(false);
-        backend.disableHdrExposureUpdated(true);
+        require(backend.setProperty("enable_hdr", false), "Enable HDR property must accept Off");
         backend.disableSteamOverlayUpdated(true);
         backend.forceAlsaAudioUpdated(true);
         // No event loop: closing before the debounce must still save both files.
     }
     {
         mako::ui::Backend reopened;
+        require(!reopened.getEnableHdr(),
+            "A saved disable_hdr_exposure=true must appear as Enable HDR Off");
         require(!reopened.getHdrReducedPrecision(),
             "Qt must preserve an explicitly saved full precision choice");
         require(reopened.getVkBasaltShader() == QStringLiteral("custom/Customcustomtone:vibrance") &&
@@ -895,6 +904,8 @@ void test_save_lifetime() {
     }
     require(ls::ConfigFile(configPath).profiles().front().target_fps == 165,
         "Closing the UI lost the pending profile edit");
+    require(ls::LaunchConfigFile(launchPath).settings().disable_hdr_exposure,
+        "Closing the UI lost the pending HDR opt-out");
     require(ls::LaunchConfigFile(launchPath).settings().disable_steam_overlay,
         "Closing the UI lost the pending overlay edit");
     require(ls::LaunchConfigFile(launchPath).settings().force_alsa_audio,

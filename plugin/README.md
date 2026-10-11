@@ -49,7 +49,7 @@ When updating, follow the [update guide](../README.md#updating-mako-decky) to re
 
 MAKO Decky follows Steam's interface language, including German and Russian, and falls back to English for unsupported languages.
 
-Press **R1** or select **Hide info** to hide explanations while keeping controls, status, warnings, recovery errors, and version information visible. Press **R1** again or select **Show info** to restore them. MAKO Decky remembers this preference independently of game profiles and collapsed settings sections.
+Press **R1** or select **Hide info** to hide explanations while keeping controls, Experimental tags, status, warnings, recovery errors, and version information visible. Press **R1** again or select **Show info** to restore them. MAKO Decky remembers this preference independently of game profiles and collapsed settings sections.
 
 See the [configuration guide](docs/CONFIGURATION.md) for settings and profiles, [troubleshooting](docs/TROUBLESHOOTING.md) for common problems, and [Collect MAKO Decky Diagnostics](docs/COLLECT_DIAGNOSTICS.md) to create a report when you need help.
 
