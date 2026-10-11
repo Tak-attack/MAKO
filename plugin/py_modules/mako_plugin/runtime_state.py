@@ -76,6 +76,13 @@ def _string(value: object, field: str) -> str:
     return value
 
 
+def _hdr_quality(value: object, field: str) -> str:
+    quality = _string(value, field)
+    if quality not in ("quality", "balanced", "performance"):
+        raise ValueError(f"{field} must be quality, balanced, or performance")
+    return quality
+
+
 def _profile(value: object, field: str) -> RuntimeProfileSnapshot:
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an object")
@@ -110,9 +117,7 @@ def _profile(value: object, field: str) -> RuntimeProfileSnapshot:
         "scaling_sharpness": _number(
             value.get("scaling_sharpness"), f"{field}.scaling_sharpness"
         ),
-        "hdr_reduced_precision": _boolean(
-            value.get("hdr_reduced_precision", False), f"{field}.hdr_reduced_precision"
-        ),
+        "hdr_quality": _hdr_quality(value.get("hdr_quality", "quality"), f"{field}.hdr_quality"),
         "frame_generation_refresh_threshold": _integer(
             value.get("frame_generation_refresh_threshold"),
             f"{field}.frame_generation_refresh_threshold",

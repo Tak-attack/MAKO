@@ -190,7 +190,7 @@ ProfileUpdateDecision Swapchain::updateProfile(
     const bool hdrFrameGenerationPrecisionChanged = resourcesAvailable &&
         (this->colorPipeline.encoding == backend::FrameEncoding::Hdr10Pq ||
          this->colorPipeline.encoding == backend::FrameEncoding::Hdr10PqPacked) &&
-        this->frameGenerationHdrReducedPrecision != nextProfile.hdr_reduced_precision;
+        this->frameGenerationHdrReducedPrecision != ls::hdrApproximateGeneration(nextProfile.hdr_quality);
     auto plan = planProfileUpdate(
         this->profile, nextProfile, this->destinationImages.size(),
         resourcesAvailable, this->spatialScaler.has_value(),
@@ -256,7 +256,7 @@ ProfileUpdateDecision Swapchain::updateProfile(
             .method = this->info.hdrDisplayResize ? ls::ScalingMethod::Native
                 : ls::effectiveScalingMethod(nextProfile),
             .sharpness = this->info.hdrDisplayResize ? 0.0F : nextProfile.scaling_sharpness,
-            .hdrReducedPrecision = nextProfile.hdr_reduced_precision,
+            .hdrQuality = nextProfile.hdr_quality,
         };
         if (this->spatialTransition.pendingRequest() &&
                 !(this->spatialTransition.value() == request)) {
@@ -284,7 +284,7 @@ ProfileUpdateDecision Swapchain::updateProfile(
                 ls::effectiveScalingMethod(this->profile) &&
             nextProfile.scaling_sharpness ==
                 this->profile.scaling_sharpness)) &&
-            nextProfile.hdr_reduced_precision == this->profile.hdr_reduced_precision) {
+            ls::hdrCompactBuffers(nextProfile.hdr_quality) == ls::hdrCompactBuffers(this->profile.hdr_quality)) {
         this->spatialTransition.cancel();
         this->preparedSpatialScaler.reset();
     }

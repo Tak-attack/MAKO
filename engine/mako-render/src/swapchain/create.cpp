@@ -197,7 +197,7 @@ Swapchain::Swapchain(const vk::Vulkan& vk, backend::Instance* backend,
                 : ls::effectiveScalingMethod(this->profile),
             this->profile.scaling_sharpness,
             scalingShaderDll, this->fp16Requested, this->colorPipeline.encoding,
-            this->profile.hdr_reduced_precision
+            ls::hdrCompactBuffers(this->profile.hdr_quality)
         );
         this->spatialScalingPasses.reserve(this->info.images.size());
         for (size_t i = 0; i < this->info.images.size(); ++i) {
@@ -439,7 +439,7 @@ Swapchain::Swapchain(const vk::Vulkan& vk, backend::Instance* backend,
                     this->colorPipeline.encoding,
                     1.0F / ls::effectiveFlowScale(this->profile),
                     ls::effectivePerformanceMode(this->profile),
-                    this->profile.hdr_reduced_precision
+                    ls::hdrApproximateGeneration(this->profile.hdr_quality)
                 )),
                 [backend](ls::R<backend::Context>& ctx) {
                     backend->closeContext(ctx);
@@ -450,7 +450,7 @@ Swapchain::Swapchain(const vk::Vulkan& vk, backend::Instance* backend,
             // combinations where destroying it during layer unload is unsafe.
             // This is process-lifetime retention, not active GPU work; see the
             // backend API contract before changing the teardown policy.
-            this->frameGenerationHdrReducedPrecision = this->profile.hdr_reduced_precision;
+            this->frameGenerationHdrReducedPrecision = ls::hdrApproximateGeneration(this->profile.hdr_quality);
             backend::makeLeaking();
         } catch (const std::exception& e) {
             throw ls::error("failed to create swapchain context", e);

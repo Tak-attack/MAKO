@@ -168,6 +168,11 @@ namespace {
             return *method;
         throw ls::error("unknown scaling method: " + value);
     }
+    HdrQuality hdrQualityFromString(const std::string& value) {
+        if (const auto quality = hdrQualityFromName(value))
+            return *quality;
+        throw ls::error("unknown HDR quality: " + value);
+    }
     GamescopeVrrMode gamescopeVrrModeFromString(const std::string& value) {
         if (const auto mode = gamescopeVrrModeFromName(value))
             return *mode;
@@ -330,9 +335,9 @@ namespace {
             .scaling_sharpness = tbl["scaling_sharpness"].value_or(
                 GameConfDefaults::scalingSharpness
             ),
-            .hdr_reduced_precision = tbl["hdr_reduced_precision"].value_or(
-                GameConfDefaults::hdrReducedPrecision
-            ),
+            .hdr_quality = hdrQualityFromString(tbl["hdr_quality"].value_or<std::string>(
+                hdrQualityName(GameConfDefaults::hdrQuality)
+            )),
             .frame_generation_refresh_threshold =
                 tbl["frame_generation_refresh_threshold"].value_or(
                     GameConfDefaults::frameGenerationRefreshThreshold
@@ -426,7 +431,7 @@ namespace {
         profile.insert("scaling_factor", conf.scaling_factor);
         profile.insert("scaling_supersampling", conf.scaling_supersampling);
         profile.insert("scaling_sharpness", conf.scaling_sharpness);
-        profile.insert("hdr_reduced_precision", conf.hdr_reduced_precision);
+        profile.insert("hdr_quality", hdrQualityName(conf.hdr_quality));
         profile.insert(
             "frame_generation_refresh_threshold",
             static_cast<int64_t>(conf.frame_generation_refresh_threshold)
@@ -553,9 +558,9 @@ namespace {
         const char* scaling_sharpness = std::getenv("MAKO_SCALING_SHARPNESS");
         if (scaling_sharpness)
             conf.scaling_sharpness = std::stof(scaling_sharpness);
-        const char* hdr_reduced_precision = std::getenv("MAKO_HDR_REDUCED_PRECISION");
-        if (hdr_reduced_precision)
-            conf.hdr_reduced_precision = std::string(hdr_reduced_precision) != "0";
+        const char* hdr_quality = std::getenv("MAKO_HDR_QUALITY");
+        if (hdr_quality)
+            conf.hdr_quality = hdrQualityFromString(hdr_quality);
         const char* frame_generation_refresh_threshold =
             std::getenv("MAKO_FRAME_GENERATION_REFRESH_THRESHOLD");
         if (frame_generation_refresh_threshold) {

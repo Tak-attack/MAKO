@@ -216,6 +216,11 @@ class ConfigurationManager:
         validated["adaptive_fractional_real_frame_priority"] = (
             fractional_priority
         )
+        hdr_quality = validated["hdr_quality"].strip().lower()
+        if hdr_quality not in ("quality", "balanced", "performance"):
+            raise ValueError("hdr_quality must be 'quality', 'balanced', or 'performance'")
+        validated["hdr_quality"] = hdr_quality
+
         vrr_mode = validated["gamescope_vrr_mode"].strip().lower()
         if vrr_mode not in GAMESCOPE_VRR_MODE_VALUES:
             raise ValueError(

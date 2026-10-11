@@ -267,7 +267,7 @@ namespace {
                << ",\"scaling_supersampling\":"
                << profile.scaling_supersampling
                << ",\"scaling_sharpness\":" << profile.scaling_sharpness
-               << ",\"hdr_reduced_precision\":" << profile.hdr_reduced_precision
+               << ",\"hdr_quality\":\"" << ls::hdrQualityName(profile.hdr_quality) << "\""
                << ",\"frame_generation_refresh_threshold\":"
                << profile.frame_generation_refresh_threshold
                << ",\"base_fps_cap\":" << profile.base_fps_cap

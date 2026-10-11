@@ -168,7 +168,7 @@ Swapchain::buildFrameGenerationResources(const vk::Vulkan& vk,
     std::vector<int> destinationFds(generatedFrameCapacityForProfile(resourceProfile), -1);
     ls::FileDescriptorScope destinationScope{destinationFds};
     FrameGenerationResources resources;
-    resources.hdrReducedPrecision = resourceProfile.hdr_reduced_precision;
+    resources.hdrReducedPrecision = ls::hdrApproximateGeneration(resourceProfile.hdr_quality);
     resources.sourceImages.reserve(sourceFds.size());
     resources.destinationImages.reserve(destinationFds.size());
     const auto sourceImageUsage = frameGenerationSourceImageUsage(
@@ -203,7 +203,7 @@ Swapchain::buildFrameGenerationResources(const vk::Vulkan& vk,
             extent.width, extent.height, pipeline.encoding,
             1.0F / ls::effectiveFlowScale(resourceProfile),
             ls::effectivePerformanceMode(resourceProfile),
-            resourceProfile.hdr_reduced_precision
+            ls::hdrApproximateGeneration(resourceProfile.hdr_quality)
         )),
         [backend = &backendInstance](ls::R<backend::Context>& context) {
             backend->closeContext(context);
@@ -234,7 +234,7 @@ void Swapchain::commitFrameGenerationResources(
     // The scaler and FG prepare independently. A pending scaler still owns
     // its applied precision; neither transaction may cancel the other.
     if (!this->spatialTransition.pendingRequest())
-        this->profile.hdr_reduced_precision = resourceProfile.hdr_reduced_precision;
+        this->profile.hdr_quality = resourceProfile.hdr_quality;
 
     applyFrameGenerationResourceProfile(
         this->profile, resourceProfile,
@@ -575,7 +575,7 @@ void Swapchain::applyPendingSpatialScaler(const vk::Vulkan& vk) {
                 vk, this->info.applicationExtent, this->info.extent,
                 this->colorPipeline.exchangeFormat, requested.method,
                 requested.sharpness, this->scalingShaderDll, this->fp16Requested,
-                this->colorPipeline.encoding, requested.hdrReducedPrecision
+                this->colorPipeline.encoding, ls::hdrCompactBuffers(requested.hdrQuality)
             );
             this->configureDirectSpatialFrameGenerationOutputs(
                 vk, *this->preparedSpatialScaler, this->sourceImages,
@@ -655,7 +655,7 @@ void Swapchain::applyPendingSpatialScaler(const vk::Vulkan& vk) {
         this->profile.scaling_method = requested.method;
         this->profile.scaling_sharpness = requested.sharpness;
     }
-    this->profile.hdr_reduced_precision = requested.hdrReducedPrecision;
+    this->profile.hdr_quality = requested.hdrQuality;
     const auto committedRevision = this->spatialTransition.committed();
     this->runtimeStatusState.error.reset();
     this->publishRuntimeStatus("spatial-scaler");

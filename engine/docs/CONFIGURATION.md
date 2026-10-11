@@ -136,4 +136,4 @@ For manual TOML fields, defaults, and environment variables, see the [advanced r
 
 In **Launch Settings**, turn on **Enable HDR (Restart)**, restart the game, then enable HDR in its settings. Restart after changing MAKO’s HDR toggle or switching between HDR and SDR displays.
 
-**Reduced HDR Precision** is on by default; saved choices are preserved. It uses coarser HDR10 motion analysis and approximate interpolation for speed, while retaining full output resolution. It can add moving-edge artifacts, banding or altered shader effects. Turn it off for full precision. Changes apply live and may briefly hitch. See the [HDR pipeline](HDR-PIPELINE.md) for technical details.
+**HDR Quality** defaults to **Performance**. **Quality** retains full precision and full motion analysis; **Balanced** uses compact shader/scaling buffers while retaining linear-light Frame Generation and full motion analysis; **Performance** also uses approximate HDR10 generation and coarser motion analysis. Output resolution stays unchanged. Changes apply live with a brief hitch; lower precision may add banding or motion artifacts. See the [HDR pipeline](HDR-PIPELINE.md) for details.

@@ -53,21 +53,29 @@ target_fps = 90
             with patch("py_modules.mako_plugin.configuration.detect_power_source", return_value=source):
                 self.assertEqual(target, self.service.get_profile_config("game")["config"]["target_fps"])
 
-    def test_hdr_precision_defaults_and_saved_power_choices(self):
+    def test_hdr_quality_defaults_and_saved_power_choices(self):
         config = self.service.get_profile_config("game")["config"]
-        self.assertTrue(config["hdr_reduced_precision"])
+        self.assertEqual("performance", config["hdr_quality"])
         self.assertTrue(config["disable_hdr_exposure"])
         self.assertTrue(self.service.set_profile_power_modes("game", True)["success"])
         self.assertTrue(self.service.update_profile_config_fields("game", {
-            "hdr_reduced_precision": False,
+            "hdr_quality": "quality",
         }, "docked")["success"])
         self.assertTrue(self.service.update_profile_config_fields("game", {
-            "hdr_reduced_precision": False,
+            "hdr_quality": "balanced",
         }, "shared")["success"])
-        for mode, expected in (("shared", False), ("handheld", True), ("docked", False)):
+        for mode, expected in (("shared", "balanced"), ("handheld", "performance"), ("docked", "quality")):
             config = self.service.get_profile_config("game", mode)["config"]
-            self.assertEqual(expected, config["hdr_reduced_precision"])
+            self.assertEqual(expected, config["hdr_quality"])
             self.assertTrue(config["disable_hdr_exposure"])
+
+    def test_invalid_hdr_quality_preserves_saved_choice(self):
+        before = self.service.config_file_path.read_text()
+        for invalid in ("unknown", "", True, 2):
+            with self.subTest(invalid=invalid):
+                result = self.service.update_profile_config_fields("game", {"hdr_quality": invalid})
+                self.assertFalse(result["success"])
+                self.assertEqual(before, self.service.config_file_path.read_text())
 
     def test_refresh_target_defaults_and_power_mode_round_trip(self):
         self.assertFalse(self.service.get_profile_config("game")["config"]["adaptive_target_refresh_rate"])

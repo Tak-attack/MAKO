@@ -10,7 +10,7 @@ The optional `adaptive_target_refresh_rate` boolean defaults to false for existi
 
 ## Policy
 
-`hdr_reduced_precision` defaults to true in profiles while preserving saved choices. Older schema-5 runtime records omit it and decode as false, matching their full-precision behavior; retain this reader until all supported Renderers emit the field. Older shader binaries without the optional precision hook also retain full precision. No migration or wrapper rewrite is needed; configuration/status tests cover defaults, validation and requested/applied values.
+The unreleased HDR precision toggle has been replaced by `hdr_quality` without a saved-value migration or legacy-field reader. Older runtime records without this field decode as `quality`, matching their full-precision behavior; retain this missing-field default until all supported Renderers report HDR quality. Older shader binaries without the optional precision hook retain full precision.
 
 Generated files and user data have different lifecycles:
 

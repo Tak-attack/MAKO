@@ -121,10 +121,12 @@ export function MakoRestartLabel({ label }: { label: string }) {
   );
 }
 
-/** Keep early-access status visible even when optional help is hidden. */
+/** Show early-access status with the panel's optional information. */
 export function MakoExperimentalBadge({ label }: { label: string }) {
   return (
-    <span
+    <MakoInfo
+      as="span"
+      data-mako-info="true"
       data-mako-experimental-badge="true"
       style={{
         display: "inline-flex",
@@ -144,7 +146,7 @@ export function MakoExperimentalBadge({ label }: { label: string }) {
       }}
     >
       {label}
-    </span>
+    </MakoInfo>
   );
 }
 

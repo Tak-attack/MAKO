@@ -174,7 +174,7 @@ export const PACING = "pacing" as const;
 export const ACTIVE_IN = "active_in" as const;
 export const GPU = "gpu" as const;
 export const DISABLE_MAKO = "disable_mako" as const;
-export const HDR_REDUCED_PRECISION = "hdr_reduced_precision" as const;
+export const HDR_QUALITY = "hdr_quality" as const;
 export const DISABLE_HDR_EXPOSURE = "disable_hdr_exposure" as const;
 export const GAMESCOPE_WSI_COMPATIBILITY = "gamescope_wsi_compatibility" as const;
 export const SWAPCHAIN_IMAGE_COUNT_COMPATIBILITY = "swapchain_image_count_compatibility" as const;
@@ -374,11 +374,11 @@ export const CONFIG_SCHEMA: Record<string, ConfigField> = {
     default: false,
     description: "troubleshooting: prevent MAKO Renderer loading on the next game launch"
   },
-  hdr_reduced_precision: {
-    name: "hdr_reduced_precision",
-    fieldType: ConfigFieldType.BOOLEAN,
-    default: true,
-    description: "live approximate HDR10 frame generation and compact 10-bit PQ shader/scaling buffers; off restores full precision"
+  hdr_quality: {
+    name: "hdr_quality",
+    fieldType: ConfigFieldType.STRING,
+    default: "performance",
+    description: "live HDR quality: quality, balanced (compact buffers), or performance (compact buffers and approximate HDR10 generation)"
   },
   disable_hdr_exposure: {
     name: "disable_hdr_exposure",
@@ -497,7 +497,7 @@ export interface ConfigurationData {
   active_in: string;
   gpu: string;
   disable_mako: boolean;
-  hdr_reduced_precision: boolean;
+  hdr_quality: string;
   disable_hdr_exposure: boolean;
   gamescope_wsi_compatibility: boolean;
   swapchain_image_count_compatibility: boolean;
@@ -553,7 +553,7 @@ export function getDefaults(): ConfigurationData {
     active_in: "",
     gpu: "",
     disable_mako: false,
-    hdr_reduced_precision: true,
+    hdr_quality: "performance",
     disable_hdr_exposure: true,
     gamescope_wsi_compatibility: false,
     swapchain_image_count_compatibility: false,
@@ -602,7 +602,7 @@ export function getFieldTypes(): Record<string, ConfigFieldType> {
     active_in: ConfigFieldType.STRING,
     gpu: ConfigFieldType.STRING,
     disable_mako: ConfigFieldType.BOOLEAN,
-    hdr_reduced_precision: ConfigFieldType.BOOLEAN,
+    hdr_quality: ConfigFieldType.STRING,
     disable_hdr_exposure: ConfigFieldType.BOOLEAN,
     gamescope_wsi_compatibility: ConfigFieldType.BOOLEAN,
     swapchain_image_count_compatibility: ConfigFieldType.BOOLEAN,

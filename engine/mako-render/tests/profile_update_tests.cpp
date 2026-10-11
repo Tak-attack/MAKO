@@ -42,12 +42,54 @@ namespace {
 
 int main() {
     {
+        using Q = ls::HdrQuality;
+        struct QualityTransition {
+            Q from;
+            Q to;
+            bool compactChanged;
+            bool generationChanged;
+        };
+        for (const auto& row : {
+                QualityTransition{Q::Quality, Q::Balanced, true, false},
+                QualityTransition{Q::Balanced, Q::Quality, true, false},
+                QualityTransition{Q::Balanced, Q::Performance, false, true},
+                QualityTransition{Q::Performance, Q::Balanced, false, true},
+                QualityTransition{Q::Quality, Q::Performance, true, true},
+                QualityTransition{Q::Performance, Q::Quality, true, true},
+                QualityTransition{Q::Balanced, Q::Balanced, false, false}}) {
+            for (const bool hdr : {false, true}) {
+                for (const bool internalResize : {false, true}) {
+                    ls::GameConf current;
+                    current.scaling_enabled = !internalResize;
+                    current.hdr_quality = row.from;
+                    auto requested = current;
+                    requested.hdr_quality = row.to;
+                    requested.base_fps_cap = 40;
+                    const auto plan = planProfileUpdate(current, requested, 4,
+                        true, true, true, true, false, false, 120, hdr,
+                        hdr && row.generationChanged, internalResize);
+                    expect(plan.decision.spatialScalingLiveRebuild == (hdr && row.compactChanged),
+                        "HDR quality transitions rebuild only a changed scaler buffer format");
+                    expect(plan.decision.frameGenerationPrivateRebuild == (hdr && row.generationChanged),
+                        "Only Performance transitions change HDR10 generation resources");
+                    expect(!plan.decision.swapchainRecreationDeferred &&
+                            !plan.decision.processRestartDeferred &&
+                            plan.appliedProfile.base_fps_cap == 40,
+                        "HDR quality stays private and cannot block an independent cap edit");
+                    expect(plan.appliedProfile.hdr_quality ==
+                            (hdr && (row.compactChanged || row.generationChanged) ? row.from : row.to),
+                        "HDR quality commits immediately only when no resource change is pending");
+                }
+            }
+        }
+    }
+    {
         ls::GameConf full;
         full.scaling_enabled = false;
         full.scaling_method = ls::ScalingMethod::Mako;
-        full.hdr_reduced_precision = false;
+        full.hdr_quality = ls::HdrQuality::Quality;
         auto compact = full;
-        compact.hdr_reduced_precision = true;
+        compact.hdr_quality = ls::HdrQuality::Performance;
         compact.scaling_method = ls::ScalingMethod::Ls1;
         compact.scaling_factor = 1.5F;
         compact.scaling_sharpness = 0.7F;
@@ -58,7 +100,7 @@ int main() {
         expect(update.decision.spatialScalingLiveRebuild &&
                 update.decision.frameGenerationPrivateRebuild &&
                 !update.decision.swapchainRecreationDeferred &&
-                !update.appliedProfile.hdr_reduced_precision &&
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Quality &&
                 update.appliedProfile.base_fps_cap == 40 &&
                 update.appliedProfile.scaling_method == compact.scaling_method &&
                 update.appliedProfile.scaling_factor == compact.scaling_factor &&
@@ -69,13 +111,13 @@ int main() {
             update = planProfileUpdate(full, compact, 4, false, false,
                 false, true, false, false, 120, hdr, false, true);
             expect(!update.decision.spatialScalingLiveRebuild &&
-                    update.appliedProfile.hdr_reduced_precision,
+                    update.appliedProfile.hdr_quality == ls::HdrQuality::Performance,
                 "An inactive internal resize cannot allocate resources for a precision edit");
         }
         update = planProfileUpdate(compact, full, 4, true, true,
             true, true, false, false, 120, true, true, true);
         expect(update.decision.spatialScalingLiveRebuild &&
-                update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Performance,
             "Internal HDR resize can return to full precision through the same drain");
         update = planProfileUpdate(compact, compact, 4, true, true,
             true, true, false, false, 120, true, false, true);
@@ -85,37 +127,37 @@ int main() {
     }
     {
         ls::GameConf full;
-        full.hdr_reduced_precision = false;
+        full.hdr_quality = ls::HdrQuality::Quality;
         full.scaling_enabled = true;
         auto compact = full;
-        compact.hdr_reduced_precision = true;
+        compact.hdr_quality = ls::HdrQuality::Performance;
         auto update = planProfileUpdate(full, compact, 4, true, true,
             true, true, false, false, 120, true);
         expect(update.decision.spatialScalingLiveRebuild &&
                 !update.decision.frameGenerationPrivateRebuild &&
                 !update.decision.swapchainRecreationDeferred &&
-                !update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Quality,
             "HDR precision prepares a private scaler without changing FG or applying before drain");
         compact.base_fps_cap = 40;
         update = planProfileUpdate(full, compact, 4, true, true,
             true, true, false, false, 120, true);
         expect(update.appliedProfile.base_fps_cap == 40 &&
-                !update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Quality,
             "HDR precision must not block an independent live cap edit");
         update = planProfileUpdate(full, compact, 4, true, true,
             true, true, false, false, 120, false);
         expect(!update.decision.spatialScalingLiveRebuild &&
-                update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Performance,
             "SDR precision edits stay dormant without rebuilding the scaler");
         update = planProfileUpdate(full, compact, 4, true, false,
             true, true, false, false, 120, true);
         expect(!update.decision.spatialScalingLiveRebuild &&
-                update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Performance,
             "Shader-only HDR precision does not allocate a scaler");
         update = planProfileUpdate(compact, full, 4, true, true,
             true, true, false, false, 120, true);
         expect(update.decision.spatialScalingLiveRebuild &&
-                update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Performance,
             "Returning to full precision uses the same private drain boundary");
         compact.scaling_factor = full.scaling_factor + 0.25F;
         compact.scaling_supersampling = !full.scaling_supersampling;
@@ -124,10 +166,10 @@ int main() {
         expect(update.decision.spatialScalingLiveRebuild &&
                 update.appliedProfile.scaling_factor == compact.scaling_factor &&
                 update.appliedProfile.scaling_supersampling == compact.scaling_supersampling &&
-                !update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Quality,
             "Extent-neutral edits apply independently of a private precision rebuild");
         auto committed = update.appliedProfile;
-        committed.hdr_reduced_precision = compact.hdr_reduced_precision;
+        committed.hdr_quality = compact.hdr_quality;
         update = planProfileUpdate(committed, compact, 4, true, true,
             true, true, true, true, 120, true);
         expect(!update.decision.spatialScalingLiveRebuild &&
@@ -138,24 +180,24 @@ int main() {
         expect(!update.decision.spatialScalingLiveRebuild &&
                 update.decision.swapchainRecreationDeferred &&
                 update.appliedProfile.scaling_factor == full.scaling_factor &&
-                !update.appliedProfile.hdr_reduced_precision,
+                update.appliedProfile.hdr_quality == ls::HdrQuality::Quality,
             "Precision cannot bypass a real extent change that needs recreation");
     }
     {
         ls::GameConf full;
-        full.hdr_reduced_precision = false;
+        full.hdr_quality = ls::HdrQuality::Quality;
         auto compact = full;
-        compact.hdr_reduced_precision = true;
+        compact.hdr_quality = ls::HdrQuality::Performance;
         auto plan = planProfileUpdate(full, compact, 4, true, false,
             true, true, false, false, 120, true, true);
         expect(plan.decision.frameGenerationPrivateRebuild &&
-                !plan.appliedProfile.hdr_reduced_precision &&
+                plan.appliedProfile.hdr_quality == ls::HdrQuality::Quality &&
                 !plan.decision.swapchainRecreationDeferred,
             "HDR10 FG precision waits for private resources without recreating WSI");
         plan = planProfileUpdate(full, compact, 4, true, false,
             false, true, false, false, 120, true, true);
         expect(plan.decision.swapchainRecreationDeferred &&
-                !plan.appliedProfile.hdr_reduced_precision,
+                plan.appliedProfile.hdr_quality == ls::HdrQuality::Quality,
             "Unavailable private replacement must not pretend precision applied");
         full.scaling_enabled = compact.scaling_enabled = true;
         plan = planProfileUpdate(full, compact, 4, true, true,

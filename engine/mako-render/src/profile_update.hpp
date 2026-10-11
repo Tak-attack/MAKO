@@ -100,7 +100,7 @@ namespace mako::layer {
             const ls::GameConf& requested) noexcept {
         if (ls::effectiveScalingMethod(current) !=
                 ls::effectiveScalingMethod(requested) ||
-                current.hdr_reduced_precision != requested.hdr_reduced_precision)
+                current.hdr_quality != requested.hdr_quality)
             return std::chrono::milliseconds::zero();
         return std::chrono::milliseconds(500);
     }
@@ -205,7 +205,7 @@ namespace mako::layer {
         live.scaling_factor = current.scaling_factor;
         live.scaling_supersampling = current.scaling_supersampling;
         live.scaling_sharpness = current.scaling_sharpness;
-        live.hdr_reduced_precision = current.hdr_reduced_precision;
+        live.hdr_quality = current.hdr_quality;
         live.flow_scale = current.flow_scale;
         live.performance_mode = current.performance_mode;
         if (generatedFrameCapacityPending) {
@@ -222,7 +222,7 @@ namespace mako::layer {
         float scalingFactor{1.0F};
         bool scalingSupersampling{false};
         float scalingSharpness{0.5F};
-        bool hdrReducedPrecision{false};
+        ls::HdrQuality hdrQuality{ls::HdrQuality::Quality};
         float effectiveFlowScale{ls::GameConfDefaults::flowScale};
         bool effectivePerformanceMode{false};
         size_t requiredGeneratedFrameCapacity{0};
@@ -245,8 +245,8 @@ namespace mako::layer {
                 ? profile.scaling_supersampling : false,
             .scalingSharpness = scalingActive
                 ? profile.scaling_sharpness : 0.5F,
-            .hdrReducedPrecision = (scalingActive || profile.frame_generation_provisioned) &&
-                profile.hdr_reduced_precision,
+            .hdrQuality = (scalingActive || profile.frame_generation_provisioned)
+                ? profile.hdr_quality : ls::HdrQuality::Quality,
             .effectiveFlowScale = ls::effectiveFlowScale(profile),
             .effectivePerformanceMode = ls::effectivePerformanceMode(profile),
             .requiredGeneratedFrameCapacity =
@@ -267,7 +267,7 @@ namespace mako::layer {
                 current.scalingMethod != requested.scalingMethod ||
                 current.scalingSupersampling !=
                     requested.scalingSupersampling ||
-                current.hdrReducedPrecision != requested.hdrReducedPrecision)
+                current.hdrQuality != requested.hdrQuality)
             return std::chrono::milliseconds::zero();
         return std::chrono::milliseconds(500);
     }
@@ -886,7 +886,7 @@ namespace mako::layer {
         const bool scalingSharpnessChanged =
             current.scaling_sharpness != next.scaling_sharpness;
         const bool hdrPrecisionChanged = hdrScalingActive &&
-            current.hdr_reduced_precision != next.hdr_reduced_precision;
+            ls::hdrCompactBuffers(current.hdr_quality) != ls::hdrCompactBuffers(next.hdr_quality);
         const bool scalerSettingsChanged = scalingMethodChanged ||
             scalingFactorChanged || scalingSupersamplingChanged ||
             scalingSharpnessChanged || hdrPrecisionChanged;
@@ -939,7 +939,7 @@ namespace mako::layer {
             if (!internalNativeSpatialResize)
                 applied.scaling_sharpness = current.scaling_sharpness;
             if (hdrPrecisionChanged)
-                applied.hdr_reduced_precision = current.hdr_reduced_precision;
+                applied.hdr_quality = current.hdr_quality;
             swapchainRecreationDeferred = !spatialScalingLiveRebuild;
         }
         if (ls::effectiveFlowScale(current) !=
@@ -953,7 +953,7 @@ namespace mako::layer {
             swapchainRecreationDeferred |= !frameGenerationPrivateRebuild;
         }
         if (hdrFrameGenerationPrecisionChanged) {
-            applied.hdr_reduced_precision = current.hdr_reduced_precision;
+            applied.hdr_quality = current.hdr_quality;
             swapchainRecreationDeferred |= !frameGenerationPrivateRebuild;
         }
         if (current.pacing != next.pacing) {
@@ -1030,7 +1030,7 @@ namespace mako::layer {
                 generationPolicyChanged ||
                 generationModeChanged || fixedMultiplierChanged ||
                 baseFpsCapChanged || dynamicCadenceProbeIntervalChanged ||
-                current.hdr_reduced_precision != applied.hdr_reduced_precision ||
+                current.hdr_quality != applied.hdr_quality ||
                 spatialScalingLiveRebuild || frameGenerationPrivateRebuild;
 
         ProfileUpdateAction action = ProfileUpdateAction::NoRuntimeChange;

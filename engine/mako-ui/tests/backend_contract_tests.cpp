@@ -95,7 +95,7 @@ void test_installed_launcher_selection() {
 }
 
 void test_scaling_properties() {
-    require_property("hdr_reduced_precision", "bool", true, false);
+    require_property("hdr_quality", "QString", true, false);
     require_property("running_games", "QVariantList", false, false);
     require_property("scanning_games", "bool", false, false);
     require_property("capture_failed", "bool", false, false);
@@ -647,7 +647,7 @@ void test_save_lifetime() {
         QByteArray(MAKO_UI_VKBASALT_SHADER_SOURCE_DIR));
     {
         mako::ui::Backend backend;
-        require(backend.getHdrReducedPrecision() && !backend.getEnableHdr(),
+        require(backend.getHdrQuality() == QStringLiteral("performance") && !backend.getEnableHdr(),
             "Qt must default reduced precision on while HDR remains disabled");
         backend.allowFP16Updated(false);
         for (const bool enabled : {true, false}) {
@@ -886,7 +886,14 @@ void test_save_lifetime() {
         require(std::filesystem::last_write_time(configPath) == timestamp,
             "Idle UI rewrote the configuration");
         backend.targetFPSUpdated(165);
-        backend.hdrReducedPrecisionUpdated(false);
+        for (const auto* quality : {"quality", "performance", "balanced"}) {
+            backend.hdrQualityUpdated(QString::fromLatin1(quality));
+            require(backend.getHdrQuality() == QString::fromLatin1(quality),
+                "Qt must accept every HDR quality choice");
+        }
+        backend.hdrQualityUpdated(QStringLiteral("balanced"));
+        backend.hdrQualityUpdated(QStringLiteral("invalid"));
+        require(backend.getHdrQuality() == QStringLiteral("balanced"), "Invalid HDR quality must preserve the selection");
         require(backend.setProperty("enable_hdr", false), "Enable HDR property must accept Off");
         backend.disableSteamOverlayUpdated(true);
         backend.forceAlsaAudioUpdated(true);
@@ -896,8 +903,8 @@ void test_save_lifetime() {
         mako::ui::Backend reopened;
         require(!reopened.getEnableHdr(),
             "A saved disable_hdr_exposure=true must appear as Enable HDR Off");
-        require(!reopened.getHdrReducedPrecision(),
-            "Qt must preserve an explicitly saved full precision choice");
+        require(reopened.getHdrQuality() == QStringLiteral("balanced"),
+            "Qt must preserve the saved Balanced HDR choice");
         require(reopened.getVkBasaltShader() == QStringLiteral("custom/Customcustomtone:vibrance") &&
                 reopened.getCustomShaderEffects().size() == 1,
             "Qt custom selection and catalog did not survive reopening");

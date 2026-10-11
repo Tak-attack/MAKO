@@ -2452,7 +2452,7 @@ namespace {
                                 "makoSetSwapchainHdrPrecisionV1"));
                         if (setHdrPrecision)
                             setHdrPrecision(device, *swapchain,
-                                layer_info->root.hdrReducedPrecision());
+                                layer_info->root.hdrCompactBuffersEnabled());
                         if (driverInfo.imageColorSpace != newInfo->imageColorSpace) {
                             // vkBasalt sees the driver's SRGB transport pair. Supply
                             // the original colour space before it exposes images or

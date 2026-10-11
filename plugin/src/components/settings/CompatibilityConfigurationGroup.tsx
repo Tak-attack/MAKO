@@ -1,7 +1,7 @@
 import { Dropdown, Field, PanelSectionRow, ToggleField } from "@decky/ui";
 import {
   DISABLE_HDR_EXPOSURE,
-  HDR_REDUCED_PRECISION,
+  HDR_QUALITY,
   DISABLE_STEAMDECK_MODE,
   DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS,
   DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS_VALUES,
@@ -75,15 +75,23 @@ export function CompatibilityConfigurationGroup({
 
           {hdrEnabled && (
             <PanelSectionRow>
-              <ToggleField
-                label={t("HDR_REDUCED_PRECISION", "Reduced HDR Precision")}
+              <Field
+                label={t("HDR_QUALITY", "HDR Quality")}
                 description={t(
-                  "HDR_REDUCED_PRECISION_DESC",
-                  "Prioritizes speed with lower-detail HDR10 motion analysis, approximate interpolation and compact shader/scaling buffers. Keeps full output resolution but may add moving-edge artifacts or banding. Applies live with a brief hitch. Off restores full precision; scRGB Frame Generation is unchanged.",
+                  "HDR_QUALITY_DESC",
+                  "Quality keeps full precision. Balanced uses compact buffers. Performance also reduces HDR10 motion detail and colour-conversion work. Output resolution stays unchanged. Applies live with a brief hitch.",
                 )}
-                checked={config.hdr_reduced_precision}
-                onChange={(value) => onConfigChange(HDR_REDUCED_PRECISION, value)}
-              />
+              >
+                <Dropdown
+                  selectedOption={config.hdr_quality}
+                  rgOptions={[
+                    { data: "quality", label: t("HDR_QUALITY_QUALITY", "Quality") },
+                    { data: "balanced", label: t("HDR_QUALITY_BALANCED", "Balanced") },
+                    { data: "performance", label: t("HDR_QUALITY_PERFORMANCE", "Performance") },
+                  ]}
+                  onChange={(option) => onConfigChange(HDR_QUALITY, option.data)}
+                />
+              </Field>
             </PanelSectionRow>
           )}
 

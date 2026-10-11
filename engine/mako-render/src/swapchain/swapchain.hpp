@@ -348,14 +348,14 @@ namespace mako::layer {
         struct SpatialResourceRequest {
             ls::ScalingMethod method{ls::ScalingMethod::Native};
             float sharpness{0.5F};
-            bool hdrReducedPrecision{false};
+            ls::HdrQuality hdrQuality{ls::HdrQuality::Quality};
 
             friend bool operator==(
                     const SpatialResourceRequest& left,
                     const SpatialResourceRequest& right) {
                 return left.method == right.method &&
                     left.sharpness == right.sharpness &&
-                    left.hdrReducedPrecision == right.hdrReducedPrecision;
+                    ls::hdrCompactBuffers(left.hdrQuality) == ls::hdrCompactBuffers(right.hdrQuality);
             }
         };
 
@@ -367,7 +367,8 @@ namespace mako::layer {
                     const FrameGenerationResourceRequest& right) {
                 return ls::effectiveFlowScale(left.profile) ==
                         ls::effectiveFlowScale(right.profile) &&
-                    left.profile.hdr_reduced_precision == right.profile.hdr_reduced_precision &&
+                    ls::hdrApproximateGeneration(left.profile.hdr_quality) ==
+                        ls::hdrApproximateGeneration(right.profile.hdr_quality) &&
                     ls::effectivePerformanceMode(left.profile) ==
                         ls::effectivePerformanceMode(right.profile) &&
                     generatedFrameCapacityForProfile(left.profile) ==

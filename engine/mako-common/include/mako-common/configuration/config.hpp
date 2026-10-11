@@ -52,6 +52,34 @@ namespace ls {
         return std::nullopt;
     }
 
+    /// HDR storage and frame-generation quality, independent of HDR activation.
+    enum class HdrQuality : uint8_t { Quality, Balanced, Performance };
+
+    [[nodiscard]] constexpr const char* hdrQualityName(HdrQuality quality) noexcept {
+        switch (quality) {
+            case HdrQuality::Quality: return "quality";
+            case HdrQuality::Balanced: return "balanced";
+            case HdrQuality::Performance: return "performance";
+        }
+        return "performance";
+    }
+
+    [[nodiscard]] constexpr std::optional<HdrQuality>
+    hdrQualityFromName(std::string_view value) noexcept {
+        if (value == "quality") return HdrQuality::Quality;
+        if (value == "balanced") return HdrQuality::Balanced;
+        if (value == "performance") return HdrQuality::Performance;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] constexpr bool hdrCompactBuffers(HdrQuality quality) noexcept {
+        return quality != HdrQuality::Quality;
+    }
+
+    [[nodiscard]] constexpr bool hdrApproximateGeneration(HdrQuality quality) noexcept {
+        return quality == HdrQuality::Performance;
+    }
+
     /// Spatial reconstruction implementation selected for a profile.
     enum class ScalingMethod : uint8_t {
         /// Preserve the game's native image while the Scaling Engine remains provisioned.
@@ -167,7 +195,7 @@ namespace ls {
         static constexpr float scalingFactor = 1.5F;
         static constexpr bool scalingSupersampling = false;
         static constexpr float scalingSharpness = 0.8F;
-        static constexpr bool hdrReducedPrecision = true;
+        static constexpr HdrQuality hdrQuality = HdrQuality::Performance;
         static constexpr uint32_t frameGenerationRefreshThreshold = 0;
         static constexpr uint32_t baseFpsCap = 0;
         static constexpr bool adaptive = false;
@@ -253,9 +281,8 @@ namespace ls {
         bool scaling_supersampling{GameConfDefaults::scalingSupersampling};
         /// normalized scaler sharpening strength
         float scaling_sharpness{GameConfDefaults::scalingSharpness};
-        /// Approximate HDR10 interpolation/coarser motion and compact PQ buffers;
-        /// linear HDR generation stays unchanged.
-        bool hdr_reduced_precision{GameConfDefaults::hdrReducedPrecision};
+        /// Select full precision, compact buffers, or approximate HDR10 generation.
+        HdrQuality hdr_quality{GameConfDefaults::hdrQuality};
         /// pause synthesis at or below a confirmed refresh rate; zero disables it
         uint32_t frame_generation_refresh_threshold{
             GameConfDefaults::frameGenerationRefreshThreshold

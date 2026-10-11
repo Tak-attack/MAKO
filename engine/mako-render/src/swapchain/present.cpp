@@ -54,17 +54,17 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
     this->bridgeOutputBatchSize = 1;
     this->applyPendingSpatialScaler(vk);
     if (hdrShaderPrecisionSupported(this->colorPipeline, this->hdrExposureDisabled) &&
-            this->shaderHdrReducedPrecision != this->profile.hdr_reduced_precision) {
+            this->shaderHdrReducedPrecision != ls::hdrCompactBuffers(this->profile.hdr_quality)) {
         using SetHdrPrecision = VkBool32 (VKAPI_PTR *)(
             VkDevice, VkSwapchainKHR, VkBool32);
         const auto setHdrPrecision = reinterpret_cast<SetHdrPrecision>(
             vk.fi().GetDeviceProcAddr(vk.dev(), "makoSetSwapchainHdrPrecisionV1"));
         const bool accepted = setHdrPrecision &&
-            setHdrPrecision(vk.dev(), swapchain, this->profile.hdr_reduced_precision);
+            setHdrPrecision(vk.dev(), swapchain, ls::hdrCompactBuffers(this->profile.hdr_quality));
         std::clog << "MAKO Renderer: HDR shader precision: reduced="
-                  << this->profile.hdr_reduced_precision
+                  << ls::hdrCompactBuffers(this->profile.hdr_quality)
                   << "; request_accepted=" << accepted << '\n';
-        this->shaderHdrReducedPrecision = this->profile.hdr_reduced_precision;
+        this->shaderHdrReducedPrecision = ls::hdrCompactBuffers(this->profile.hdr_quality);
     }
     if (presentDiagnosticsEnabled()) {
         const auto requested = present_diagnostics::applicationPresentMode(

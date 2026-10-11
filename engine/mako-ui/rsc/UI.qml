@@ -1104,13 +1104,15 @@ ApplicationWindow {
 
                     GroupEntry {
                         visible: backend.enable_hdr
-                        title: t.hdrReducedPrecision
-                        description: t.hdrReducedPrecisionDesc
+                        title: t.hdrQuality
+                        description: t.hdrQualityDesc
 
-                        CheckBox {
+                        ComboBox {
                             Layout.alignment: Qt.AlignRight
-                            checked: backend.hdr_reduced_precision
-                            onToggled: backend.hdr_reduced_precision = checked
+                            model: [t.hdrQualityQuality, t.hdrQualityBalanced, t.hdrQualityPerformance]
+                            property var values: ["quality", "balanced", "performance"]
+                            currentIndex: values.indexOf(backend.hdr_quality)
+                            onActivated: backend.hdr_quality = values[index]
                         }
                     }
 

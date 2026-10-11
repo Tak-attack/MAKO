@@ -94,7 +94,7 @@ See [Adaptive validation](ADAPTIVE-VALIDATION.md) for scheduling details.
 | `scaling_factor` | `1.5` | Target output-to-source ratio per dimension from 1.0–2.0; the surface, display target, and resource limits may reduce the effective ratio. |
 | `scaling_supersampling` | `false` | Allows supported variable Gamescope surfaces to render beyond the display target before downsampling. |
 | `scaling_sharpness` | `0.8` | Sharpening strength from 0.0–1.0. |
-| `hdr_reduced_precision` | `true` | Trades HDR accuracy for speed using coarser HDR10 motion analysis, approximate interpolation and compact shader/scaling buffers. The HDR10 motion Flow Scale is halved, with a 0.25 floor; source/output resolution and saved Flow Scale are preserved. May add banding, bright-edge artifacts or altered effects. Applies live; off restores full precision. Inert for SDR. See [precision details](HDR-PIPELINE.md#reduced-precision). |
+| `hdr_quality` | `'performance'` | Live HDR quality: `'quality'` retains full precision; `'balanced'` uses compact shader/scaling buffers with full motion analysis and linear-light generation; `'performance'` also uses approximate HDR10 interpolation and halves motion Flow Scale, bounded at 0.25. Output resolution and saved Flow Scale are preserved. SDR ignores it. See [HDR quality](HDR-PIPELINE.md#hdr-quality). |
 | `swapchain_image_count_compatibility` | `false` | Preserves the game's requested swapchain image minimum. Use only for games that otherwise fail to start. Requires restart. |
 
 ### Performance and device selection
@@ -125,7 +125,7 @@ Set `MAKO_ENV=1` to build one profile from environment variables instead of TOML
 - Fixed and identity: `MAKO_GPU`, `MAKO_MULTIPLIER`, `MAKO_FRAME_GENERATION_PROVISIONED`, `MAKO_FRAME_GENERATION_ENABLED`, `MAKO_FRAME_GENERATION_REFRESH_THRESHOLD`, `MAKO_BASE_FPS_CAP`;
 - Adaptive: `MAKO_ADAPTIVE`, `MAKO_ADAPTIVE_AUTO_BASE_FPS_CAP`, `MAKO_ADAPTIVE_FRACTIONAL_REAL_FRAME_PRIORITY`, `MAKO_TARGET_FPS`, `MAKO_ADAPTIVE_TARGET_REFRESH_RATE`, `MAKO_ADAPTIVE_MAX_MULTIPLIER`, `MAKO_ADAPTIVE_STABLE_CADENCE`, `MAKO_DYNAMIC_CADENCE_RECOVERY`, `MAKO_DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS`;
 - Gamescope VRR: `MAKO_GAMESCOPE_VRR_MODE` (`follow-steam`, `on`, or `off`);
-- HDR buffer precision: `MAKO_HDR_REDUCED_PRECISION` (`1` by default, `0` for full precision);
+- HDR quality: `MAKO_HDR_QUALITY` (`quality`, `balanced`, or `performance`; defaults to `performance`);
 - Scaling: `MAKO_SCALING_ENABLED`, `MAKO_SCALING_METHOD`, `MAKO_SCALING_FACTOR`, `MAKO_SCALING_SUPERSAMPLING`, `MAKO_SCALING_SHARPNESS`, `MAKO_SWAPCHAIN_IMAGE_COUNT_COMPATIBILITY`; and
 - resources: `MAKO_ULTRA_PERFORMANCE`, `MAKO_FLOW_SCALE`, `MAKO_PERFORMANCE_MODE`, `MAKO_PACING`.
 

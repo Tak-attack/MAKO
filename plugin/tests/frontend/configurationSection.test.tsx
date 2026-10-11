@@ -114,9 +114,11 @@ vi.mock("@decky/ui", () => ({
     <button
       data-testid="cadence-probe-interval-dropdown"
       data-options={JSON.stringify(rgOptions.map((option) => option.data))}
-      onClick={() => onChange(rgOptions[0])}
+      onClick={() => onChange(typeof selectedOption === "string"
+        ? rgOptions[(rgOptions.findIndex((option) => option.data === selectedOption) + 1) % rgOptions.length]
+        : rgOptions[0])}
     >
-      {selectedOption}s
+      {typeof selectedOption === "string" ? selectedOption : `${selectedOption}s`}
     </button>
   ),
   TextField: ({
@@ -1137,7 +1139,7 @@ describe("Configuration controls", () => {
     fireEvent.click(container.querySelector<HTMLButtonElement>(
       ".MAKO_WorkaroundsCollapseButton_Container button",
     )!);
-    expect(screen.queryByText("Reduced HDR Precision")).toBeNull();
+    expect(screen.queryByText("HDR Quality")).toBeNull();
     const hdr = screen.getByText("Enable HDR (Restart)").closest("button")!;
     expect(hdr.textContent).toContain("Experimental");
     expect(hdr.getAttribute("data-checked")).toBe("false");
@@ -1149,16 +1151,20 @@ describe("Configuration controls", () => {
     expect(enabledHdr.getAttribute("data-checked")).toBe("true");
     fireEvent.click(enabledHdr);
     expect(onConfigChange).toHaveBeenLastCalledWith("disable_hdr_exposure", true);
-    const precision = screen.getByRole("button", { name: "Reduced HDR Precision" });
-    expect(precision.getAttribute("data-checked")).toBe("true");
-    expect(precision.textContent).not.toContain("Experimental");
-    fireEvent.click(precision);
-    expect(onConfigChange).toHaveBeenLastCalledWith("hdr_reduced_precision", false);
-    rerender(<ConfigurationSection {...props} config={{ ...config, hdr_reduced_precision: false }} />);
-    fireEvent.click(screen.getByText("Reduced HDR Precision"));
-    expect(onConfigChange).toHaveBeenLastCalledWith("hdr_reduced_precision", true);
+    const quality = screen.getByText("HDR Quality").parentElement!;
+    const dropdown = quality.querySelector("button")!;
+    expect(dropdown.textContent).toBe("performance");
+    expect(JSON.parse(dropdown.getAttribute("data-options")!)).toEqual([
+      "quality", "balanced", "performance",
+    ]);
+    for (const hdr_quality of ["quality", "balanced", "performance"] as const) {
+      fireEvent.click(screen.getByText("HDR Quality").parentElement!.querySelector("button")!);
+      expect(onConfigChange).toHaveBeenLastCalledWith("hdr_quality", hdr_quality);
+      rerender(<ConfigurationSection {...props} config={{ ...config, hdr_quality }} />);
+      expect(screen.getByText("HDR Quality").parentElement!.querySelector("button")!.textContent).toBe(hdr_quality);
+    }
     rerender(<ConfigurationSection {...props} config={{ ...config, disable_hdr_exposure: true }} />);
-    expect(screen.queryByText("Reduced HDR Precision")).toBeNull();
+    expect(screen.queryByText("HDR Quality")).toBeNull();
     expect(screen.getByText("Enable HDR (Restart)").closest("button")?.getAttribute("data-checked"))
       .toBe("false");
   });

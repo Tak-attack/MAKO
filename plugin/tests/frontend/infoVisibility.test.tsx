@@ -79,6 +79,7 @@ import {
   type ModelWarningProps,
 } from "../../src/components/ModelWarning";
 import {
+  MakoExperimentalSettingLabel,
   MakoInlineTip,
   MakoReleaseIdentity,
   MakoSectionHeader,
@@ -151,6 +152,13 @@ test("R1 hides information without changing controls, repeats, or other buttons"
         Flow Scale
         <input defaultValue="90" />
       </label>
+      <label>
+        <MakoExperimentalSettingLabel
+          label="Enable HDR (Restart)"
+          badgeLabel="Experimental"
+        />
+        <input type="checkbox" defaultChecked />
+      </label>
       <div className="Steam_FieldDescription">Setting description</div>
       <div className="Mako_OptionDescription">MAKO description</div>
       <MakoInlineTip>Helpful tip</MakoInlineTip>
@@ -159,6 +167,7 @@ test("R1 hides information without changing controls, repeats, or other buttons"
     </InfoVisibility>,
   );
   const input = screen.getByRole("textbox") as HTMLInputElement;
+  const hdrToggle = screen.getByRole("checkbox") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "75" } });
   input.focus();
   const descriptions = [
@@ -168,6 +177,7 @@ test("R1 hides information without changing controls, repeats, or other buttons"
     "Helpful tip",
     "Setting warning",
     "Setting relationship",
+    "Experimental",
   ];
   expect(
     descriptions.every((text) => isDisplayed(screen.getByText(text))),
@@ -194,6 +204,10 @@ test("R1 hides information without changing controls, repeats, or other buttons"
   expect(isDisplayed(screen.getByText("2×"))).toBe(true);
   expect(isDisplayed(input)).toBe(true);
   expect(input.value).toBe("75");
+  expect(isDisplayed(screen.getByText("Enable HDR"))).toBe(true);
+  expect(isDisplayed(screen.getByText("(Restart)"))).toBe(true);
+  expect(isDisplayed(hdrToggle)).toBe(true);
+  expect(hdrToggle.checked).toBe(true);
   expect(document.activeElement).toBe(input);
   pressButton(input, 6, true);
   expect(
@@ -208,6 +222,7 @@ test("R1 hides information without changing controls, repeats, or other buttons"
     descriptions.every((text) => isDisplayed(screen.getByText(text))),
   ).toBe(true);
   expect(input.value).toBe("75");
+  expect(hdrToggle.checked).toBe(true);
 });
 
 test("renders option descriptions two pixels smaller in both Steam UI modes", () => {
@@ -241,10 +256,17 @@ test("clicking the ribbon persists the choice across reopening without changing 
   localStorage.setItem("mako-welcome-tips-collapsed", "true");
   const { unmount } = render(
     <InfoVisibility>
-      <button>Option</button>
+      <button>
+        <MakoExperimentalSettingLabel
+          label="Enable Scaling (Restart)"
+          badgeLabel="Experimental"
+        />
+      </button>
     </InfoVisibility>,
   );
+  expect(screen.getByText("Experimental")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Hide info" }));
+  expect(screen.queryByText("Experimental")).toBeNull();
   expect(localStorage.getItem("mako-info-hidden")).toBe("true");
   expect(localStorage.getItem("mako-welcome-tips-collapsed")).toBe("true");
   unmount();
@@ -252,14 +274,21 @@ test("clicking the ribbon persists the choice across reopening without changing 
     <InfoVisibility>
       <MakoReleaseIdentity version="3.2.1" codename="The Captain" />
       <RuntimeStatusCard runtimeState={EMPTY_RUNTIME_SCALING_UI_STATE} />
-      <button>Option</button>
+      <button>
+        <MakoExperimentalSettingLabel
+          label="Enable Scaling (Restart)"
+          badgeLabel="Experimental"
+        />
+      </button>
     </InfoVisibility>,
   );
   expect(isDisplayed(screen.getByText("v3.2.1"))).toBe(true);
   expect(isDisplayed(screen.getByText("the-captain"))).toBe(true);
   expect(isDisplayed(screen.getByText("Waiting for MAKO"))).toBe(true);
   expect(isDisplayed(screen.getByText(/Live metrics unavailable/))).toBe(true);
+  expect(screen.queryByText("Experimental")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show info" }));
+  expect(isDisplayed(screen.getByText("Experimental"))).toBe(true);
   expect(localStorage.getItem("mako-info-hidden")).toBe("false");
 });
 

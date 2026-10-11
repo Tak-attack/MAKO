@@ -408,10 +408,10 @@ CONFIG_SCHEMA_DEF: Dict[str, ConfigFieldDefinition] = {
     },
 
     # Native per-profile precision choice; private resources can change live.
-    "hdr_reduced_precision": {
-        "fieldType": ConfigFieldType.BOOLEAN,
-        "default": True,
-        "description": "live approximate HDR10 frame generation and compact 10-bit PQ shader/scaling buffers; off restores full precision",
+    "hdr_quality": {
+        "fieldType": ConfigFieldType.STRING,
+        "default": "performance",
+        "description": "live HDR quality: quality, balanced (compact buffers), or performance (compact buffers and approximate HDR10 generation)",
         "location": "toml"
     },
 
