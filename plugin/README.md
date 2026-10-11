@@ -22,12 +22,11 @@ Published MAKO Renderer packages target x86_64 Linux hosts, with 64-bit and 32-b
 
 - Installs and updates the per-user MAKO Renderer Vulkan layer and common `mako-run` wrapper.
 - Saves per-game and per-process profiles, then selects them automatically by Steam application ID or process name.
-- Groups Fixed and Adaptive Frame Generation, Spatial Scaling, Shaders, performance, compatibility, external-tool, and manual controls. **Live Status** reports the active mode, scaler, resolutions, limits, fallbacks, and pending changes for the running game.
-- Provides a per-profile Gamescope WSI compatibility option, host-installed MangoHud, and MAKO's private pinned 64-bit/32-bit vkBasalt build, including live per-game sharpening, anti-aliasing, and lightweight shader presets. Scaling uses the combined Renderer by default; the independent WSI option selects the managed compatibility path inside a supported Gamescope session.
+- Offers Frame Generation, Scaling, Shaders, performance, and compatibility controls. **Live Status** shows active features and pending changes.
+- Bundles vkBasalt shader effects and supports optional host-installed MangoHud and Gamescope WSI compatibility. See [graphics integrations](../engine/docs/LAYER-CHAINING.md) for limits.
 - Offers an opt-in [native Steam Remote Play override](docs/CONFIGURATION.md#native-steam-remote-play) using ordinary saved profiles and verified original-client restoration.
 - Prepares matching Vulkan runtime extensions and application access for supported Flatpak workflows.
-- Shares one active native Renderer version with the standalone archive installer. Installing either version selects it for both launch workflows; a later MAKO Decky installation adopts a valid standalone Renderer and offers its bundled update when the versions differ.
-- Removes files supplied by either managed native Renderer installer when you select **Uninstall MAKO Renderer**, while preserving MAKO Decky and its profiles. Uninstalling MAKO Decky also removes the managed native Renderer; shared Flatpak runtime extensions remain installed.
+- Shares the native Renderer with the standalone installer. **Uninstall MAKO Renderer** removes it but keeps MAKO Decky and profiles. Uninstalling MAKO Decky also removes the native Renderer while preserving profiles. Flatpak extensions remain installed separately.
 
 Close games using MAKO before installing or updating the Renderer. Installation preserves valid profiles. If the saved configuration cannot be read or validated, installation resets it and its profiles to defaults. Read-only configurations stop installation. If installation fails, MAKO attempts to restore the previous installation and configuration and reports any recovery problems.
 

@@ -286,7 +286,7 @@
   "HDR_REDUCED_PRECISION": "Reduced HDR Precision",
   "HDR_REDUCED_PRECISION_DESC": "Prioritizes speed with lower-detail HDR10 motion analysis, approximate interpolation and compact shader/scaling buffers. Keeps full output resolution but may add moving-edge artifacts or banding. Applies live with a brief hitch. Off restores full precision; scRGB Frame Generation is unchanged.",
   "CONFIG_ENABLE_HDR": "HDR aktivieren (Neustart)",
-  "CONFIG_ENABLE_HDR_DESC": "Erlaubt HDR auf einem kompatiblen Display. HDR muss auch im Spiel aktiviert sein. Standardmäßig ausgeschaltet.",
+  "CONFIG_ENABLE_HDR_DESC": "Für externe HDR-Displays. HDR muss auch im Spiel aktiviert sein. Standardmäßig ausgeschaltet.",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI (Neustart)",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY_DESC": "Kann durch Gamescope-Präsentation farbige oder pixelige Bewegungsartefakte reduzieren. Optional bei Skalierung und Frame Generation; nur bei Bedarf aktivieren.",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY_WARNING": "Nur für unterstützte 64-Bit-Host-Starts. Ohne Bedarf ausgeschaltet lassen; kann die Leistung verringern.",

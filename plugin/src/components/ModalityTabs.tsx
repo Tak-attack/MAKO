@@ -1,5 +1,5 @@
-import { PanelSectionRow } from "@decky/ui";
-import { useState, type CSSProperties } from "react";
+import { GamepadButton, PanelSectionRow } from "@decky/ui";
+import { useRef, useState, type CSSProperties } from "react";
 import {
   FiFastForward,
   FiLayers,
@@ -78,6 +78,7 @@ export function ModalityTabs({
   activeModality,
   onModalityChange,
 }: ModalityTabsProps) {
+  const selector = useRef<HTMLDivElement>(null);
   const [revealedModality, setRevealedModality] = useState<ModalityId | null>(
     null,
   );
@@ -124,9 +125,32 @@ export function ModalityTabs({
     setRevealedModality((current) => (current === modality ? null : current));
   };
 
+  const navigate = (
+    index: number,
+    key: string | undefined,
+    event: Pick<Event, "preventDefault" | "stopPropagation">,
+  ) => {
+    const columns = 3;
+    let next = index;
+    if (key === "ArrowLeft" && index % columns > 0) next--;
+    if (key === "ArrowRight" && index % columns < columns - 1) next++;
+    if (key === "ArrowUp") next -= columns;
+    if (key === "ArrowDown") next += columns;
+    // Leave outer edges to Steam so focus can leave the settings grid.
+    if (next === index || next < 0 || next >= options.length) return;
+    const target = selector.current?.querySelector<HTMLElement>(
+      `[data-modality="${options[next].id}"]`,
+    );
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    target.focus({ preventScroll: true });
+  };
+
   return (
     <PanelSectionRow>
       <div
+        ref={selector}
         data-mako-modality-selector="true"
         style={{
           width: "100%",
@@ -145,7 +169,7 @@ export function ModalityTabs({
           role="tablist"
           aria-label={t("CONTENT_IMAGE_PROCESSING", "Image Processing")}
           flow-children="grid"
-          data-mako-focus-scroll="nearest"
+          data-mako-focus-scroll="group"
           noFocusRing
           style={{
             width: "100%",
@@ -155,7 +179,7 @@ export function ModalityTabs({
             gap: "7px",
           }}
         >
-          {options.map((option) => {
+          {options.map((option, index) => {
             const active = activeModality === option.id;
             const revealed = revealedModality === option.id;
             const Icon = option.icon;
@@ -170,6 +194,28 @@ export function ModalityTabs({
                 data-modality={option.id}
                 onClick={() => onModalityChange(option.id)}
                 onActivate={() => onModalityChange(option.id)}
+                onKeyDown={(event) => {
+                  if (
+                    event.altKey ||
+                    event.ctrlKey ||
+                    event.metaKey ||
+                    event.shiftKey
+                  )
+                    return;
+                  navigate(index, event.key, event);
+                }}
+                onButtonDown={(event) =>
+                  navigate(
+                    index,
+                    {
+                      [GamepadButton.DIR_LEFT]: "ArrowLeft",
+                      [GamepadButton.DIR_RIGHT]: "ArrowRight",
+                      [GamepadButton.DIR_UP]: "ArrowUp",
+                      [GamepadButton.DIR_DOWN]: "ArrowDown",
+                    }[event.detail.button],
+                    event,
+                  )
+                }
                 onMouseEnter={() => setRevealedModality(option.id)}
                 onMouseLeave={() => hideRibbon(option.id)}
                 onFocus={() => setRevealedModality(option.id)}

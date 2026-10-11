@@ -136,7 +136,7 @@ scaling_supersampling = false
 scaling_sharpness = 0.8
 ```
 
-Set `frame_generation_enabled = false` for scaling-only operation. Fixed and Adaptive controls remain unchanged when Frame Generation is enabled. Environment-only profiles use `MAKO_SCALING_ENABLED`, `MAKO_SCALING_METHOD`, `MAKO_SCALING_FACTOR`, `MAKO_SCALING_SUPERSAMPLING`, and `MAKO_SCALING_SHARPNESS` with `MAKO_ENV=1`.
+Set `frame_generation_provisioned = false` before launch for scaling-only operation without FG resources. `frame_generation_enabled = false` pauses already provisioned generation live and retains its resources. Fixed and Adaptive controls remain unchanged when Frame Generation is enabled. Environment-only profiles use `MAKO_SCALING_ENABLED`, `MAKO_SCALING_METHOD`, `MAKO_SCALING_FACTOR`, `MAKO_SCALING_SUPERSAMPLING`, and `MAKO_SCALING_SHARPNESS` with `MAKO_ENV=1`.
 
 `MAKO_VKD3D_SHADER_PATH=/absolute/path/to/libvkd3d-shader.so.1` overrides the shared LS1/LSFG DirectX translator discovery for a nonstandard installation. It affects setup only.
 
@@ -148,7 +148,7 @@ Portable CTest covers configuration, fixed and variable extent policy, Gamescope
 
 Real-Vulkan changes need proportionate MAKO Gym evidence for both FP32 and FP16 where Frame Generation is involved. Select the applicable suites from [Testing MAKO](../../TESTING.md), including quality, spatial performance, synchronization, Gamescope, recovery, native Vulkan, DXVK, VKD3D-Proton, direct desktop, and supported Flatpak/runtime paths. Record unavailable hardware and matrix rows as not tested.
 
-Positive split-chain scaling evidence requires the ordered three-role loader chain, Wayland provenance at the lower role, a source/presentation split, `inactive_reason=none`, one active upper reconstruction owner, and correct real/generated delivery. A selected method alone does not prove that scaling ran. For the combined path, require isolated Gamescope WSI, no lower spatial role, and an active source/presentation split in the combined Renderer. Compare WSI on/off performance only at the same proven source and presentation sizes, scaler, Frame Generation settings, scene, and refresh rate; native fallback is not a scaling performance improvement. Use `VK_LOADER_DEBUG=layer` only for focused loader captures and the `scaling`, `layers`, and `recovery` diagnostics presets from [Collect diagnostics](COLLECT_DIAGNOSTICS.md).
+Positive split-chain scaling evidence requires the ordered three-role loader chain, Wayland provenance at the lower role, a source/presentation split, `inactive_reason=none`, one active upper reconstruction owner, and correct real/generated delivery. A selected method alone does not prove that scaling ran. For the combined path, require isolated Gamescope WSI, no lower spatial role, and an active source/presentation split in the combined Renderer. Compare WSI on/off performance only at the same proven source and presentation sizes, scaler, Frame Generation settings, scene, and refresh rate; native fallback is not a scaling performance improvement. Use `VK_LOADER_DEBUG=layer` only for focused loader captures and select `scaling`, `layers`, or `recovery` with `mako-diagnostics` for focused reports after [collecting a session](COLLECT_DIAGNOSTICS.md).
 
 ## Code and test ownership
 

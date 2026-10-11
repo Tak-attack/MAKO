@@ -13,7 +13,9 @@ Without live metrics, **Live Status** shows **Off** when Frame Generation and Sc
 3. Use the **Frame-gen**, **Scaling**, and/or **Shaders** tabs to choose features.
 4. Restart after changing a **Restart** option, then check **Live Status**.
 
-The settings have two rows of three tabs: **Frame-gen**, **Scaling**, and **Shaders**, then **Performance**, **Advanced**, and **Tweaks**. Frame-gen opens by default. Hover or focus a tab to see its name on one line; Performance uses **Perf**. Tweaks contains compatibility controls. Tab names identify the controls without extra section headings. Selecting a tab shows its controls directly; **External Tools** and **Manual Overrides** remain collapsible sections below the launch instructions.
+Use **Performance** (shown as **Perf** on focus), **Advanced**, and **Tweaks** for additional controls; Tweaks contains compatibility options. **External Tools** and **Manual Overrides** are below the launch instructions.
+
+Use Left/Right to move across tabs and Up/Down between rows. Press A to open the focused tab. The grid centres when you enter it.
 
 Try one feature at a time. If it does not work, try Fullscreen, Borderless Fullscreen, and Windowed. Compare V-Sync on and off and keep the smoother option.
 

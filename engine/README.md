@@ -4,7 +4,7 @@
   <img src="assets/mako-render-logo.webp" width="256" alt="MAKO Renderer logo" />
 </p>
 
-MAKO Renderer is a Vulkan layer for Frame Generation, spatial scaling, and optional shader effects on SteamOS and Linux. It supports LSFG Fixed and Adaptive Frame Generation, LS1 scaling, and the open MAKO Scaler. **MAKO Scaler and shaders work without Lossless Scaling.** Only Frame Generation and LS1 require it.
+MAKO Renderer is a Vulkan layer for Frame Generation, spatial scaling, and optional shader effects on SteamOS and Linux. It supports LSFG Fixed and Adaptive Frame Generation, LS1 scaling, and the open MAKO Scaler. **MAKO Scaler and shaders work without Lossless Scaling.**
 
 LSFG and LS1 require a lawful, user-supplied <a href="https://store.steampowered.com/app/993090/Lossless_Scaling/" target="_blank" rel="noopener noreferrer">Lossless Scaling</a> installation. MAKO does not distribute or modify `Lossless.dll`; the open MAKO Scaler and bundled shaders do not require it. MAKO Renderer descends from the GPL-3.0-or-later lsfg-vk version 2 tree. See the <a href="../THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener noreferrer">third-party notices</a> and <a href="../LICENSE.md#lsfg-vk-renderer-lineage" target="_blank" rel="noopener noreferrer">Renderer lineage</a>.
 
@@ -106,7 +106,7 @@ Use `mako-cli benchmark --profile` for opt-in CPU submission/wait timings and GP
 
 ## Build from source
 
-Build a standard development configuration with CMake and Vulkan development headers:
+From `engine/`, build a standard development configuration with CMake and Vulkan development headers:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -116,20 +116,7 @@ ctest --test-dir build --output-on-failure
 
 The optional Qt interface requires Qt 6.2 or newer. See [Building from source](docs/BUILDING-FROM-SOURCE.md) for prerequisites, SteamOS builds, 32-bit layers, and installation prefixes.
 
-Build individual local packages with:
-
-```bash
-./scripts/package-local.sh
-./scripts/package-flatpaks.sh
-```
-
-To create the complete release-shaped local artifact set, including the Arch package and checksums, use:
-
-```bash
-./scripts/package-local-release.sh
-```
-
-Artifacts are written under `engine/out/`. These commands build locally; they do not tag or publish a release.
+For host, Flatpak, Arch, or complete local packages, choose an entry point in [Building from source](docs/BUILDING-FROM-SOURCE.md#choose-the-right-build-path). Packaging writes to `engine/out/` without publishing.
 
 ## More documentation
 

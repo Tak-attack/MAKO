@@ -129,7 +129,7 @@ A broad “configuration changed” reset would discard validated cadence after 
 
 ## Frame Generation provisioning, 0x, and Ultra Performance
 
-Disabling Frame Generation provisioning before launch omits LSFG device interop and backend/private generation ownership. A Scaling-only profile still loads the combined Renderer because it owns reconstruction, but it creates no Frame Generation resources. Decky can omit the Renderer layer entirely when Frame Generation provisioning and Scaling are both off; a selected post-processing layer remains independent.
+Disabling Frame Generation provisioning before launch omits LSFG device interop and backend/private generation ownership. A Scaling-only profile still loads the combined Renderer because it owns reconstruction, but it creates no Frame Generation resources. Decky can omit the Renderer layer when Frame Generation provisioning, Scaling and HDR exposure are all off; a selected post-processing layer remains independent. HDR-only launches retain the Renderer for its surface bridge without provisioning FG or scaling resources.
 
 The `0x` execution state submits no LSFG model work, generated-image acquisition, or generated presents. The saved cap is dormant. When provisioning is on, the process retains interop, backend, private images, and synchronization so `0x` can return to an active factor live. Failed provisioning leaves real-frame or independent scaling active and reports restart pending.
 
@@ -145,7 +145,7 @@ Each context also publishes an atomic schema-5 requested-versus-applied record u
 
 Before the first primary context publishes, one process-wide pass removes only unlocked stale MAKO runtime files from that exact directory. It is non-recursive and best-effort; held locks, unrelated names, symlinks, ownership uncertainty, and failures are preserved and never block startup. Status I/O is observational and cannot change presentation.
 
-Use the `config`, `startup`, `recovery`, or `performance` presets in [Collect diagnostics](COLLECT_DIAGNOSTICS.md).
+Follow [Collect diagnostics](COLLECT_DIAGNOSTICS.md) to capture a session; use `mako-diagnostics --list` to select a narrower `config`, `startup`, `recovery`, or `performance` report.
 
 ## Adding a setting
 

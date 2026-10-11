@@ -171,4 +171,4 @@ Keep these invariants:
 | Embedded shader generation and freshness | `scripts/generate-color-conversion-spirv.py`, portable CTest |
 | Deterministic policy coverage | `mako-render/tests/color_pipeline_tests.cpp`, `mako-render/tests/presentation_policy_tests.cpp`, related Renderer tests |
 
-Use the `hdr`, `layers`, and `recovery` presets from [Collect diagnostics](COLLECT_DIAGNOSTICS.md) for a focused report.
+Follow [Collect diagnostics](COLLECT_DIAGNOSTICS.md) to capture a session. For a narrower technical report, replace the collector’s `all` argument with `hdr`, `layers`, or `recovery`; `mako-diagnostics --help` lists presets.

@@ -66,7 +66,7 @@ export function CompatibilityConfigurationGroup({
               }
               description={t(
                 "CONFIG_ENABLE_HDR_DESC",
-                "Allow HDR on a compatible display. HDR must also be enabled in the game. Off by default.",
+                "For external HDR displays. HDR must also be enabled in the game. Off by default.",
               )}
               checked={hdrEnabled}
               onChange={(enabled) => onConfigChange(DISABLE_HDR_EXPOSURE, !enabled)}

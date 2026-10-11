@@ -360,6 +360,83 @@ test("effects navigation keeps rows visible without recentering the whole panel"
   });
 });
 
+test("tab grid centres on entry and stays steady across both rows and R1", () => {
+  render(
+    <InfoVisibility>
+      <button>Before tabs</button>
+      <div role="tablist" data-mako-focus-scroll="group">
+        <button>Top tab</button>
+        <button>Bottom tab</button>
+      </div>
+      <button>After tabs</button>
+    </InfoVisibility>,
+  );
+  const group = screen.getByRole("tablist");
+  const first = screen.getByRole("button", { name: "Top tab" });
+  const second = screen.getByRole("button", { name: "Bottom tab" });
+  first.focus();
+  // A second direction before the next animation frame must retain entry centring.
+  second.focus();
+  flushAnimationFrames();
+  expect(group.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+    block: "center",
+    inline: "nearest",
+    behavior: "auto",
+  });
+  expect(vi.mocked(group.scrollIntoView).mock.contexts).toEqual([group]);
+
+  vi.mocked(group.scrollIntoView).mockClear();
+  first.focus();
+  flushAnimationFrames();
+  expect(first.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+    block: "nearest",
+    inline: "nearest",
+    behavior: "auto",
+  });
+  expect(vi.mocked(first.scrollIntoView).mock.contexts).toEqual([first]);
+
+  vi.mocked(first.scrollIntoView).mockClear();
+  pressButton(first);
+  flushAnimationFrames();
+  expect(document.activeElement).toBe(first);
+  expect(first.scrollIntoView).not.toHaveBeenCalled();
+  second.focus();
+  flushAnimationFrames();
+  expect(second.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+    block: "nearest",
+    inline: "nearest",
+    behavior: "auto",
+  });
+
+  screen.getByRole("button", { name: "After tabs" }).focus();
+  flushAnimationFrames();
+  vi.mocked(group.scrollIntoView).mockClear();
+  second.focus();
+  flushAnimationFrames();
+  expect(group.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+    block: "center",
+    inline: "nearest",
+    behavior: "auto",
+  });
+  expect(vi.mocked(group.scrollIntoView).mock.contexts).toEqual([group]);
+});
+
+test("leaving a tab grid before its scroll runs cancels entry centring", () => {
+  render(
+    <InfoVisibility>
+      <div role="tablist" data-mako-focus-scroll="group">
+        <button>Tab</button>
+      </div>
+      <button>Other control</button>
+    </InfoVisibility>,
+  );
+  screen.getByRole("button", { name: "Tab" }).focus();
+  const other = screen.getByRole("button", { name: "Other control" });
+  other.focus();
+  flushAnimationFrames();
+  expect(vi.mocked(other.scrollIntoView).mock.contexts).toEqual([other]);
+});
+
 test("a disappearing info control moves to the next visible, enabled control", () => {
   render(
     <InfoVisibility>

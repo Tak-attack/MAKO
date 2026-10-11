@@ -68,7 +68,7 @@ Published Renderer packages currently target x86_64 Linux hosts and include laye
 
 ## What MAKO is
 
-MAKO (**Motion-Adaptive Kernel Orchestration**) brings LSFG frame generation, spatial scaling, and bundled shader effects to Linux gaming. **MAKO Scaler and shaders work without Lossless Scaling; only Frame Generation and LS1 require it.** Scaling can run alone or reconstruct real frames before Fixed or Adaptive Frame Generation.
+MAKO (**Motion-Adaptive Kernel Orchestration**) brings LSFG frame generation, spatial scaling, and bundled shader effects to Linux gaming. **MAKO Scaler and shaders work without Lossless Scaling; only Frame Generation and LS1 require it.** Scaling can run alone or alongside Fixed or Adaptive Frame Generation.
 
 The project consists of two closely integrated components:
 
@@ -105,7 +105,7 @@ Every game and display behaves differently, so compare one setting at a time. If
 
 ### Optional graphics integrations
 
-MAKO Decky provides a per-profile **Gamescope WSI** option, host-installed MangoHud integration, and its own private 64-bit/32-bit vkBasalt build. Enable Shaders for a game to use MAKO-managed sharpening, anti-aliasing, and its bundled effect catalog without installing vkBasalt separately; MAKO does not use a system-wide vkBasalt copy. Scaling and Gamescope WSI are independent choices. See <a href="engine/docs/LAYER-CHAINING.md" target="_blank" rel="noopener noreferrer">optional graphics integrations</a> for ordering and limits.
+Shaders use bundled vkBasalt; no separate installation is needed. MAKO Decky also offers host-installed MangoHud and a per-profile **Gamescope WSI** compatibility option, independent of Scaling. See <a href="engine/docs/LAYER-CHAINING.md" target="_blank" rel="noopener noreferrer">optional graphics integrations</a> for ordering and limits.
 
 ### How to configure MAKO with third-party launchers
 
@@ -120,10 +120,6 @@ MAKO Decky provides a per-profile **Gamescope WSI** option, host-installed Mango
 For a step-by-step guide that creates a shareable report on the Desktop, see <a href="plugin/docs/COLLECT_DIAGNOSTICS.md" target="_blank" rel="noopener noreferrer">Collect MAKO Decky Diagnostics</a>.
 
 ### Updating MAKO Decky
-
-<!-- prettier-ignore -->
-> [!IMPORTANT]
-> To prevent Decky retaining a previous plugin backend or bundled payload, especially when moving between local test ZIPs, uninstall MAKO Decky, install the newer ZIP, restart, then select **Install MAKO Renderer**.
 
 1. Quit the games using MAKO.
 2. Uninstall MAKO Decky, then install the newer ZIP through **Developer > Install Plugin from Zip**.

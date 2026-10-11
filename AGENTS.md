@@ -57,7 +57,7 @@ The diagnostics helper deliberately recognizes historical lowercase renderer pre
 | Decky packaging | Frontend generation, local ZIPs, direct development deployment, reload, and publishing | `plugin/scripts/` |
 | Product website | Public MAKO product story, direct component downloads, social metadata, static GitHub Pages output, and Pages deployment | `website/`, `.github/workflows/pages.yml` |
 | Cross-component contracts | Static agreement for configuration, RPCs, package layout, paths, runtime versions, and stable identities | `plugin/tests/test_*_contract.py`, `plugin/tests/test_decky_loader_import.py`, `plugin/tests/test_flatpak_runtime_detection.py`, `plugin/tests/frontend/*Contract*.test.ts` |
-| Automation | Portable CI and dedicated SteamOS/AMD hardware validation | `.github/workflows/` |
+| Automation | Portable CI, release contracts, and website deployment | `.github/workflows/` |
 | Private real-hardware QA | Licensed-model feature, quality, performance, synchronization, recovery, Gamescope/Desktop, Flatpak, and Proton matrices with local evidence | Sibling `MAKO-Gym` checkout; MAKO owns only `engine/scripts/run-mako-gym.sh` and its portable bridge contract |
 
 Start with the root `README.md`, then read `engine/README.md` or `plugin/README.md`. The boundary owners are:

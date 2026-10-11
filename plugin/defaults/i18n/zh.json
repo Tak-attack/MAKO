@@ -286,7 +286,7 @@
   "HDR_REDUCED_PRECISION": "Reduced HDR Precision",
   "HDR_REDUCED_PRECISION_DESC": "Prioritizes speed with lower-detail HDR10 motion analysis, approximate interpolation and compact shader/scaling buffers. Keeps full output resolution but may add moving-edge artifacts or banding. Applies live with a brief hitch. Off restores full precision; scRGB Frame Generation is unchanged.",
   "CONFIG_ENABLE_HDR": "启用 HDR （重启）",
-  "CONFIG_ENABLE_HDR_DESC": "允许在兼容显示器上使用 HDR。还需在游戏中启用 HDR。默认关闭。",
+  "CONFIG_ENABLE_HDR_DESC": "适用于外接 HDR 显示器。还需在游戏中启用 HDR。默认关闭。",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY": "Gamescope WSI（重启）",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY_DESC": "通过 Gamescope 呈现路径，可能减少彩色或像素化的运动伪影。缩放和帧生成均可选用；仅在需要的游戏中启用。",
   "CONFIG_GAMESCOPE_WSI_COMPATIBILITY_WARNING": "仅限受支持的 64 位主机启动方式。不需要时请关闭；它可能降低性能。",

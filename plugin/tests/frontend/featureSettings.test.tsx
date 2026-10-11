@@ -1,8 +1,16 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { GamepadButton, type GamepadEvent } from "@decky/ui";
 
 vi.mock("@decky/ui", () => ({
+  GamepadButton: { DIR_UP: 9, DIR_DOWN: 10, DIR_LEFT: 11, DIR_RIGHT: 12 },
   PanelSectionRow: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
@@ -34,6 +42,8 @@ vi.mock("../../src/components/MakoUi", () => ({
   MakoFocusable: ({
     children,
     onActivate,
+    onKeyDown,
+    onButtonDown,
     onGamepadFocus: _onGamepadFocus,
     onGamepadBlur: _onGamepadBlur,
     noFocusRing: _noFocusRing,
@@ -41,22 +51,34 @@ vi.mock("../../src/components/MakoUi", () => ({
     ...props
   }: React.HTMLAttributes<HTMLDivElement> & {
     onActivate?: () => void;
+    onButtonDown?: (event: GamepadEvent) => void;
     onGamepadFocus?: () => void;
     onGamepadBlur?: () => void;
     noFocusRing?: boolean;
     "flow-children"?: string;
-  }) => (
-    <div
-      tabIndex={0}
-      data-focus-flow={flowChildren}
-      {...props}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") onActivate?.();
-      }}
-    >
-      {children}
-    </div>
-  ),
+  }) => {
+    const ref = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+      const element = ref.current!;
+      const handle = (event: Event) => onButtonDown?.(event as GamepadEvent);
+      element.addEventListener("vgp_onbuttondown", handle);
+      return () => element.removeEventListener("vgp_onbuttondown", handle);
+    }, [onButtonDown]);
+    return (
+      <div
+        ref={ref}
+        tabIndex={0}
+        data-focus-flow={flowChildren}
+        {...props}
+        onKeyDown={(event) => {
+          onKeyDown?.(event);
+          if (!event.defaultPrevented && event.key === "Enter") onActivate?.();
+        }}
+      >
+        {children}
+      </div>
+    );
+  },
   makoDialogButtonStyle: () => ({}),
 }));
 vi.mock("../../src/components/FpsMultiplierControl", () => ({
@@ -84,10 +106,82 @@ vi.mock("../../src/i18n/i18n", () => ({
 }));
 
 import { FeatureSettings } from "../../src/components/FeatureSettings";
+import { ModalityTabs } from "../../src/components/ModalityTabs";
 import { getDefaults } from "../../src/config/configSchema";
 import { EMPTY_RUNTIME_SCALING_UI_STATE } from "../../src/utils/runtimeScalingUtils";
 
 afterEach(cleanup);
+
+test.each([
+  ["ArrowLeft", GamepadButton.DIR_LEFT, [null, 0, 1, null, 3, 4]],
+  ["ArrowRight", GamepadButton.DIR_RIGHT, [1, 2, null, 4, 5, null]],
+  ["ArrowUp", GamepadButton.DIR_UP, [null, null, null, 0, 1, 2]],
+  ["ArrowDown", GamepadButton.DIR_DOWN, [3, 4, 5, null, null, null]],
+] as const)(
+  "%s moves within rows/columns and leaves grid exits to Steam",
+  (key, button, destinations) => {
+    window.SP_REACT = React;
+    const select = vi.fn();
+    render(
+      <ModalityTabs
+        activeModality="frame-generation"
+        onModalityChange={select}
+      />,
+    );
+    const tabs = screen.getAllByRole("tab");
+    for (const gamepad of [false, true]) {
+      destinations.forEach((destination, index) => {
+        act(() => tabs[index].focus());
+        const event = gamepad
+          ? new CustomEvent("vgp_onbuttondown", {
+              bubbles: true,
+              cancelable: true,
+              detail: { button, source: 0 },
+            })
+          : new KeyboardEvent("keydown", {
+              key,
+              bubbles: true,
+              cancelable: true,
+            });
+        fireEvent(tabs[index], event);
+        expect(document.activeElement).toBe(tabs[destination ?? index]);
+        expect(event.defaultPrevented).toBe(destination !== null);
+      });
+    }
+    expect(select).not.toHaveBeenCalled();
+  },
+);
+
+test("held direction continues navigation while activation remains explicit", () => {
+  window.SP_REACT = React;
+  const select = vi.fn();
+  render(
+    <ModalityTabs
+      activeModality="frame-generation"
+      onModalityChange={select}
+    />,
+  );
+  const tabs = screen.getAllByRole("tab");
+  act(() => tabs[0].focus());
+  for (let index = 0; index < 2; index++) {
+    fireEvent(
+      tabs[index],
+      new CustomEvent("vgp_onbuttondown", {
+        bubbles: true,
+        cancelable: true,
+        detail: {
+          button: GamepadButton.DIR_RIGHT,
+          is_repeat: index > 0,
+          source: 0,
+        },
+      }),
+    );
+    expect(document.activeElement).toBe(tabs[index + 1]);
+  }
+  expect(select).not.toHaveBeenCalled();
+  fireEvent.keyDown(tabs[2], { key: "Enter" });
+  expect(select).toHaveBeenCalledExactlyOnceWith("shaders");
+});
 
 describe("primary feature organization", () => {
   test("opens Frame-gen by default and switches six settings tabs in a three-column grid", () => {

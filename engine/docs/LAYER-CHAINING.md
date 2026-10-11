@@ -49,7 +49,7 @@ Unsupported: Desktop Mode, 32-bit WSI presentation, unprepared Flatpaks, mismatc
 
 ### MangoHud and Shaders
 
-Save or select the game's profile, enable **Shaders** under **Image Processing** or **MangoHud** under **External Tools**, then restart.
+Save or select the game's profile, enable **Shaders** in its tab or **MangoHud** under **External Tools**, then restart.
 
 MangoHud and Shaders cannot run together. MangoHud requires a host installation and is unavailable inside Flatpak games. Shaders use bundled vkBasalt; prepare Flatpak apps in **Flatpak Setup** first.
 

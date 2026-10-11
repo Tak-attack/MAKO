@@ -36,7 +36,7 @@ mako-cli validate --config ~/.config/mako-render/conf.toml
 
 ## Gamescope WSI, overlays, and HDR
 
-Use [supported graphics integrations](LAYER-CHAINING.md). HDR frame generation is unsupported; keep the HDR and WSI guards in place.
+Use [supported graphics integrations](LAYER-CHAINING.md). HDR is experimental and disabled by default. To use it on a supported Gamescope display, turn on **Enable HDR (Restart)**, restart the game, then enable HDR in the game. Keep full Gamescope WSI off; see [HDR setup](CONFIGURATION.md#hdr).
 
 ## Collect diagnostics
 

@@ -82,6 +82,7 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
   const [focused, setFocused] = useState(false);
   const ribbon = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number>();
+  const centredFocusGroup = useRef<HTMLElement | null>(null);
   const focusAnchor = useRef<{
     target: HTMLElement;
     top: number;
@@ -126,18 +127,28 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
     )
       return;
 
-    // Keep ordinary settings centred and paged groups stable. Never let an
+    const group = target.closest<HTMLElement>(
+      '[data-mako-focus-scroll="group"]',
+    );
+    if (!group || !group.contains(event.relatedTarget))
+      centredFocusGroup.current = null;
+
+    // Centre a grid on entry, then keep navigation within it steady. Never let an
     // older request scroll away from a newer focus or an R1-restored position.
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = undefined;
       if (target.isConnected && target.ownerDocument.activeElement === target) {
-        target.scrollIntoView({
-          block: target.closest('[data-mako-focus-scroll="nearest"]')
-            ? "nearest"
-            : "center",
+        const enteringGroup = group && centredFocusGroup.current !== group;
+        (enteringGroup ? group : target).scrollIntoView({
+          block: enteringGroup
+            ? "center"
+            : group || target.closest('[data-mako-focus-scroll="nearest"]')
+              ? "nearest"
+              : "center",
           inline: "nearest",
           behavior: "auto",
         });
+        centredFocusGroup.current = group;
       }
     });
   };

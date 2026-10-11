@@ -52,14 +52,14 @@ Battery selects Handheld; confirmed AC selects Docked. Unavailable startup detec
 
 ### Launcher exclusions
 
-Known launchers and helpers stay inactive while their child games can match. The [shared registry](../mako-common/launcher_exclusions.json) owns the exact exclusions; generic `Launcher.exe` is not globally excluded. To change the registry, update [the compatibility ledger](../../CLEANUPS.md), run `just generate-launcher-exclusions`, and validate with `just check-launcher-exclusions`.
+Known launchers and helpers stay inactive while their child games can match. The [shared registry](../mako-common/launcher_exclusions.json) owns the exact exclusions; generic `Launcher.exe` is not globally excluded. If only a launcher is detected, wait for gameplay and match the game executable instead. Maintainers can find registry changes in [the compatibility ledger](../../CLEANUPS.md).
 
 ## Global settings
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `dll` | Automatic | Optional absolute path to `Lossless.dll`. LSFG and LS1 require it; MAKO Scaler and Native Resolution do not. |
-| `allow_fp16` | `true` | Selects FP16 LSFG and MAKO Scaler colour arithmetic; `false` selects FP32. Ordinary builds fail explicitly when native FP16 LSFG is unavailable; experimental builds may force conversion of a supported FP32 graph with unqualified image quality. LS1 Quality and LS1 Performance always use FP32 independently of this setting. Coordinates and transport retain their required precision. Requires restart; Ultra Performance respects this choice. |
+| `allow_fp16` | `true` | Selects FP16 for supported LSFG models and MAKO Scaler; `false` selects FP32. If a model lacks native FP16, select FP32. LS1 always uses FP32. Requires restart; Ultra Performance respects this choice. [Experimental source builds](BUILDING-FROM-SOURCE.md#experimental-forced-lsfg-fp16) have separate limits. |
 
 ## Profile settings
 
@@ -74,7 +74,7 @@ Known launchers and helpers stay inactive while their child games can match. The
 | `target_fps` | `120` | Adaptive output target, or saved fallback when refresh matching is on. MAKO Decky uses a 90 FPS product default. |
 | `adaptive_target_refresh_rate` | `false` | Matches Adaptive's output target to confirmed Gamescope display refresh, clamped to the Renderer’s 10–1000 FPS range. Applies live; unavailable or zero refresh uses the saved `target_fps`. Fixed ignores this choice. |
 | `adaptive_max_multiplier` | `3` | Adaptive multiplier ceiling, from 2–5. |
-| `adaptive_auto_base_fps_cap` | `false` | Enables Steady Base Cap behavior. |
+| `adaptive_auto_base_fps_cap` | `false` | Enables Steady Base Cap behavior. MAKO Decky defaults this to `true`. |
 | `adaptive_fractional_real_frame_priority` | `auto` | Fractional real-frame preference: `auto`, `low`, `medium`, `high`, or `very-high`. |
 | `adaptive_stable_cadence` | `true` | Favours a stable validated cadence when available. |
 | `gamescope_vrr_mode` | `follow-steam` | Per-profile live Gamescope VRR choice: `follow-steam`, `on`, or `off`. On and Off take effect only when Gamescope reports that the active display supports VRR; otherwise they are saved but leave the live setting untouched. |
@@ -133,4 +133,4 @@ Set `MAKO_ENV=1` to build one profile from environment variables instead of TOML
 
 ## Presentation acquisition timeout
 
-`MAKO_PRESENT_ACQUIRE_TIMEOUT_MS` sets one shared deadline for all ordered generated-image acquisitions in an application present, so higher multipliers cannot multiply the wait. Exhaustion or elapsed-time overrun enters native recovery. MAKO Decky uses 50 ms. A pool that fits the generated batch but has no additional relief image always uses at most 50 ms, including standalone launches; a shorter configured deadline remains authoritative. Other standalone ordered paths retain the unbounded compatibility default when unset. For a focused stall reproduction, try `25` and include the log.
+`MAKO_PRESENT_ACQUIRE_TIMEOUT_MS` limits how long MAKO waits for generated-image availability before native recovery. MAKO Decky uses 50 ms; standalone launches have no explicit default, although Adaptive VRR delivery and constrained Fixed image pools enforce a 50 ms limit. For a focused stall reproduction, try `25` and include the log. See [presentation recovery](LIFECYCLE.md) for deadline and fallback rules.
