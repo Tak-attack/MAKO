@@ -5,6 +5,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string_view>
 
 using namespace mako::layer;
@@ -335,29 +336,80 @@ int main() {
     fractionalPacing.frame_generation_provisioned = true;
     for (const bool smooth : {false, true}) {
         fractionalPacing.adaptive_stable_cadence = smooth;
-        expect(fractionalBaseCapPacesOutputs(fractionalPacing, 60.0, true),
+        expect(baseCapPacesOutputs(fractionalPacing, 60.0, true),
             "Fractional source-cap slack must be usable with either Smooth Cadence setting");
         fractionalPacing.adaptive = false;
-        expect(!fractionalBaseCapPacesOutputs(fractionalPacing, 60.0, true),
-            "Fixed must retain its original source pacing");
+        expect(!baseCapPacesOutputs(fractionalPacing, 60.0, true),
+            "uncapped Fixed must retain its original source pacing");
         fractionalPacing.adaptive = true;
         fractionalPacing.adaptive_auto_base_fps_cap = true;
-        expect(!fractionalBaseCapPacesOutputs(fractionalPacing, 45.0, true),
-            "Steady must retain its original source pacing");
+        expect(!baseCapPacesOutputs(fractionalPacing, 45.0, true) &&
+                !baseCapPacesOutputs(fractionalPacing, 45.0, true, 90) &&
+                !baseCapPacesOutputs(fractionalPacing, 45.0, true, 60),
+            "automatic caps must preserve target-matched FIFO and unknown-refresh pacing");
+        expect(baseCapPacesOutputs(fractionalPacing, 45.0, true, 120),
+            "below-refresh automatic caps must space their existing generated outputs");
         fractionalPacing.adaptive_auto_base_fps_cap = false;
     }
-    expect(!fractionalBaseCapPacesOutputs(fractionalPacing, 60.0, false) &&
-            !fractionalBaseCapPacesOutputs(fractionalPacing, 0.0, true) &&
-            !fractionalBaseCapPacesOutputs(fractionalPacing, 90.0, true) &&
-            !fractionalBaseCapPacesOutputs(fractionalPacing, 120.0, true),
+    expect(!baseCapPacesOutputs(fractionalPacing, 60.0, false) &&
+            !baseCapPacesOutputs(fractionalPacing, 0.0, true) &&
+            !baseCapPacesOutputs(fractionalPacing, 90.0, true) &&
+            !baseCapPacesOutputs(fractionalPacing, 120.0, true),
         "Fractional output pacing must not invent a source cap or override another transport");
     fractionalPacing.frame_generation_enabled = false;
-    expect(!fractionalBaseCapPacesOutputs(fractionalPacing, 60.0, true),
+    expect(!baseCapPacesOutputs(fractionalPacing, 60.0, true),
         "disabled generation must not defer its source cap");
     fractionalPacing.frame_generation_enabled = true;
     fractionalPacing.frame_generation_provisioned = false;
-    expect(!fractionalBaseCapPacesOutputs(fractionalPacing, 60.0, true),
+    expect(!baseCapPacesOutputs(fractionalPacing, 60.0, true),
         "unprovisioned generation must not defer its source cap");
+    auto cappedFixedPacing = adaptiveProfile();
+    cappedFixedPacing.frame_generation_provisioned = true;
+    cappedFixedPacing.adaptive = false;
+    for (const bool smooth : {false, true}) {
+        cappedFixedPacing.adaptive_stable_cadence = smooth;
+        for (const int multiplier : {2, 3, 4, 5}) {
+            cappedFixedPacing.multiplier = multiplier;
+            cappedFixedPacing.base_fps_cap = 120 / multiplier;
+            for (const int target : {30, 120, 240}) {
+                cappedFixedPacing.target_fps = target;
+                expect(baseCapPacesOutputs(cappedFixedPacing,
+                        cappedFixedPacing.base_fps_cap, true, 120),
+                    "capped Fixed output pacing must not depend on the Adaptive target");
+            }
+        }
+    }
+    cappedFixedPacing.multiplier = 2;
+    cappedFixedPacing.base_fps_cap = 30;
+    expect(baseCapPacesOutputs(cappedFixedPacing, 30., true, 120),
+        "below-refresh Fixed must use its existing source-cap slack");
+    expect(!baseCapPacesOutputs(cappedFixedPacing, 30., false, 120) &&
+            !baseCapPacesOutputs(cappedFixedPacing, 30., true) &&
+            !baseCapPacesOutputs(cappedFixedPacing, 30., true, 50) &&
+            !baseCapPacesOutputs(cappedFixedPacing, 0., true, 120),
+        "Fixed output pacing must preserve transport, refresh and source-cap guards");
+    for (const double invalid : {-1., std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::quiet_NaN()}) {
+        expect(!baseCapPacesOutputs(cappedFixedPacing, invalid, true, 120),
+            "invalid Fixed source rates must not acquire output pacing");
+    }
+    for (const int multiplier : {0, 1, 6}) {
+        cappedFixedPacing.multiplier = multiplier;
+        expect(!baseCapPacesOutputs(cappedFixedPacing, 30., true, 240),
+            "unsupported Fixed batches must not acquire output pacing");
+    }
+    cappedFixedPacing.multiplier = 2;
+    cappedFixedPacing.dynamic_cadence_recovery = true;
+    expect(!baseCapPacesOutputs(cappedFixedPacing, 30., true, 120),
+        "Fixed recovery must retain its own timing boundary");
+    cappedFixedPacing.dynamic_cadence_recovery = false;
+    cappedFixedPacing.frame_generation_enabled = false;
+    expect(!baseCapPacesOutputs(cappedFixedPacing, 30., true, 120),
+        "disabled Fixed generation must not acquire output pacing");
+    cappedFixedPacing.frame_generation_enabled = true;
+    cappedFixedPacing.frame_generation_refresh_threshold = 120;
+    expect(!baseCapPacesOutputs(cappedFixedPacing, 30., true, 120),
+        "refresh-paused Fixed generation must not acquire output pacing");
     auto bridgeProfile = ls::GameConf{};
     bridgeProfile.frame_generation_provisioned = true;
     bridgeProfile.frame_generation_enabled = true;
@@ -583,7 +635,7 @@ int main() {
                     effectiveBaseFpsCap(paused, staleCapRelease, refreshGuardVrr, 60)
                         == manualCap,
                 "Stale scheduler or VRR state must not override the paused manual cap");
-            expect(!fractionalBaseCapPacesOutputs(paused, manualCap, true, 60),
+            expect(!baseCapPacesOutputs(paused, manualCap, true, 60),
                 "Refresh-paused generation must not reserve Fractional output deadlines");
             expect(!smoothCadenceBaseCapEligible(paused, true, false, 60) &&
                     !smoothCadencePacerHandoffGenerationLimit(

@@ -429,18 +429,26 @@ namespace mako::layer {
             *gamescopeRefreshHz > profile.frame_generation_refresh_threshold;
     }
 
-    /// A capped Fractional plan can prepare its outputs during the existing
-    /// source-cap wait. Other modes and timestamped/variable WSI transports
-    /// retain their current pacing owner. No additional source cap is created.
-    [[nodiscard]] inline bool fractionalBaseCapPacesOutputs(
+    /// Use the existing cap interval for Fractional, below-refresh automatic
+    /// caps, and exact Fixed batches that fit the known refresh. Target-matched
+    /// automatic caps and other pacing owners retain their current path.
+    [[nodiscard]] inline bool baseCapPacesOutputs(
             const ls::GameConf& profile, const double effectiveCap,
             const bool untimedOrderedTransport,
             const std::optional<uint32_t> gamescopeRefreshHz = std::nullopt) {
-        return effectiveFrameGenerationEnabled(profile, gamescopeRefreshHz) &&
-            profile.adaptive &&
-            !profile.adaptive_auto_base_fps_cap && untimedOrderedTransport &&
-            std::isfinite(effectiveCap) && effectiveCap > 0.0 &&
-            static_cast<double>(profile.target_fps) > effectiveCap;
+        if (!effectiveFrameGenerationEnabled(profile, gamescopeRefreshHz) ||
+                !untimedOrderedTransport || !std::isfinite(effectiveCap) ||
+                effectiveCap <= 0.0)
+            return false;
+        if (profile.adaptive)
+            return static_cast<double>(profile.target_fps) > effectiveCap &&
+                (!profile.adaptive_auto_base_fps_cap ||
+                    (gamescopeRefreshHz && profile.target_fps < *gamescopeRefreshHz));
+        return !profile.dynamic_cadence_recovery && profile.base_fps_cap > 0 &&
+            profile.multiplier >= ls::GameConfLimits::minimumMultiplier &&
+            profile.multiplier <= ls::GameConfLimits::maximumMultiplier &&
+            gamescopeRefreshHz &&
+            effectiveCap * profile.multiplier <= *gamescopeRefreshHz;
     }
 
     /// Auto-cap aligns the common healthy path with an exact 2x cadence.

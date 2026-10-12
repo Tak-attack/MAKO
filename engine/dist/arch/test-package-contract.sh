@@ -56,6 +56,7 @@ mkdir -p \
     "$package_root/usr/lib32" \
     "$package_root/usr/lib32/vkbasalt" \
     "$package_root/usr/share/applications" \
+    "$package_root/usr/share/mako-render/mako_remote_play" \
     "$package_root/usr/share/doc/mako-renderer-bin"
 touch \
     "$package_root/usr/bin/mako-cli" \
@@ -77,11 +78,15 @@ for binary_path in \
     usr/lib/vkbasalt/libvkbasalt.so \
     usr/lib32/libmako-render.so \
     usr/lib32/libmako-render-scaling.so \
-    usr/lib32/vkbasalt/libvkbasalt.so; do
+    usr/lib32/vkbasalt/libvkbasalt.so \
+    usr/share/mako-render/mako_remote_play/libmako-remote-play-sdr.so; do
     printf '\177ELF' > "$package_root/$binary_path"
 done
 if [[ "${MAKO_TEST_ADD_NEW_ELF:-0}" == 1 ]]; then
     printf '\177ELF' > "$package_root/usr/lib/libfuture.so"
+fi
+if [[ "${MAKO_TEST_ADD_UNREVIEWED_SHARED_ELF:-0}" == 1 ]]; then
+    printf '\177ELF' > "$package_root/usr/share/mako-render/mako_remote_play/libfuture.so"
 fi
 printf '%s\n' install-script > "$package_root/.INSTALL"
 printf '%s\n' \
@@ -109,6 +114,11 @@ cat > "$fake_tools/readelf" <<'EOF'
 set -eu
 case "$1" in
     -h)
+        if [ "${MAKO_TEST_WRONG_HELPER_CLASS:-0}" = 1 ] &&
+                [ "${2##*/}" = libmako-remote-play-sdr.so ]; then
+            printf '  Class:                             ELF32\n'
+            exit 0
+        fi
         case "$2" in
             */lib32/*) printf '  Class:                             ELF32\n' ;;
             *) printf '  Class:                             ELF64\n' ;;
@@ -163,6 +173,16 @@ if MAKO_TEST_PKGVER="$current_pkgver" \
     echo "Arch release package skipped an added ELF file" >&2
     exit 1
 fi
+for rejected_case in MAKO_TEST_ADD_UNREVIEWED_SHARED_ELF MAKO_TEST_WRONG_HELPER_CLASS; do
+    if env MAKO_TEST_PKGVER="$current_pkgver" \
+            MAKO_TEST_PKGREL="$current_pkgrel" \
+            "$rejected_case=1" PATH="$fake_tools:/usr/bin:/bin" \
+            "$script_dir/verify-release-package.sh" "$fake_archive" \
+            >/dev/null 2>&1; then
+        echo "Arch release package accepted invalid Remote Play helper layout: $rejected_case" >&2
+        exit 1
+    fi
+done
 if MAKO_TEST_PKGVER="$current_pkgver" \
         MAKO_TEST_PKGREL="$current_pkgrel" \
         MAKO_TEST_OMIT_LIB32_GLIBC=1 \

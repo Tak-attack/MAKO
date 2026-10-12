@@ -626,6 +626,53 @@ void testLongSessionDeadlineBounds() {
     }
 }
 
+void testFixedUsesExistingSourceDeadline() {
+    using Clock = RealFramePacer::Clock;
+    const auto start = Clock::time_point{10s};
+    for (const double outputFps : {60., 90., 120.}) {
+        for (const size_t count : {2U, 3U, 4U, 5U}) {
+            const double sourceFps = outputFps / count;
+            const auto sourceInterval = std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double>(1. / sourceFps));
+            const auto outputInterval = std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double>(1. / outputFps));
+            RealFramePacer pacer;
+            static_cast<void>(pacer.schedule(start, sourceFps));
+            auto previousReal = start;
+            std::optional<Clock::time_point> previousOutput;
+            for (size_t frame = 0; frame < 120; ++frame) {
+                const auto real = pacer.schedule(previousReal + 1ms, sourceFps);
+                expect(real == previousReal + sourceInterval,
+                    "Fixed output pacing changed the existing source cap");
+                const auto batch = pacer.scheduleOutputs(previousReal + 2ms,
+                    real, outputFps, count, false);
+                expect(batch && batch->count == count &&
+                        batch->first > previousReal && batch->at(count - 1) <= real,
+                    "Fixed output batch escaped its reserved source interval");
+                for (size_t output = 0; output < count; ++output) {
+                    const auto deadline = batch->at(output);
+                    if (previousOutput) {
+                        const auto error = deadline - *previousOutput - outputInterval;
+                        expect(error >= -100ns && error <= 100ns,
+                            "Fixed generated and real frames lost uniform output spacing");
+                    }
+                    previousOutput = deadline;
+                }
+                previousReal = real;
+            }
+            const auto late = previousReal + 2s;
+            const auto real = pacer.schedule(late, sourceFps);
+            expect(real == late && !pacer.scheduleOutputs(late, real, outputFps, count, false),
+                "Fixed loading stall accumulated catch-up output debt");
+            const auto next = pacer.schedule(late + 1ms, sourceFps);
+            expect(!pacer.scheduleOutputs(next - 1ms, next, outputFps, count, false),
+                "slow Fixed preparation compressed an expired output batch");
+            expect(!pacer.scheduleOutputs(late + 1ms, next, outputFps, 1, false),
+                "native Fixed recovery acquired a generated-output deadline");
+        }
+    }
+}
+
 void testFractionalUsesExistingSourceDeadline() {
     using Clock = RealFramePacer::Clock;
     const auto start = Clock::time_point{10s};
@@ -726,6 +773,7 @@ void testFractionalUsesExistingSourceDeadline() {
 int main() {
     testLongSessionDeadlineBounds();
     testFractionalUsesExistingSourceDeadline();
+    testFixedUsesExistingSourceDeadline();
     testSmoothCadenceCapFollowsActivePlan();
     testOrderedPresentationTimeline();
     testBridgeCompositorReadiness();
@@ -890,6 +938,16 @@ int main() {
     for (uint32_t applicationImages = 2; applicationImages <= 4; ++applicationImages) {
         for (size_t generated = 1; generated <= 4; ++generated) {
             const size_t images = applicationImages + generated;
+            expect(orderedGeneratedBatchCanPrepareBeforeCap(
+                    applicationImages, images, generated, false) &&
+                    !orderedGeneratedBatchCanPrepareBeforeCap(
+                        applicationImages, images - 1, generated, false) &&
+                    !orderedGeneratedBatchCanPrepareBeforeCap(
+                        applicationImages, images, generated, true),
+                "source-cap preparation moved undersized or pressured admission before image release");
+            expect(!orderedGeneratedBatchCanPrepareBeforeCap(
+                    applicationImages, images, generated + 1, false),
+                "source-cap preparation ignored a possible higher generated batch");
             expect(!orderedGeneratedBatchNeedsNonblockingAdmission(
                     applicationImages, images, generated),
                 "a fitting generated batch was dropped solely for lacking a relief image");
@@ -908,6 +966,9 @@ int main() {
                 "relief-bearing ordered delivery changed its existing acquire contract");
         }
     }
+    expect(!orderedGeneratedBatchCanPrepareBeforeCap(3, 7, 0, false) &&
+            !orderedGeneratedBatchCanPrepareBeforeCap(3, 2, 1, false),
+        "source-cap preparation accepted inactive generation or an invalid pool");
     expect(!orderedGeneratedBatchAcquireBudget(3, 3, 0, std::nullopt) &&
             !orderedGeneratedBatchAcquireBudget(3, 2, 1, std::nullopt),
         "empty or malformed pools gained a synthetic acquire budget");

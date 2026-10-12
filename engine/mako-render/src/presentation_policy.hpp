@@ -261,6 +261,20 @@ namespace mako::layer {
             requestedGeneratedFrames;
     }
 
+    /// Moving preparation into source-cap slack must not move a zero-wait
+    /// admission attempt ahead of the image-release opportunity it previously
+    /// had. Check the active policy's full capacity because planning can
+    /// qualify a higher generated count after this decision.
+    [[nodiscard]] inline bool orderedGeneratedBatchCanPrepareBeforeCap(
+            const uint32_t requestedMinImages,
+            const size_t returnedImages,
+            const size_t maximumGeneratedFrames,
+            const bool admissionUnderPressure) noexcept {
+        return maximumGeneratedFrames > 0 && !admissionUnderPressure &&
+            !orderedGeneratedBatchNeedsNonblockingAdmission(
+                requestedMinImages, returnedImages, maximumGeneratedFrames);
+    }
+
     enum class AdaptiveOrderedDeliveryPolicy {
         NotApplicable,
         VariableRefreshBounded,

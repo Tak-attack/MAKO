@@ -213,6 +213,7 @@ while IFS= read -r -d '' audited_binary; do
     binary_path="${audited_binary#"$work_dir/audit/"}"
     case "$binary_path" in
         usr/bin/* | usr/lib/* | usr/lib32/*) ;;
+        usr/share/mako-render/mako_remote_play/libmako-remote-play-sdr.so) ;;
         *)
             echo "Built Arch package has an ELF in an unreviewed location: $binary_path." >&2
             exit 1 ;;

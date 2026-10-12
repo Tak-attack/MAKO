@@ -226,16 +226,19 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
     const auto limiterDeadline = this->realFramePacer.schedule(
         limiterArrival, baseFpsCap
     );
-    const bool fractionalDeadlinePacing = limiterDeadline > limiterArrival &&
-        fractionalBaseCapPacesOutputs(
-        this->profile, baseFpsCap,
-        this->privateOrderedTransport && !this->info.variableSurface &&
-            !this->info.gamescopeScalingSurface && !this->spatialScaler &&
-            !this->wsiPresentTimingQuery && !hasPresentTiming(lowerNextChain) &&
-            !this->recoveryState.orderedAcquireRecovery.active(),
-        this->gamescopeRefreshHz
-    );
-    if (!fractionalDeadlinePacing) {
+    const bool sourceDeadlinePacing = limiterDeadline > limiterArrival &&
+        baseCapPacesOutputs(
+            this->profile, baseFpsCap,
+            this->privateOrderedTransport && !this->info.variableSurface &&
+                !this->info.gamescopeScalingSurface && !this->spatialScaler &&
+                !this->wsiPresentTimingQuery && !hasPresentTiming(lowerNextChain) &&
+                !this->recoveryState.orderedAcquireRecovery.active(),
+            this->gamescopeRefreshHz) &&
+        orderedGeneratedBatchCanPrepareBeforeCap(
+            this->info.requestedMinImageCount, this->info.images.size(),
+            generatedFrameCapacityForActivePolicy(this->profile),
+            this->recoveryState.generatedImageAdmission.underPressure());
+    if (!sourceDeadlinePacing) {
         this->realFramePacer.resetOutputs();
         if (limiterDeadline > limiterArrival)
             std::this_thread::sleep_until(limiterDeadline);
@@ -249,14 +252,14 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
             if (deadline)
                 std::this_thread::sleep_until(*deadline);
         }
-    } sourceCapCompletion{fractionalDeadlinePacing
+    } sourceCapCompletion{sourceDeadlinePacing
         ? std::optional{limiterDeadline} : std::nullopt};
 
     const auto presentNow = DiagnosticsClock::now();
     // Observe the reserved real-frame cadence, while resource/recovery clocks
-    // continue using wall time. Fractional work uses the existing limiter's
+    // continue using wall time. Capped work uses the existing limiter's
     // slack; control returns to the game no earlier than that same deadline.
-    const auto cadenceNow = fractionalDeadlinePacing
+    const auto cadenceNow = sourceDeadlinePacing
         ? std::max(limiterDeadline, presentNow) : presentNow;
     PresentInvocation invocation{
         .vk = vk,
@@ -267,7 +270,7 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
         .waitSemaphores = waitSemaphores,
         .cadenceStarted = cadenceNow,
         .started = startPresentDiagnostic(),
-        .originalPresentDeadline = fractionalDeadlinePacing
+        .originalPresentDeadline = sourceDeadlinePacing
             ? std::optional{limiterDeadline} : std::nullopt,
     };
     this->recordPresentCadence(cadenceNow);
@@ -637,13 +640,17 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
     plan.submitSourceCopyDuration = finishPresentDiagnostic(
         sourceCopyStarted
     );
-    if (fractionalDeadlinePacing && !plan.historyWarmupActive &&
+    if (sourceDeadlinePacing && !plan.historyWarmupActive &&
+            (this->profile.adaptive || plan.scheduledGeneratedFrames.size() ==
+                this->configuredFixedGeneratedFrames) &&
             plan.scheduledGeneratedFrames.size() ==
                 plan.requestedGeneratedFrames.size()) {
         invocation.pacedOutputs = this->realFramePacer.scheduleOutputs(
             DiagnosticsClock::now(), limiterDeadline,
-            std::min<double>(this->profile.target_fps,
-                this->gamescopeRefreshHz.value_or(this->profile.target_fps)),
+            this->profile.adaptive
+                ? std::min<double>(this->profile.target_fps,
+                    this->gamescopeRefreshHz.value_or(this->profile.target_fps))
+                : baseFpsCap * this->profile.multiplier,
             plan.scheduledGeneratedFrames.size() + 1,
             this->adaptiveScheduler &&
                 this->adaptiveScheduler->snapshot().targetOutputClockActive);
