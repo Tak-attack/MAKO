@@ -499,8 +499,26 @@ struct GamescopeScalingSurface::Impl {
 
     static void pastTiming(void* data, wl_proxy*, uint32_t id,
             uint32_t desiredHi, uint32_t desiredLo, uint32_t actualHi, uint32_t actualLo,
-            uint32_t, uint32_t, uint32_t, uint32_t) {
+            uint32_t earliestHi, uint32_t earliestLo, uint32_t marginHi, uint32_t marginLo) {
         auto& content = *static_cast<Content*>(data);
+        const auto time = [](const uint32_t hi, const uint32_t lo) {
+            const uint64_t ns = (uint64_t{hi} << 32) | lo;
+            return ns <= static_cast<uint64_t>(INT64_MAX)
+                ? OrderedPresentTimeline::TimePoint{std::chrono::duration_cast<
+                    OrderedPresentTimeline::Clock::duration>(std::chrono::nanoseconds(ns))}
+                : OrderedPresentTimeline::TimePoint{};
+        };
+        const uint64_t earliest = (uint64_t{earliestHi} << 32) | earliestLo;
+        const uint64_t margin = (uint64_t{marginHi} << 32) | marginLo;
+        // The refresh prediction includes time between latching and display.
+        // Feeding that extra time into the next deadline can miss a refresh.
+        if (earliest > margin && earliest <= static_cast<uint64_t>(INT64_MAX)) {
+            content.presentTimeline.feedback(id, time(desiredHi, desiredLo),
+                time(earliestHi, earliestLo),
+                std::chrono::duration_cast<OrderedPresentTimeline::Clock::duration>(
+                    std::chrono::nanoseconds(margin)));
+        } else
+            content.presentTimeline.feedback(id, time(desiredHi, desiredLo), {});
         if (content.timing)
             content.timing->feedback(id, (uint64_t{desiredHi} << 32) | desiredLo,
                 (uint64_t{actualHi} << 32) | actualLo);
@@ -1245,6 +1263,8 @@ VkResult GamescopeScalingSurface::preparePresent(
             {.u = static_cast<uint32_t>(ns)},
         };
         impl->marshal(content->second->proxy, 5, nullptr, 1, 0, timing);
+        content->second->presentTimeline.submitted(content->second->presentId,
+            slot->presentAt, OrderedPresentTimeline::Clock::now());
         if (content->second->timing) {
             const auto nanos = [](const auto time) {
                 return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(

@@ -129,7 +129,7 @@ Shader precision changes prepare a complete graph, drain the queue and retire th
 
 ### Performance boundaries
 
-Allowing HDR can provision the bridge even if the game selects SDR. In-game HDR changes do not replace that transport. With FG provisioned, [presentation-wait compatibility](WSI-ISOLATION.md#private-bridge-presentation-wait-compatibility) also applies. Compare launch HDR exposure separately from in-game encoding when measuring overhead.
+Allowing HDR can provision the bridge even if the game selects SDR. In-game HDR changes do not replace that transport. With FG provisioned, the shared [compositor-readiness policy](WSI-ISOLATION.md#private-bridge-presentation-wait-compatibility) also applies: application wait capabilities remain available, and CPU arrival gaps do not become GPU-readiness estimates. HDR colour processing and metadata remain independent of that presentation policy. Compare launch HDR exposure separately from in-game encoding when measuring overhead.
 
 Storage precision is separate from arithmetic: SDR exchange uses RGBA8 (four bytes per pixel), full-precision HDR scaling uses RGBA16F (eight), and supported FG-only HDR10 exchange uses packed 10-bit (four). MAKO Scaler and LSFG retain selected FP16/FP32 arithmetic; LS1 remains FP32. HDR does not require RGBA32F.
 

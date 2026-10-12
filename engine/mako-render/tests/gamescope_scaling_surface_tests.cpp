@@ -55,6 +55,7 @@ extern "C" {
     uint32_t mako_test_surface_server();
     void mako_test_surface_retire();
     void mako_test_surface_timing();
+    void mako_test_surface_ready_timing(uint64_t);
 }
 
 using namespace mako::layer;
@@ -423,15 +424,6 @@ namespace {
 }
 
 int main() {
-    for (const bool bridge : {false, true}) {
-        for (const bool applicationRole : {false, true}) {
-            for (const bool generation : {false, true}) {
-                expect(needsBridgePresentWaitFallback(bridge, applicationRole, generation) ==
-                        (bridge && applicationRole && generation),
-                    "presentation-wait fallback escaped the provisioned private bridge");
-            }
-        }
-    }
     VkPhysicalDevicePresentIdFeaturesKHR presentId{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR,
         .presentId = VK_TRUE,
@@ -462,26 +454,20 @@ int main() {
         "nested device feature request must detect presentation waits");
     expect(presentWait.presentWait == VK_TRUE,
         "device request inspection mutated caller-owned features");
-    disableBridgePresentWaitFeatures(features);
-    expect(!requestsApplicationPresentWait(&features) && !presentWait.presentWait,
-        "bridge must decline both presentation-wait feature generations");
     expect(features.features.robustBufferAccess && timeline.timelineSemaphore &&
             presentId.presentId && features.pNext == &timeline &&
             timeline.pNext == &presentWait && presentWait.pNext == &presentId,
         "bridge changed unrelated features, present IDs or chain linkage");
 #if defined(VK_KHR_present_wait2)
-    expect(!presentWait2.presentWait2 && presentId.pNext == &presentWait2,
-        "wait2 fallback must preserve its feature structure");
-    presentWait2.presentWait2 = VK_TRUE;
+    expect(presentWait2.presentWait2 && presentId.pNext == &presentWait2,
+        "wait2 inspection must preserve its feature structure");
+    presentWait.presentWait = VK_FALSE;
     expect(requestsApplicationPresentWait(&features),
         "wait2-only device request bypassed the capability contract");
-    disableBridgePresentWaitFeatures(features);
 #endif
-    disableBridgePresentWaitFeatures(features);
     VkPhysicalDeviceFeatures2 emptyFeatures{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
     };
-    disableBridgePresentWaitFeatures(emptyFeatures);
     expect(!requestsApplicationPresentWait(nullptr) &&
             !requestsApplicationPresentWait(&emptyFeatures),
         "absent wait features must remain supported");
@@ -1082,7 +1068,7 @@ int main() {
         uint64_t previousTime = 0;
         for (uint32_t output = 1; output <= 130; ++output) {
             const auto before = std::chrono::steady_clock::now();
-            expect(bridge.preparePresent(surface, timedSwapchain, 120, 120, 1, true) == VK_SUCCESS,
+            expect(bridge.preparePresent(surface, timedSwapchain, 120, 120, 1, true, output) == VK_SUCCESS,
                 "timed generated/real bridge output");
             const auto ns = mako_test_surface_present_time();
             const auto nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1093,7 +1079,7 @@ int main() {
                     ns <= static_cast<uint64_t>(nowNs) + 50000000)),
                 "protocol lost per-output id or monotonic 64-bit future deadline");
             previousTime = ns;
-            mako_test_surface_timing();
+            mako_test_surface_ready_timing(ns - 1000000);
         }
         std::cerr.rdbuf(previousLog);
         const bool diagnostics = std::getenv("MAKO_PRESENT_DIAGNOSTICS") &&

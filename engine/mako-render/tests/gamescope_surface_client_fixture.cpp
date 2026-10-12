@@ -147,7 +147,7 @@ extern "C" {
     int mako_test_surface_present_times() { return presentTimes; }
     uint32_t mako_test_surface_present_id() { return presentId; }
     uint64_t mako_test_surface_present_time() { return presentTime; }
-    void mako_test_surface_timing() {
+    void mako_test_surface_ready_timing(uint64_t earliest) {
         auto* proxy = lastTimedProxy;
         if (!proxy || !proxy->listener)
             std::abort();
@@ -157,9 +157,11 @@ extern "C" {
         const uint64_t actual = presentTime + 100000;
         reinterpret_cast<Timing>(proxy->listener[0])(proxy->data, proxy, presentId,
             static_cast<uint32_t>(presentTime >> 32), static_cast<uint32_t>(presentTime),
-            static_cast<uint32_t>(actual >> 32), static_cast<uint32_t>(actual), 0, 0, 0, 0);
+            static_cast<uint32_t>(actual >> 32), static_cast<uint32_t>(actual),
+            static_cast<uint32_t>(earliest >> 32), static_cast<uint32_t>(earliest), 0, 0);
         reinterpret_cast<Refresh>(proxy->listener[1])(proxy->data, proxy, 0, 8333333);
     }
+    void mako_test_surface_timing() { mako_test_surface_ready_timing(0); }
     int mako_test_surface_present_modes() { return presentModes; }
     uint32_t mako_test_surface_present_mode() { return presentMode; }
     uint32_t mako_test_surface_feedback_image_count() { return feedbackImageCount; }

@@ -63,7 +63,6 @@ namespace {
         std::string engineName;
         std::unique_ptr<GamescopeScalingSurface> scalingSurfaces;
         SurfaceMaintenance1Support surfaceMaintenance1;
-        std::atomic_bool presentWaitFallbackLogged{false};
 
         std::unordered_map<VkDevice, vk::Vulkan> devices;
         std::unordered_set<VkDevice> nativeDevices;
@@ -701,28 +700,11 @@ namespace {
         }
     }
 
-    bool bridgePresentWaitFallback() {
-        return layer_info && instance_info && layer_info->root.active() &&
-            needsBridgePresentWaitFallback(
-                instance_info->scalingSurfaces != nullptr, frameGenerationLayer,
-                layer_info->root.frameGenerationInteropProvisioned());
-    }
-
     void myvkGetPhysicalDeviceFeatures2(
             VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures2* features) {
         // initVulkanInstanceFuncs resolves the core spelling with the KHR
         // alias as fallback. GPA below only exposes supported entrypoints.
         instance_info->funcs.GetPhysicalDeviceFeatures2(physicalDevice, features);
-        if (bridgePresentWaitFallback()) {
-            disableBridgePresentWaitFeatures(*features);
-            if (!instance_info->presentWaitFallbackLogged.exchange(
-                    true, std::memory_order_relaxed)) {
-                std::cerr << "MAKO Renderer: spatial scaling bridge presentation-wait "
-                             "fallback enabled; application presentWait=0 presentWait2=0; "
-                             "scope=provisioned-bridge; lifetime=process; "
-                             "ordered output and GPU readiness retained\n";
-            }
-        }
     }
 
     VkResult myvkCreateDevice(
@@ -734,12 +716,6 @@ namespace {
             std::cerr << "MAKO Renderer: device creation requested before "
                          "instance initialization\n";
             return VK_ERROR_INITIALIZATION_FAILED;
-        }
-        if (bridgePresentWaitFallback() && requestsApplicationPresentWait(info->pNext)) {
-            std::cerr << "MAKO Renderer: spatial scaling bridge cannot enable "
-                         "application presentation-wait features; "
-                         "honor the reported feature capabilities\n";
-            return VK_ERROR_FEATURE_NOT_PRESENT;
         }
         // apply layer chaining
         auto* layerInfo = reinterpret_cast<VkLayerDeviceCreateInfo*>(const_cast<void*>(info->pNext));

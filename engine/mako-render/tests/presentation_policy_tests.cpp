@@ -265,139 +265,330 @@ void testOrderedPresentationTimeline() {
     }
 }
 
-void testBridgeSourceBatchReadiness() {
-    using Clock = OrderedPresentTimeline::Clock;
+void testBridgeCompositorReadiness() {
+    using Timeline = OrderedPresentTimeline;
+    using Clock = Timeline::Clock;
     const auto start = Clock::time_point{10s};
-    const auto period = std::chrono::duration_cast<Clock::duration>(
+    const auto tick = std::chrono::duration_cast<Clock::duration>(
         std::chrono::duration<double>(1.0 / 120.0));
+    const auto prime = [&](Timeline& timeline, uint32_t id, auto arrival, auto cost) {
+        timeline.observeSourceBatch(arrival, id);
+        const auto slot = timeline.schedule(arrival, 120, 120, 2);
+        timeline.submitted(id, slot->presentAt, slot->submitAt);
+        timeline.feedback(id, slot->presentAt, slot->submitAt + cost);
+        return *slot;
+    };
 
-    for (const auto sourceInterval : {19ms, 26ms, 50ms, 100ms}) {
-        OrderedPresentTimeline bridge;
-        auto last = start;
-        for (uint64_t serial = 0; serial < 120; ++serial) {
-            const auto arrival = start + sourceInterval * serial;
-            bridge.observeSourceBatch(arrival, serial);
-            const auto first = bridge.schedule(arrival, 120, 120, 2);
-            // A duplicate lower present belongs to the same source batch;
-            // its short interval must not replace the measured source cost.
-            bridge.observeSourceBatch(arrival + 1ms, serial);
-            const auto second = bridge.schedule(arrival + 1ms, 120, 120, 2);
-            const auto overrun = std::min(period, std::max(Clock::duration::zero(),
-                sourceInterval - 2 * period));
-            const auto minimumLead = (serial < 3 ? 4 : 3) * period;
-            const auto lead = serial == 0 ? minimumLead :
-                std::max(minimumLead, sourceInterval + period + overrun);
-            expect(first && second && first->presentAt > last &&
-                    second->presentAt > first->presentAt,
-                "GPU-bound bridge output overtook an earlier output");
-            expect(first->presentAt >= arrival + lead &&
-                    second->presentAt >= arrival + 1ms + lead,
-                "GPU-bound bridge deadlines can precede asynchronous batch readiness");
-            expect(first->presentAt - first->submitAt <= lead + period &&
-                    second->presentAt - second->submitAt <= lead + period,
-                "GPU-bound readiness accumulated an unbounded output queue");
-            last = second->presentAt;
-        }
+    // Different CPU arrival gaps with the same readiness evidence must not
+    // change GPU allowance. Includes presentation waits, CPU hitches and load.
+    for (const auto gap : {16ms, 26ms, 50ms, 80ms}) {
+        Timeline timeline;
+        prime(timeline, 1, start, tick);
+        const auto arrival = start + 200ms;
+        timeline.observeSourceBatch(arrival, 2);
+        auto slot = timeline.schedule(arrival, 120, 120, 2);
+        expect(slot->presentAt == arrival + tick,
+            "CPU source interval changed compositor readiness");
+        timeline.submitted(2, slot->presentAt, slot->submitAt);
+        timeline.feedback(2, slot->presentAt, slot->submitAt + tick);
+        timeline.observeSourceBatch(arrival + gap, 3);
+        slot = timeline.schedule(arrival + gap, 120, 120, 2);
+        expect(slot->presentAt == arrival + gap + tick,
+            "presentation waiting fed back into source readiness");
     }
 
-    OrderedPresentTimeline transition;
-    transition.observeSourceBatch(start, 0);
-    transition.observeSourceBatch(start + 16ms, 1);
-    transition.observeSourceBatch(start + 32ms, 2);
-    transition.observeSourceBatch(start + 112ms, 3);
-    const auto hitch = transition.schedule(start + 112ms, 120, 120, 2);
-    expect(hitch->presentAt == start + 128ms + 2 * period,
-        "one CPU hitch exceeded the bounded one-refresh allowance");
-    transition.observeSourceBatch(start + 128ms, 4);
-    const auto resumed = transition.schedule(start + 128ms, 120, 120, 2);
-    expect(resumed->presentAt == start + 128ms + 3 * period,
-        "one CPU hitch polluted the next source batch");
-
-    for (const double refresh : {60., 90., 120., 240.}) {
-        const auto tick = std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double>(1.0 / refresh));
-        for (const auto rise : {tick / 4, tick, tick + 1ns, 2 * tick}) {
-            OrderedPresentTimeline rising;
-            auto arrival = start;
-            for (uint64_t serial = 0; serial < 4; ++serial) {
-                rising.observeSourceBatch(arrival, serial);
-                arrival += 2 * tick;
-            }
-            arrival += rise;
-            rising.observeSourceBatch(arrival, 4);
-            const auto pending = rising.schedule(arrival, refresh, refresh, 2);
-            expect(pending->presentAt == arrival +
-                    (rise > tick ? 4 : 3) * tick,
-                "bridge jitter acquired extra lead or abrupt pressure lost its allowance");
-            arrival += 2 * tick;
-            rising.observeSourceBatch(arrival, 5);
-            const auto recovered = rising.schedule(arrival, refresh, refresh, 2);
-            expect(recovered->presentAt == arrival + 3 * tick,
-                "abrupt-rise allowance survived a recovered source interval");
-        }
-    }
-    transition.observeSourceBatch(start + 154ms, 5);
-    transition.observeSourceBatch(start + 180ms, 6);
-    const auto slower = transition.schedule(start + 180ms, 120, 120, 2);
-    expect(slower->presentAt == start + 180ms + 26ms + 2 * period,
-        "sustained GPU saturation did not extend readiness");
-    const auto off = transition.schedule(start + 181ms, 120, 120, 1, false);
-    expect(off->presentAt > slower->presentAt &&
-            off->presentAt - off->submitAt == period,
-        "live FG off lost queued ordering or retained generated readiness");
-    transition.observeSourceBatch(start + 240ms, 7);
-    const auto reenabled = transition.schedule(start + 240ms, 120, 120, 2);
-    expect(reenabled->presentAt == start + 240ms + 4 * period,
-        "live FG re-enabling reused a stale GPU-cost estimate");
-    transition.observeSourceBatch(start + 2s, 8);
-    const auto afterStall = transition.schedule(start + 2s, 120, 120, 2);
-    expect(afterStall->submitAt == start + 2s &&
-            afterStall->presentAt == start + 2s + 4 * period,
-        "loading stall left stale bridge readiness or catch-up debt");
-
-    // A saturated 720p source can need more than the nominal 240 Hz output
-    // budget. Preserve both refreshes of readiness after its asynchronous
-    // source work, including the later output from the same batch.
-    OrderedPresentTimeline fastDisplay;
-    fastDisplay.observeSourceBatch(start, 0);
-    fastDisplay.observeSourceBatch(start + 14500us, 1);
-    fastDisplay.observeSourceBatch(start + 29000us, 2);
-    const auto fastPeriod = std::chrono::duration_cast<Clock::duration>(
-        std::chrono::duration<double>(1.0 / 240.0));
-    const auto saturated = fastDisplay.schedule(start + 29000us, 240, 240, 2);
-    expect(saturated->presentAt == start + 43500us + 2 * fastPeriod,
-        "high-refresh GPU saturation lost its bounded overrun allowance");
-
-    // Healthy sources retain the earlier lead across refresh rates and
-    // multiplier changes: GPU-saturation headroom is not a blanket delay.
-    for (const double refresh : {60., 90., 120., 240.}) {
-        const auto step = std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double>(1.0 / refresh));
-        for (size_t batchSize = 2; batchSize <= 5; ++batchSize) {
-            OrderedPresentTimeline healthy;
-            const auto sourceStep = step * static_cast<int64_t>(batchSize);
-            healthy.observeSourceBatch(start, 0);
-            healthy.observeSourceBatch(start + sourceStep, 1);
-            healthy.observeSourceBatch(start + 2 * sourceStep, 2);
-            healthy.observeSourceBatch(start + 3 * sourceStep, 3);
-            const auto arrival = start + 3 * sourceStep;
-            const auto slot = healthy.schedule(arrival, refresh, refresh, batchSize);
-            expect(slot->presentAt == arrival + sourceStep + step,
-                "on-time source acquired unnecessary GPU-overrun latency");
-        }
-    }
-
+    // Closed loop: each application waits for its real image before supplying
+    // another batch. Source timing includes our lead. It must converge instead
+    // of multiplying that delay, with every output retaining a distinct slot.
     for (const double refresh : {30., 60., 90., 120., 240.}) {
-        OrderedPresentTimeline disabled;
-        const auto step = std::chrono::duration_cast<Clock::duration>(
+        const auto period = std::chrono::duration_cast<Clock::duration>(
             std::chrono::duration<double>(1.0 / refresh));
-        for (uint64_t serial = 0; serial < 120; ++serial) {
-            const auto now = start + step * serial;
-            disabled.observeSourceBatch(now, serial);
-            const auto slot = disabled.schedule(now, refresh, refresh, 1, false);
-            expect(slot->submitAt == now && slot->presentAt == now,
-                "bridge source observations delayed FG-off completion pacing");
+        for (size_t count = 2; count <= 5; ++count) {
+            Timeline timeline;
+            auto arrival = start;
+            auto completedReal = start;
+            uint32_t id = 0;
+            for (uint64_t batch = 0; batch < 80; ++batch) {
+                timeline.observeSourceBatch(arrival, batch);
+                const auto ready = arrival + period / 2;
+                auto last = arrival;
+                std::optional<Timeline::Slot> firstOutput;
+                uint32_t firstId{};
+                std::optional<Timeline::Slot> lastOutput;
+                for (size_t output = 0; output < count; ++output) {
+                    const auto slot = timeline.schedule(arrival, refresh, refresh, count);
+                    timeline.submitted(++id, slot->presentAt, slot->submitAt);
+                    if (output == 0) {
+                        firstOutput = slot;
+                        firstId = id;
+                    }
+                    expect(slot->presentAt > last,
+                        "completion-paced outputs lost ordering");
+                    // The real wait releases at compositor refresh, not at
+                    // an arbitrary requested timestamp between refreshes.
+                    const auto ticks = (slot->presentAt - start + period - 1ns) / period;
+                    const auto completed = start + period * ticks;
+                    if (batch > 0)
+                        expect(completed == completedReal + period *
+                                static_cast<int64_t>(output + 1),
+                            "serialized source missed a refresh through its own lead");
+                    last = completed;
+                    lastOutput = slot;
+                }
+                // Deliver readiness after the real output completes and the
+                // application's wait releases, before it begins the next batch.
+                timeline.feedback(firstId, firstOutput->presentAt,
+                    arrival + period, period - (ready - arrival));
+                timeline.feedback(id, lastOutput->presentAt,
+                    last, period / 2);
+                // Real-image waits can return at the latch before display.
+                completedReal = last;
+                arrival = last - period / 4;
+            }
         }
+    }
+
+    // Warm-up native output does not measure generated-batch readiness. Prime
+    // when generation first starts, but never re-prime every Fractional turn.
+    Timeline warmup;
+    warmup.observeSourceBatch(start, 1);
+    const auto native = warmup.schedule(start, 120, 120, 1);
+    warmup.submitted(1, native->presentAt, start);
+    warmup.feedback(1, native->presentAt, start + 1ms);
+    warmup.observeSourceBatch(start + 100ms, 2);
+    const auto generated = warmup.schedule(start + 100ms, 120, 120, 2);
+    expect(generated->presentAt == start + 100ms + 4 * tick,
+        "generation startup reused native-only readiness");
+    warmup.submitted(2, generated->presentAt, start + 100ms);
+    warmup.feedback(2, generated->presentAt, start + 105ms);
+    for (uint64_t batch = 3; batch < 12; ++batch) {
+        const auto now = start + 100ms * batch;
+        warmup.observeSourceBatch(now, batch);
+        const auto slot = warmup.schedule(now, 120, 120, batch % 2 ? 1 : 2);
+        expect(slot->presentAt == now + tick,
+            "Fractional batch alternation repeatedly primed readiness");
+        warmup.submitted(static_cast<uint32_t>(batch), slot->presentAt, now);
+        warmup.feedback(static_cast<uint32_t>(batch), slot->presentAt, now + 5ms);
+    }
+
+    // Asynchronous queued output has extra spacing ahead of its readiness
+    // lead. That owned spacing must be subtracted from the readiness sample.
+    Timeline queued;
+    queued.observeSourceBatch(start, 1);
+    const auto first = queued.schedule(start, 120, 120, 2);
+    queued.submitted(1, first->presentAt, start);
+    const auto real = queued.schedule(start, 120, 120, 2);
+    queued.submitted(2, real->presentAt, start);
+    queued.observeSourceBatch(start, 2);
+    const auto behind = queued.schedule(start, 120, 120, 2);
+    queued.submitted(3, behind->presentAt, behind->submitAt);
+    queued.feedback(3, behind->presentAt, behind->presentAt - tick);
+    queued.observeSourceBatch(start + 200ms, 3);
+    const auto afterQueue = queued.schedule(start + 200ms, 120, 120, 2);
+    expect(afterQueue->presentAt == start + 200ms + 3 * tick,
+        "queued output spacing was counted as GPU work");
+
+    // A separate presentation waiter releases a source-frame credit while
+    // the real output of the next batch is still pending. That tail is not
+    // a full batch of asynchronous work and must not impose the queue reserve.
+    for (size_t count = 2; count <= 5; ++count) {
+        Timeline occupancy;
+        occupancy.observeSourceBatch(start, 1);
+        auto previous = start;
+        for (size_t output = 0; output < count; ++output) {
+            const auto slot = occupancy.schedule(start, 120, 120, count);
+            occupancy.submitted(static_cast<uint32_t>(output + 1), slot->presentAt, start);
+            previous = slot->presentAt;
+            if (output + 1 < count)
+                occupancy.feedback(static_cast<uint32_t>(output + 1), previous, start + tick / 2);
+        }
+        const auto arrival = previous - 1ms;
+        occupancy.observeSourceBatch(arrival, 2);
+        const auto tail = occupancy.schedule(arrival, 120, 120, count);
+        expect(tail->presentAt == previous + tick,
+            "partial queued batch added a hold or lost its next ordered slot");
+        occupancy.submitted(static_cast<uint32_t>(count + 1), tail->presentAt, arrival);
+        // Keep the next batch pending without acknowledging the old real image.
+        for (size_t output = 1; output < count; ++output) {
+            const auto slot = occupancy.schedule(arrival, 120, 120, count);
+            occupancy.submitted(static_cast<uint32_t>(count + output + 1), slot->presentAt, arrival);
+        }
+        const auto nextArrival = previous + tick;
+        occupancy.observeSourceBatch(nextArrival, 3);
+        const auto queuedSlot = occupancy.schedule(nextArrival, 120, 120, count);
+        expect(queuedSlot->presentAt >= nextArrival + 3 * tick,
+            "fully queued asynchronous work lost its bounded reserve");
+        occupancy.submitted(static_cast<uint32_t>(2 * count + 1), queuedSlot->presentAt, nextArrival);
+        occupancy.feedback(static_cast<uint32_t>(2 * count + 1), queuedSlot->presentAt, nextArrival + tick / 2);
+        occupancy.observeSourceBatch(start + 200ms, 4);
+        expect(occupancy.schedule(start + 200ms, 120, 120, count)->presentAt == start + 200ms + tick,
+            "completion-paced source retained the asynchronous queue reserve");
+    }
+
+    // The next batch can be entirely pending when a separate waiter releases
+    // a credit. At depth two, adding a reserve here limits throughput even
+    // though every frame's CPU/GPU work fits inside the source budget.
+    for (size_t count = 2; count <= 5; ++count) {
+        Timeline pipeline;
+        pipeline.observeSourceBatch(start, 0);
+        const auto learned = pipeline.schedule(start, 120, 120, count);
+        pipeline.submitted(UINT32_MAX, learned->presentAt, start);
+        pipeline.feedback(UINT32_MAX, learned->presentAt, start + tick / 2);
+        const auto arrival = start + 200ms;
+        pipeline.observeSourceBatch(arrival, 1);
+        auto last = arrival;
+        for (size_t output = 0; output < count; ++output) {
+            const auto slot = pipeline.schedule(arrival, 120, 120, count);
+            pipeline.submitted(static_cast<uint32_t>(output), slot->presentAt, arrival);
+            last = slot->presentAt;
+        }
+        pipeline.observeSourceBatch(last - 1ms, 2);
+        expect(pipeline.schedule(last - 1ms, 120, 120, count)->presentAt == last + tick,
+            "one pending batch added a hold or lost its next ordered slot");
+    }
+
+    // FIFO eligibility includes older outputs. Remove their owned slots from
+    // the learned work allowance, but do not subtract spacing already removed
+    // by the desired-deadline correction a second time.
+    for (const auto arrivalGap : {1ms, 9ms}) {
+        Timeline fifo;
+        prime(fifo, 1, start, tick / 2);
+        const auto producer = start + 200ms;
+        fifo.observeSourceBatch(producer, 2);
+        const auto priorFirst = fifo.schedule(producer, 120, 120, 2);
+        fifo.submitted(2, priorFirst->presentAt, producer);
+        const auto priorReal = fifo.schedule(producer, 120, 120, 2);
+        fifo.submitted(3, priorReal->presentAt, producer);
+        const auto arrival = producer + arrivalGap;
+        fifo.observeSourceBatch(arrival, 3);
+        const auto first = fifo.schedule(arrival, 120, 120, 2);
+        fifo.submitted(4, first->presentAt, arrival);
+        const auto reserved = std::max(Clock::duration::zero(),
+            first->presentAt - arrival - tick);
+        const auto ownedHold = std::max(reserved, 2 * tick);
+        fifo.feedback(4, first->presentAt, arrival + ownedHold + tick / 2);
+        fifo.observeSourceBatch(start + 400ms, 4);
+        expect(fifo.schedule(start + 400ms, 120, 120, 2)->presentAt == start + 400ms + tick,
+            "FIFO occupancy was learned as GPU work or deducted twice");
+    }
+
+    // Rising GPU cost extends readiness immediately. Four recent batches
+    // retain that protection; one late output cannot lower the first deadline.
+    Timeline rising;
+    prime(rising, 1, start, tick);
+    prime(rising, 2, start + 200ms, 26ms);
+    rising.observeSourceBatch(start + 300ms, 3);
+    const auto expensive = rising.schedule(start + 300ms, 120, 120, 2);
+    expect(expensive->presentAt == start + 326ms,
+        "GPU readiness feedback did not extend the deadline");
+    rising.submitted(3, expensive->presentAt, expensive->submitAt);
+    const auto expensiveReal = rising.schedule(start + 300ms, 120, 120, 2);
+    rising.submitted(4, expensiveReal->presentAt, expensiveReal->submitAt);
+    rising.feedback(3, expensive->presentAt, start + 326ms);
+    rising.feedback(4, expensiveReal->presentAt, start + 327ms);
+    for (uint32_t id = 5; id < 9; ++id)
+        prime(rising, id, start + 200ms * id, tick);
+    rising.observeSourceBatch(start + 1900ms, 10);
+    expect(rising.schedule(start + 1900ms, 120, 120, 2)->presentAt ==
+            start + 1900ms + tick,
+        "recovered GPU work retained stale readiness");
+
+    // Compositors need not report a dropped first output. Later feedback must
+    // still correct that batch's first deadline rather than hide the miss.
+    Timeline dropped;
+    dropped.observeSourceBatch(start, 1);
+    const auto droppedFirst = dropped.schedule(start, 120, 120, 2);
+    dropped.submitted(UINT32_MAX, droppedFirst->presentAt, start);
+    const auto surviving = dropped.schedule(start, 120, 120, 2);
+    dropped.submitted(0, surviving->presentAt, start);
+    dropped.feedback(0, surviving->presentAt, start + 50ms);
+    dropped.observeSourceBatch(start + 200ms, 2);
+    expect(dropped.schedule(start + 200ms, 120, 120, 2)->presentAt == start + 250ms,
+        "dropped first output or protocol-ID wrap lost readiness feedback");
+
+    Timeline invalid;
+    invalid.observeSourceBatch(start, 1);
+    const auto initial = invalid.schedule(start, 120, 120, 2);
+    invalid.submitted(1, initial->presentAt, start);
+    invalid.feedback(99, initial->presentAt, start + tick);
+    invalid.feedback(1, initial->presentAt + 1ns, start + tick);
+    invalid.feedback(1, initial->presentAt, {});
+    invalid.feedback(1, initial->presentAt, start - 1ns);
+    invalid.feedback(1, initial->presentAt, start + 1s);
+    invalid.feedback(1, initial->presentAt, start + tick, -1ns);
+    invalid.feedback(1, initial->presentAt, start + tick, (start + tick).time_since_epoch());
+    invalid.observeSourceBatch(start + 200ms, 2);
+    expect(invalid.schedule(start + 200ms, 120, 120, 2)->presentAt ==
+            start + 200ms + 4 * tick,
+        "unmatched or invalid compositor feedback affected readiness");
+    // No feedback is bounded even after the fixed pending ring wraps.
+    for (uint64_t batch = 3; batch < 1000; ++batch) {
+        const auto now = start + 200ms * batch;
+        invalid.observeSourceBatch(now, batch);
+        const auto slot = invalid.schedule(now, 120, 120, 2);
+        invalid.submitted(static_cast<uint32_t>(batch), slot->presentAt, now);
+        expect(slot->presentAt == now + 4 * tick,
+            "missing feedback inflated bridge lead");
+    }
+    invalid.feedback(1, initial->presentAt, start + tick);
+
+    Timeline transitions;
+    prime(transitions, 1, start, 50ms);
+    transitions.observeSourceBatch(start + 100ms, 2);
+    const auto queuedBeforeOff = transitions.schedule(start + 100ms, 120, 120, 2);
+    const auto off = transitions.schedule(start + 101ms, 120, 120, 1, false);
+    expect(off->presentAt > queuedBeforeOff->presentAt &&
+            off->presentAt - off->submitAt == tick,
+        "FG off discarded queued order or retained generated readiness");
+    transitions.observeSourceBatch(start + 300ms, 3);
+    expect(transitions.schedule(start + 300ms, 120, 120, 2)->presentAt ==
+            start + 300ms + 4 * tick,
+        "FG re-enable reused stale feedback");
+    prime(transitions, 4, start + 500ms, tick);
+    transitions.observeSourceBatch(start + 3s, 5);
+    expect(transitions.schedule(start + 3s, 120, 120, 2)->presentAt ==
+            start + 3s + 2 * tick,
+        "long pause lost its bounded recovery reserve");
+
+    // A pause can drain the old queue without its feedback being consumed.
+    // Retire those IDs and prime recovery once. Native history warm-up must
+    // not release the allowance before generation resumes, nor add a second
+    // startup hold. Fresh samples age the recovery allowance out naturally.
+    for (const auto cost : {tick, 3 * tick}) {
+        Timeline paused;
+        prime(paused, 1, start, cost);
+        const auto beforePause = start + 100ms;
+        paused.observeSourceBatch(beforePause, 2);
+        auto old = paused.schedule(beforePause, 120, 120, 2);
+        paused.submitted(2, old->presentAt, beforePause);
+        for (uint32_t id = 3; id <= 6; ++id) {
+            const auto slot = paused.schedule(beforePause, 120, 120, 2);
+            paused.submitted(id, slot->presentAt, slot->submitAt);
+        }
+        // More native-only frames than the readiness window, including a
+        // second pause, must not consume the generated recovery allowance.
+        for (uint32_t batch = 3; batch <= 16; ++batch) {
+            const auto now = start + 2s + 100ms * (batch - 3) +
+                (batch >= 9 ? 2s : 0s);
+            paused.observeSourceBatch(now, batch);
+            // Late feedback from before the pause must not contaminate the
+            // retained estimate or the new queue's completion accounting.
+            paused.feedback(2, old->presentAt, beforePause + 90ms);
+            const auto slot = paused.schedule(now, 120, 120, batch >= 11 ? 2 : 1);
+            const auto expected = batch < 7 ? cost : batch < 11 ? tick :
+                batch < 15 ? std::max(cost, 2 * tick) : tick;
+            expect(slot->presentAt == now + expected,
+                "pause warm-up released recovery lead early or re-primed generation");
+            paused.submitted(batch + 4, slot->presentAt, now);
+            paused.feedback(batch + 4, slot->presentAt, now + tick / 2);
+        }
+        const auto backwards = start + 1s;
+        paused.observeSourceBatch(backwards, 17);
+        // Deadlines remain ordered, but the old cost must be invalidated.
+        const auto fresh = start + 8s;
+        paused.observeSourceBatch(fresh, 18);
+        expect(paused.schedule(fresh, 120, 120, 2)->presentAt == fresh + 4 * tick,
+            "clock reset retained an invalid readiness estimate");
     }
 }
 
@@ -537,7 +728,7 @@ int main() {
     testFractionalUsesExistingSourceDeadline();
     testSmoothCadenceCapFollowsActivePlan();
     testOrderedPresentationTimeline();
-    testBridgeSourceBatchReadiness();
+    testBridgeCompositorReadiness();
     testOrderedAcquireUsesExplicitFailureOnly();
     testOrderedAcquireBackoffAndProbeAreFinite();
     testExternalInterruptionDiscardsOldFailure();

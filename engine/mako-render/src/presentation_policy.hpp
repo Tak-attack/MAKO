@@ -884,22 +884,11 @@ namespace mako::layer {
         size_t totalRecoveries{0};
     };
 
-    /// Spaces the private bridge's compositor commits without waiting for a
-    /// lower Wayland FIFO callback. Allow at least two refresh periods or one
-    /// admitted output batch for asynchronous generated work to become ready.
-    /// Isolated-bridge source observations extend this to at least three
-    /// refreshes, or the recent source-batch interval plus one refresh. A
-    /// GPU-bound source also reserves its output-budget overrun, capped at
-    /// one extra refresh; on-time sources need no additional allowance.
-    /// A future deadline alone is not GPU-readiness proof: shortening this
-    /// lead can let both outputs become ready after their deadlines and be
-    /// coalesced by the compositor, even with healthy present-call counts.
-    /// Explicitly disabled generation needs no batch lead: an application that
-    /// waits for presentation must remain able to submit once per refresh.
-    /// Bound submission to that lead plus one refresh period; larger batches cannot
-    /// accumulate an unbounded queue, and unused configured capacity adds none.
-    /// Keep the last deadline across live changes: already queued images must
-    /// not be overtaken. A late frame rebases instead of accruing catch-up debt.
+    /// Spaces ordered compositor commits without a lower Wayland FIFO wait.
+    /// The isolated bridge learns readiness from its own compositor feedback,
+    /// never from source-frame intervals (which include application waits).
+    /// Full WSI, without bridge observations, retains its fixed batch lead.
+    /// Deadlines remain ordered across changes and submission stays bounded.
     class OrderedPresentTimeline {
     public:
         using Clock = std::chrono::steady_clock;
@@ -913,28 +902,108 @@ namespace mako::layer {
             return std::isfinite(fps) && fps >= 1.0 && fps <= 1000.0;
         }
 
-        /// The isolated bridge can enqueue outputs before asynchronous GPU
-        /// work finishes. Observe each source batch once, not each generated
-        /// output. The shorter of the last two intervals extends readiness
-        /// without letting a lone CPU hitch inflate an established estimate.
-        /// Loading stalls reset this estimate without discarding queued slots.
+        /// Identify one generated batch. A pause retires old feedback and
+        /// primes recovery once; native history warm-up must not prime a
+        /// second startup delay when the known generated batch resumes.
         void observeSourceBatch(const TimePoint now, const uint64_t serial) {
             if (this->lastBatchSerial == serial)
                 return;
+            if (this->lastBatchAt) {
+                if (now <= *this->lastBatchAt)
+                    this->resetReadiness();
+                else if (now - *this->lastBatchAt > std::chrono::seconds(1)) {
+                    this->clearPending();
+                    if (!this->primeRecovery) {
+                        this->recoveryReadiness = this->readinessCount
+                            ? std::optional{*std::max_element(this->readiness.begin(),
+                                this->readiness.begin() + this->readinessCount)}
+                            : std::nullopt;
+                    }
+                    this->primeRecovery = true;
+                }
+            }
             this->lastBatchSerial = serial;
-            const auto elapsed = this->lastBatchAt
-                ? now - *this->lastBatchAt : Clock::duration::zero();
             this->lastBatchAt = now;
-            if (elapsed > Clock::duration::zero() &&
-                    elapsed <= std::chrono::milliseconds(100)) {
-                this->batchInterval = std::min(elapsed,
-                    this->previousBatchInterval.value_or(elapsed));
-                this->previousBatchInterval = elapsed;
-                this->sourceIntervals = std::min(this->sourceIntervals + 1, 3u);
-            } else {
-                this->batchInterval = Clock::duration::zero();
-                this->previousBatchInterval.reset();
-                this->sourceIntervals = 0;
+            this->batchIndex = (this->batchIndex + 1) % this->pending.size();
+            this->pending[this->batchIndex] = {};
+            this->queuedOutputs = this->submittedOutputs - this->completedOutputs;
+        }
+
+        /// Record only this owner's protocol IDs, after submission backpressure.
+        /// Fixed storage also bounds sessions with absent/dropped feedback.
+        void submitted(const uint32_t id, const TimePoint desired,
+                const TimePoint submittedAt) {
+            if (!this->lastBatchSerial || !this->generationEnabled)
+                return;
+            auto& batch = this->pending[this->batchIndex];
+            if (batch.count == batch.desired.size())
+                return;
+            if (batch.count == 0) {
+                batch.firstId = id;
+                batch.firstSubmission = this->submittedOutputs + 1;
+                batch.lead = this->scheduledLead;
+                batch.refreshPeriod = this->scheduledRefreshPeriod;
+                // FIFO eligibility can include slots belonging to earlier
+                // batches. Those slots already constrain the next deadline;
+                // they are not additional GPU work for this batch.
+                batch.queuedDuration = this->scheduledInterval * static_cast<int64_t>(
+                    std::min<uint64_t>(this->submittedOutputs - this->completedOutputs,
+                        GeneratedFramePlan::capacity + 1));
+                batch.submittedAt = submittedAt;
+            } else if (id != batch.firstId + static_cast<uint32_t>(batch.count)) {
+                return;
+            }
+            batch.desired[batch.count++] = desired;
+            ++this->submittedOutputs;
+        }
+
+        /// Gamescope reports when a ready output was first eligible to latch,
+        /// separately from the requested hold. Correct the lead
+        /// by that difference: using submission-to-feedback elapsed time would
+        /// count our already queued output spacing as new GPU work.
+        /// Use the first feedback received for each batch. If an earlier output
+        /// was dropped, a later output still supplies readiness evidence for
+        /// the batch's first deadline; later outputs cannot shrink its budget.
+        void feedback(const uint32_t id, const TimePoint desired,
+                const TimePoint earliest, const Clock::duration margin = {}) {
+            for (auto& batch : this->pending) {
+                const auto index = static_cast<uint32_t>(id - batch.firstId);
+                if (index >= batch.count || batch.desired[index] != desired)
+                    continue;
+                // Completion is acknowledged at the compositor latch, which
+                // can precede the predicted display timestamp. Every matched
+                // output advances completion, even after this batch supplied
+                // its readiness sample or if optional readiness is absent.
+                // An acknowledged ordered output retires its prefix, including
+                // dropped outputs. Use owned ordinals, not wrapping protocol IDs
+                // or the future display timestamp, to measure queue depth.
+                this->completedOutputs = std::max(this->completedOutputs,
+                    batch.firstSubmission + index);
+                if (margin < Clock::duration::zero() || earliest <= TimePoint{} ||
+                        margin >= earliest.time_since_epoch())
+                    return;
+                const auto readyAt = earliest - margin;
+                if (batch.observed || readyAt < batch.submittedAt ||
+                        readyAt - batch.submittedAt > maximumReadiness)
+                    return;
+                batch.observed = true;
+                // Preserve half the latch-to-refresh room for dispatch jitter.
+                // The full margin can ratchet deadlines into another refresh.
+                // Queued GPU work has its separate bounded reserve below.
+                const auto allowance = std::min(margin, batch.refreshPeriod) / 2;
+                const auto reservedSpacing = std::max(Clock::duration::zero(),
+                    batch.desired[0] - batch.submittedAt - batch.lead);
+                const auto queuedHold = std::max(Clock::duration::zero(),
+                    batch.queuedDuration - reservedSpacing);
+                const auto sample = std::max(Clock::duration::zero(),
+                    batch.lead + (readyAt - batch.desired[0]) + allowance - queuedHold);
+                if (sample > maximumReadiness)
+                    return;
+                this->readiness[this->readinessIndex] = sample;
+                this->readinessIndex = (this->readinessIndex + 1) % this->readiness.size();
+                this->readinessCount = std::min(this->readinessCount + 1,
+                    this->readiness.size());
+                return;
             }
         }
 
@@ -946,6 +1015,15 @@ namespace mako::layer {
                     outputBatchSize == 0 ||
                     outputBatchSize > GeneratedFramePlan::capacity + 1)
                 return std::nullopt;
+            // Warm-up can learn native-only readiness before generation starts.
+            // Prime once when a larger admitted batch first appears. Retain the
+            // high-water mark across Fractional small/large alternation so it
+            // cannot repeatedly impose startup latency.
+            if (this->lastBatchSerial && generationEnabled &&
+                    outputBatchSize > this->readinessBatchCapacity) {
+                this->resetReadiness();
+                this->readinessBatchCapacity = outputBatchSize;
+            }
             const auto period = [](const double fps) {
                 return std::chrono::duration_cast<Clock::duration>(
                     std::chrono::duration<double>(1.0 / fps));
@@ -953,39 +1031,50 @@ namespace mako::layer {
             const auto refreshPeriod = period(refreshFps);
             const auto interval = period(std::min(outputFps, refreshFps));
             const auto batchDuration = interval * static_cast<int64_t>(outputBatchSize);
-            const auto sourceOverrun = std::max(Clock::duration::zero(),
-                this->batchInterval - batchDuration);
-            // React to a source-cost jump before the two-interval filter
-            // confirms it, but do not extend the queue for sub-refresh
-            // jitter. Reserve at most one refresh, never the full hitch.
-            const auto unconfirmedRise =
-                this->previousBatchInterval.value_or(this->batchInterval) -
-                    this->batchInterval;
-            const auto abruptRise = unconfirmedRise > refreshPeriod
-                ? refreshPeriod : Clock::duration::zero();
-            // The first interval can be optimistic while the GPU queue fills.
-            // Keep one startup refresh until both retained intervals follow
-            // that first interval. The same bounded priming follows stalls
-            // and live re-enabling; it does not delay explicit FG-off output.
-            const auto minimumReadiness =
-                (this->sourceIntervals < 3 ? 4 : 3) * refreshPeriod;
-            const auto readiness = this->lastBatchSerial
-                ? std::max(minimumReadiness, this->batchInterval + refreshPeriod +
-                    std::min(refreshPeriod, sourceOverrun) + abruptRise)
-                : 2 * refreshPeriod;
+            // Apply the retained work estimate when generated work resumes.
+            // Native history/relief can last longer than the sample window;
+            // it must neither consume this allowance nor inherit extra lead.
+            if (this->primeRecovery && outputBatchSize > 1 && generationEnabled) {
+                this->readiness[0] = std::max(
+                    this->recoveryReadiness.value_or(Clock::duration::zero()),
+                    std::min((this->recoveryReadiness ? 2 : 4) * refreshPeriod,
+                        Clock::duration(maximumReadiness)));
+                this->readinessCount = 1;
+                this->readinessIndex = 1;
+                this->primeRecovery = false;
+                this->recoveryReadiness.reset();
+            }
+            // Four refreshes prime unknown asynchronous work. Observed ready
+            // batches can release that allowance; CPU pacing cannot enlarge it.
+            const auto measuredReadiness = this->readinessCount
+                ? *std::max_element(this->readiness.begin(),
+                    this->readiness.begin() + this->readinessCount)
+                : std::min(4 * refreshPeriod, Clock::duration(maximumReadiness));
+            // A threaded presentation waiter releases source credit while
+            // another batch is pending. Its deadlines already reserve those
+            // slots; a second refresh of lead consumes the next frame's work
+            // budget. Keep one refresh of dispatch room for shallow queues,
+            // measured readiness when larger, and three for deeper queues.
+            const auto reserve = (this->queuedOutputs <= outputBatchSize ? 1 : 3)
+                * refreshPeriod;
+            const auto bridgeReadiness = std::max(measuredReadiness,
+                std::min(reserve, Clock::duration(maximumReadiness)));
             const auto lead = generationEnabled
-                ? std::max(readiness, batchDuration)
+                ? (this->lastBatchSerial ? bridgeReadiness :
+                    std::max(2 * refreshPeriod, batchDuration))
                 : Clock::duration::zero();
             const auto next = this->lastPresentAt
                 ? *this->lastPresentAt + interval : now;
             const auto presentAt = std::max(now + lead, next);
             this->lastPresentAt = presentAt;
-            if (!generationEnabled) {
+            this->scheduledLead = lead;
+            this->scheduledRefreshPeriod = refreshPeriod;
+            this->scheduledInterval = interval;
+            if (!generationEnabled && this->generationEnabled) {
+                this->resetReadiness();
                 this->lastBatchAt.reset();
-                this->previousBatchInterval.reset();
-                this->batchInterval = Clock::duration::zero();
-                this->sourceIntervals = 0;
             }
+            this->generationEnabled = generationEnabled;
             return Slot{
                 .submitAt = std::max(now, presentAt - lead - refreshPeriod),
                 .presentAt = presentAt,
@@ -993,12 +1082,52 @@ namespace mako::layer {
         }
 
     private:
+        void resetReadiness() {
+            this->clearPending();
+            this->readinessCount = 0;
+            this->readinessIndex = 0;
+            this->readinessBatchCapacity = 0;
+            this->primeRecovery = false;
+            this->recoveryReadiness.reset();
+        }
+
+        void clearPending() {
+            this->pending = {};
+            this->submittedOutputs = 0;
+            this->completedOutputs = 0;
+            this->queuedOutputs = 0;
+        }
+
+        static constexpr auto maximumReadiness = std::chrono::milliseconds(100);
+        struct PendingBatch {
+            uint32_t firstId{};
+            uint64_t firstSubmission{};
+            size_t count{};
+            std::array<TimePoint, GeneratedFramePlan::capacity + 1> desired{};
+            TimePoint submittedAt{};
+            Clock::duration lead{};
+            Clock::duration refreshPeriod{};
+            Clock::duration queuedDuration{};
+            bool observed{};
+        };
         std::optional<TimePoint> lastPresentAt;
         std::optional<uint64_t> lastBatchSerial;
         std::optional<TimePoint> lastBatchAt;
-        std::optional<Clock::duration> previousBatchInterval;
-        Clock::duration batchInterval{};
-        unsigned sourceIntervals{};
+        std::array<PendingBatch, 16> pending{};
+        size_t batchIndex{};
+        std::array<Clock::duration, 4> readiness{};
+        size_t readinessIndex{};
+        size_t readinessCount{};
+        size_t readinessBatchCapacity{};
+        Clock::duration scheduledLead{};
+        Clock::duration scheduledRefreshPeriod{};
+        Clock::duration scheduledInterval{};
+        uint64_t submittedOutputs{};
+        uint64_t completedOutputs{};
+        uint64_t queuedOutputs{};
+        bool generationEnabled{};
+        bool primeRecovery{};
+        std::optional<Clock::duration> recoveryReadiness;
     };
 
     /// Limits application presents before frame-generation policy observes
