@@ -155,6 +155,22 @@ namespace mako::layer {
         };
     }
 
+    /// Only MAKO's internal HDR display resize changes the sharpener footprint.
+    /// Explicit scaling and native-sized/SDR paths retain their existing shader
+    /// sampling. The decision uses admitted extents, not requested geometry.
+    [[nodiscard]] constexpr bool hdrBridgeSharpenSourceRequired(
+            const bool hdrDisplayResize, const bool spatialScalingActive,
+            const VkExtent2D source, const VkExtent2D presentation) noexcept {
+        return hdrDisplayResize && spatialScalingActive &&
+            source.width > 0 && source.height > 0 &&
+            presentation.width > source.width &&
+            presentation.height > source.height &&
+            uint64_t{source.width} * presentation.height ==
+                uint64_t{source.height} * presentation.width &&
+            double(presentation.width) / source.width <=
+                ls::GameConfLimits::maximumScalingFactor;
+    }
+
     /// One coherent policy snapshot used for a fixed-surface capability query.
     /// The revision changes only when scaler activity, process support, or the
     /// factor changes. Native Resolution and changes between active scaler

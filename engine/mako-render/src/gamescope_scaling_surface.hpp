@@ -164,8 +164,20 @@ namespace mako::layer {
         [[nodiscard]] std::optional<std::vector<VkSurfaceFormatKHR>> applicationFormats(
             VkPhysicalDevice physicalDevice, VkSurfaceKHR surface,
             PFN_vkGetPhysicalDeviceSurfaceFormatsKHR lowerFormats) const;
+        /// Preserve formats2 input constraints and per-format compression
+        /// properties while applying the same X11/HDR exposure policy.
+        /// nullopt retains lower dispatch for unowned/unsupported queries.
+        [[nodiscard]] std::optional<VkResult> applicationFormats2(
+            VkPhysicalDevice physicalDevice,
+            const VkPhysicalDeviceSurfaceInfo2KHR& info, uint32_t* count,
+            VkSurfaceFormat2KHR* formats,
+            PFN_vkGetPhysicalDeviceSurfaceFormats2KHR lowerFormats) const;
 
     private:
+        using FormatQuery = std::function<
+            std::optional<std::vector<VkSurfaceFormatKHR>>(VkSurfaceKHR)>;
+        [[nodiscard]] std::optional<std::vector<VkSurfaceFormatKHR>>
+            applicationFormats(VkSurfaceKHR surface, const FormatQuery& query) const;
         struct Impl;
         std::unique_ptr<Impl> impl;
     };

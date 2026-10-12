@@ -8,11 +8,19 @@ The package includes the CLI, launcher, Qt UI, diagnostics helper, and 64-bit/32
 
 ## Install the release package
 
-An `x86_64` Arch Linux system with the multilib repository enabled is required because one package carries both the 64-bit and 32-bit Vulkan layers and their runtime dependencies. Download `mako-renderer-bin-X.Y.Z-1-x86_64.pkg.tar.zst` from the matching MAKO Renderer GitHub release and install it with:
+An `x86_64` Arch Linux system with the multilib repository enabled is required because one package carries both the 64-bit and 32-bit Vulkan layers and their runtime dependencies. Download `mako-renderer-bin-X.Y.Z-1-x86_64.pkg.tar.zst` from the matching MAKO Renderer GitHub release and leave it unextracted. Open a terminal in the folder containing the downloaded file, then run the following command, replacing the example filename with the exact downloaded filename:
 
 ```bash
 sudo pacman -U ./mako-renderer-bin-X.Y.Z-1-x86_64.pkg.tar.zst
 ```
+
+The `./` prefix means the terminal's current folder; this command does not download the package. You can instead use the file's full path. For example, if you saved it in `Downloads`, replace the example filename below with the downloaded filename:
+
+```bash
+sudo pacman -U "$HOME/Downloads/mako-renderer-bin-X.Y.Z-1-x86_64.pkg.tar.zst"
+```
+
+If pacman reports `could not find or read package`, check that the file exists at the path you supplied and that its filename matches exactly. Download it again if it was deleted or the download did not finish. Reinstalling after removal uses the same steps.
 
 Pacman verifies the package database transaction, installs the declared dependencies, owns every installed path, and runs the non-mutating coexistence report. The GitHub release records the package's SHA-256 in its release notes and the repository's release metadata.
 

@@ -894,12 +894,20 @@ std::optional<std::vector<VkSurfaceFormatKHR>>
 GamescopeScalingSurface::applicationFormats(
         const VkPhysicalDevice physicalDevice, const VkSurfaceKHR surface,
         const PFN_vkGetPhysicalDeviceSurfaceFormatsKHR lowerFormats) const {
+    return applicationFormats(surface, [&](const VkSurfaceKHR queriedSurface) {
+        return enumerateFormats(physicalDevice, queriedSurface, lowerFormats);
+    });
+}
+
+std::optional<std::vector<VkSurfaceFormatKHR>>
+GamescopeScalingSurface::applicationFormats(
+        const VkSurfaceKHR surface, const FormatQuery& query) const {
     const std::lock_guard lock(impl->mutex);
     const auto found = impl->surfaces.find(surface);
-    if (found == impl->surfaces.end() || !lowerFormats)
+    if (found == impl->surfaces.end())
         return std::nullopt;
     auto& state = *found->second;
-    const auto waylandFormats = enumerateFormats(physicalDevice, surface, lowerFormats);
+    const auto waylandFormats = query(surface);
     if (!waylandFormats)
         return std::nullopt;
 
@@ -940,7 +948,7 @@ GamescopeScalingSurface::applicationFormats(
         PFN_vkDestroySurfaceKHR destroy;
         ~NativeSurfaceGuard() { destroy(instance, surface, nullptr); }
     } nativeGuard{state.instance, nativeSurface, destroy};
-    const auto nativeFormats = enumerateFormats(physicalDevice, nativeSurface, lowerFormats);
+    const auto nativeFormats = query(nativeSurface);
     if (!nativeFormats)
         return std::nullopt;
 
@@ -995,6 +1003,100 @@ GamescopeScalingSurface::applicationFormats(
                   << '\n';
     }
     return exposed;
+}
+
+std::optional<VkResult> GamescopeScalingSurface::applicationFormats2(
+        const VkPhysicalDevice physicalDevice,
+        const VkPhysicalDeviceSurfaceInfo2KHR& info, uint32_t* count,
+        VkSurfaceFormat2KHR* output,
+        const PFN_vkGetPhysicalDeviceSurfaceFormats2KHR lowerFormats) const {
+    if (!count || !lowerFormats)
+        return std::nullopt;
+    bool compressionRequested{};
+    if (output) {
+        for (uint32_t i = 0; i < *count; ++i) {
+            const auto* node = static_cast<const VkBaseOutStructure*>(output[i].pNext);
+            if (!node)
+                continue;
+            // This is the only defined SurfaceFormat2 output extension.
+            // Unknown future chains retain driver dispatch without mutation.
+            if (node->sType != VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_PROPERTIES_EXT || node->pNext)
+                return std::nullopt;
+            compressionRequested = true;
+        }
+    }
+    std::vector<VkSurfaceFormatKHR> waylandFormats;
+    std::vector<VkImageCompressionPropertiesEXT> waylandCompression;
+    const auto exposed = applicationFormats(info.surface,
+        [&](const VkSurfaceKHR surface) -> std::optional<std::vector<VkSurfaceFormatKHR>> {
+            auto queriedInfo = info;
+            queriedInfo.surface = surface;
+            for (uint32_t attempt = 0; attempt < 3; ++attempt) {
+                uint32_t available{};
+                if (lowerFormats(physicalDevice, &queriedInfo, &available, nullptr) != VK_SUCCESS ||
+                        available == 0 || available > 256)
+                    return std::nullopt;
+                std::vector<VkSurfaceFormat2KHR> formats(available,
+                    {.sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR});
+                std::vector<VkImageCompressionPropertiesEXT> compression;
+                if (compressionRequested && surface == info.surface) {
+                    compression.resize(available,
+                        {.sType = VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_PROPERTIES_EXT});
+                    for (uint32_t i = 0; i < available; ++i)
+                        formats[i].pNext = &compression[i];
+                }
+                const auto result = lowerFormats(physicalDevice, &queriedInfo,
+                    &available, formats.data());
+                if (result == VK_SUCCESS && available <= formats.size()) {
+                    std::vector<VkSurfaceFormatKHR> pairs;
+                    pairs.reserve(available);
+                    for (uint32_t i = 0; i < available; ++i)
+                        pairs.push_back(formats[i].surfaceFormat);
+                    if (compressionRequested && surface == info.surface) {
+                        waylandFormats = pairs;
+                        waylandCompression = std::move(compression);
+                    }
+                    return pairs;
+                }
+                if (result != VK_INCOMPLETE)
+                    return std::nullopt;
+            }
+            return std::nullopt;
+        });
+    if (!exposed)
+        return std::nullopt;
+    if (!output) {
+        *count = static_cast<uint32_t>(exposed->size());
+        return VK_SUCCESS;
+    }
+    const uint32_t written = std::min(*count, static_cast<uint32_t>(exposed->size()));
+    // Resolve properties before touching caller output. HDR pairs use the
+    // identical lower storage format with the bridge's normalized sRGB tag.
+    std::vector<size_t> compressionIndices;
+    if (compressionRequested) {
+        compressionIndices.reserve(written);
+        for (uint32_t i = 0; i < written; ++i) {
+            const auto& pair = (*exposed)[i];
+            const auto found = std::ranges::find_if(waylandFormats, [&](const auto& lower) {
+                return (lower.format == pair.format || lower.format == VK_FORMAT_UNDEFINED) &&
+                    lower.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+            });
+            if (found == waylandFormats.end())
+                return std::nullopt;
+            compressionIndices.push_back(static_cast<size_t>(found - waylandFormats.begin()));
+        }
+    }
+    for (uint32_t i = 0; i < written; ++i) {
+        output[i].surfaceFormat = (*exposed)[i];
+        if (output[i].pNext) {
+            auto& properties = *static_cast<VkImageCompressionPropertiesEXT*>(output[i].pNext);
+            const auto& lower = waylandCompression[compressionIndices[i]];
+            properties.imageCompressionFlags = lower.imageCompressionFlags;
+            properties.imageCompressionFixedRateFlags = lower.imageCompressionFixedRateFlags;
+        }
+    }
+    *count = written;
+    return written < exposed->size() ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
 VkResult GamescopeScalingSurface::prepareSwapchain(

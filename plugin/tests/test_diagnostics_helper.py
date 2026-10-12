@@ -40,6 +40,7 @@ MAKO Renderer: swapchain colour pipeline: format=64; color-space=1000104008; mod
 MAKO Renderer: HDR generation precision: reduced_requested=1; model_space=pq-code-values; pq_conversion=0; requested_flow_scale=0.8; motion_flow_scale=0.4; motion_width=1024; motion_height=576
 MAKO Renderer: HDR scaling precision: input_format=64; output_format=97; compact_input=1
 MAKO Renderer: HDR shader precision: reduced=1; request_accepted=1
+MAKO Renderer: HDR shader source footprint: source=2560x1440; output=3840x2160; accepted=1
 MAKO Renderer: HDR10 transport: mode=packed-10-bit; nominal_bytes=16384000; nominal_bytes_saved=16384000; application_device_supported=1; backend_device_supported=1
 MAKO Renderer: Gamescope application HDR feedback stabilized: active=1; contexts_pending_recreation=1
 MAKO Renderer: Gamescope presentation feedback initialized: vrr_enabled=1; vrr_capable=1; vrr_active=1; allow_tearing=0
@@ -352,6 +353,7 @@ class DiagnosticsHelperTests(unittest.TestCase):
         self.assertIn("HDR10 transport: mode=packed-10-bit", result.stdout)
         self.assertIn("HDR scaling precision: input_format=64", result.stdout)
         self.assertIn("HDR shader precision: reduced=1", result.stdout)
+        self.assertIn("HDR shader source footprint: source=2560x1440", result.stdout)
         self.assertIn("HDR generation precision: reduced_requested=1", result.stdout)
         self.assertIn("motion_flow_scale=0.4; motion_width=1024; motion_height=576", result.stdout)
         self.assertIn("nominal_bytes_saved=16384000", result.stdout)
@@ -655,6 +657,7 @@ class DiagnosticsHelperTests(unittest.TestCase):
         self.assertIn("HDR10 transport: mode=packed-10-bit", result.stdout)
         self.assertIn("HDR scaling precision: input_format=64", result.stdout)
         self.assertIn("HDR shader precision: reduced=1", result.stdout)
+        self.assertIn("HDR shader source footprint: source=2560x1440", result.stdout)
         self.assertIn("HDR generation precision: reduced_requested=1", result.stdout)
         self.assertIn("motion_flow_scale=0.4; motion_width=1024; motion_height=576", result.stdout)
 

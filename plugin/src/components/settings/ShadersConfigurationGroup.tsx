@@ -509,6 +509,7 @@ export function ShadersConfigurationGroup({
           <PanelSectionRow>
             <Field
               label={t("CONFIG_VKBASALT_ANTIALIASING", "Anti-aliasing")}
+              bottomSeparator="none"
               description={t(
                 "CONFIG_VKBASALT_ANTIALIASING_DESC",
                 "Optionally smooth jagged edges before sharpening. FXAA is lighter and softer; SMAA is more selective and may cost more GPU time.",

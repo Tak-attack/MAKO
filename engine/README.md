@@ -30,11 +30,13 @@ MAKO Decky is the recommended SteamOS path. Install its ZIP, open **MAKO Decky**
 
 ### Arch Linux package
 
-On a writable x86_64 Arch Linux system with the multilib repository enabled, download the matching `.pkg.tar.zst` release asset and install it with:
+On a writable x86_64 Arch Linux system with the multilib repository enabled, download the matching `.pkg.tar.zst` release asset and leave it unextracted. Open a terminal in the folder containing the downloaded file, then run this command with the exact downloaded filename:
 
 ```bash
 sudo pacman -U ./mako-renderer-bin-X.Y.Z-1-x86_64.pkg.tar.zst
 ```
+
+The `./` prefix refers to the terminal's current folder; the command does not download the package. If the file is elsewhere, use its full path instead.
 
 See the [Arch guide](dist/arch/README.md#install-the-release-package) for launch options, upgrades, removal, and user-local installation conflicts.
 

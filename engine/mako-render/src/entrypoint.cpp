@@ -1983,22 +1983,28 @@ namespace {
                 "vkGetPhysicalDeviceSurfaceFormats2KHR"));
         if (!lower)
             return VK_ERROR_EXTENSION_NOT_PRESENT;
-        // Per-format output chains and input mode constraints belong to the
-        // driver. Only the ordinary format/color-space list is virtualized.
         bool plainFormats = !surfaceInfo->pNext;
         if (formats) {
             for (uint32_t i = 0; i < *count; ++i)
                 plainFormats = plainFormats && !formats[i].pNext;
         }
         try {
-            if (plainFormats && instance_info->scalingSurfaces) {
-                const auto applicationFormats =
-                    instance_info->scalingSurfaces->applicationFormats(
-                        physicalDevice, surfaceInfo->surface,
-                        instance_info->funcs.GetPhysicalDeviceSurfaceFormatsKHR);
-                if (applicationFormats)
-                    return copyApplicationSurfaceFormats(*applicationFormats,
-                        count, formats);
+            if (instance_info->scalingSurfaces) {
+                // Keep ordinary queries on their existing allocation/query
+                // path. Extended queries need their own lower constraints.
+                if (plainFormats) {
+                    const auto applicationFormats =
+                        instance_info->scalingSurfaces->applicationFormats(
+                            physicalDevice, surfaceInfo->surface,
+                            instance_info->funcs.GetPhysicalDeviceSurfaceFormatsKHR);
+                    if (applicationFormats)
+                        return copyApplicationSurfaceFormats(*applicationFormats, count, formats);
+                } else {
+                    const auto result = instance_info->scalingSurfaces->applicationFormats2(
+                        physicalDevice, *surfaceInfo, count, formats, lower);
+                    if (result)
+                        return *result;
+                }
             }
         } catch (const std::bad_alloc&) {
             return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -2642,6 +2648,31 @@ namespace {
                     );
                 }
             };
+
+            // The internal HDR resize must not shrink CAS/DLS from one source
+            // pixel to one display pixel. Hand off admitted source geometry
+            // before vkBasalt exposes images and builds its immutable graph.
+            if (hdrBridgeSharpenSourceRequired(
+                    modification.hdrDisplayResize,
+                    modification.spatialScalingActive,
+                    modification.applicationExtent,
+                    modification.presentationExtent)) {
+                using SetSharpenSource = VkBool32 (VKAPI_PTR *)(
+                    VkDevice, VkSwapchainKHR, uint32_t, uint32_t);
+                const auto setSharpenSource = reinterpret_cast<SetSharpenSource>(
+                    instance_info->funcs.GetDeviceProcAddr(device,
+                        "makoSetSwapchainSharpenSourceExtentV1"));
+                if (setSharpenSource) {
+                    const auto source = modification.applicationExtent;
+                    const auto accepted = setSharpenSource(
+                        device, *swapchain, source.width, source.height);
+                    std::cerr << "MAKO Renderer: HDR shader source footprint: "
+                              << "source=" << source.width << 'x' << source.height
+                              << "; output=" << modification.presentationExtent.width
+                              << 'x' << modification.presentationExtent.height
+                              << "; accepted=" << accepted << '\n';
+                }
+            }
 
             // get all swapchain images
             uint32_t imageCount{};

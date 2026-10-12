@@ -407,7 +407,7 @@
   "LOSSLESS_WARNING_OPEN_STEAM": "Steam에서 Lossless Scaling 열기",
   "LOSSLESS_WARNING_INSTALL_ACTION": "설치",
   "POWER_SEPARATE": "전원별 설정",
-  "POWER_EDIT_MODE": "Editing settings for",
+  "POWER_EDIT_MODE": "설정 대상",
   "POWER_SHARED": "기본 설정",
   "POWER_HANDHELD": "Handheld (Battery)",
   "POWER_DOCKED": "Docked (AC Power)",

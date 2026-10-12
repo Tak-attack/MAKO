@@ -47,7 +47,7 @@ If the command is missing, select **Install MAKO Renderer** in Decky and retry. 
 
 For a slowdown after a long session, replace `--lines 5000` with `--lines 200000`. Collect before starting another game.
 
-For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible.
+For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution.
 
 ## 4. Restore your settings
 

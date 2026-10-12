@@ -248,11 +248,13 @@ Configure the profile in the UI or \`~/.config/mako-render/conf.toml\`. Select t
 
 ### Arch Linux package
 
-Download \`$(basename "$arch_package")\` and install the verified system-wide package with:
+Download \`$(basename "$arch_package")\` and leave it unextracted. Open a terminal in the folder containing the downloaded file, then install the verified system-wide package with:
 
 \`\`\`bash
 sudo pacman -U ./$(basename "$arch_package")
 \`\`\`
+
+The \`./\` prefix refers to the terminal's current folder; this command does not download the package. If you saved the file elsewhere, use its full path instead. If pacman reports \`could not find or read package\`, check the path and exact filename, or download the package again if it is missing.
 
 The package installs MAKO Renderer under \`/usr\`, preserves profiles under \`~/.config/mako-render\`, and does not touch MAKO Decky's user-local Renderer under \`~/.local\`. Use either the system package or the user-local installation as the active owner for a user; see the [Arch package guide](https://github.com/$release_repository/blob/main/engine/dist/arch/README.md) for coexistence details.
 

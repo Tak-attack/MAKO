@@ -232,6 +232,22 @@ int main() {
         profile.scaling_enabled = false;
         const VkExtent2D source{2560, 1440};
         const VkExtent2D display{3840, 2160};
+        for (bool internalResize : {false, true}) {
+            for (bool admitted : {false, true}) {
+                expect(hdrBridgeSharpenSourceRequired(internalResize, admitted,
+                        source, display) == (internalResize && admitted),
+                    "Shader source footprint requires an admitted internal HDR resize");
+            }
+        }
+        for (const auto target : {source, VkExtent2D{1920,1080},
+                VkExtent2D{3840,2400}, VkExtent2D{7680,4320}}) {
+            expect(!hdrBridgeSharpenSourceRequired(true, true, source, target),
+                "Native replacement and incompatible geometry must retain original shader sampling");
+        }
+        expect(!hdrBridgeSharpenSourceRequired(true, true, {0,0}, display),
+            "Unknown source geometry must not reach the shader handoff");
+        expect(hdrBridgeSharpenSourceRequired(true, true, {1920,1080}, display),
+            "The maximum admitted 2x internal resize must retain source-pixel sharpening");
         for (unsigned gates = 0; gates < 16; ++gates) {
             const auto resize = hdrBridgeDisplayResizePolicy(profile,
                 (gates & 1) != 0, (gates & 2) != 0,

@@ -134,7 +134,7 @@ test("edits an explicit power set and reloads canonical settings after disabling
     />,
   );
   expect(screen.getByText(/Current power: AC/)).toBeTruthy();
-  fireEvent.change(screen.getByLabelText("Editing settings for"), {
+  fireEvent.change(screen.getByLabelText("Settings for"), {
     target: { value: "docked" },
   });
   expect(loadProfileConfig).toHaveBeenCalledWith("game", "docked");
@@ -178,7 +178,7 @@ test("reports toggle failures and blocks controls while another set loads", asyn
     />,
   );
   expect(
-    (screen.getByLabelText("Editing settings for") as HTMLSelectElement)
+    (screen.getByLabelText("Settings for") as HTMLSelectElement)
       .disabled,
   ).toBe(true);
   expect(

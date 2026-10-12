@@ -50,6 +50,7 @@ export function PowerProfileControls({
       <PanelSectionRow>
         <ToggleField
           label={t("POWER_SEPARATE", "Separate power settings")}
+          bottomSeparator={enabled ? undefined : "none"}
           checked={enabled}
           disabled={busy || disabled}
           onChange={(value) => void changeEnabled(value)}
@@ -58,7 +59,8 @@ export function PowerProfileControls({
       {enabled && (
         <PanelSectionRow>
           <DropdownItem
-            label={t("POWER_EDIT_MODE", "Editing settings for")}
+            label={t("POWER_EDIT_MODE", "Settings for")}
+            bottomSeparator="none"
             selectedOption={powerMode}
             disabled={busy || disabled}
             rgOptions={[

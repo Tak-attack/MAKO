@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <type_traits>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -59,6 +60,13 @@ extern "C" {
 using namespace mako::layer;
 
 namespace {
+    template<typename Handle>
+    Handle fakeHandle(const uintptr_t value) {
+        if constexpr (std::is_pointer_v<Handle>)
+            return reinterpret_cast<Handle>(value);
+        else
+            return static_cast<Handle>(value);
+    }
     void expect(bool condition, const char* message) {
         if (!condition) {
             std::cerr << "FAIL: " << message << '\n';
@@ -192,6 +200,154 @@ namespace {
         std::memcpy(formats, selected, written * sizeof(VkSurfaceFormatKHR));
         *count = written;
         return written < available ? VK_INCOMPLETE : VK_SUCCESS;
+    }
+    const void* expectedFormatInput{};
+    unsigned formats2Calls{};
+    unsigned formats2Incomplete{};
+    bool formats2Fail{};
+    bool formats2Oversized{};
+    VkResult VKAPI_PTR surfaceFormats2(VkPhysicalDevice device,
+            const VkPhysicalDeviceSurfaceInfo2KHR* info,
+            uint32_t* count, VkSurfaceFormat2KHR* output) {
+        ++formats2Calls;
+        expect(info->pNext == expectedFormatInput,
+            "formats2 must preserve input constraints on native and Wayland queries");
+        if (formats2Fail)
+            return VK_ERROR_SURFACE_LOST_KHR;
+        if (formats2Oversized) {
+            *count = 257;
+            return VK_SUCCESS;
+        }
+        uint32_t available = 4;
+        VkSurfaceFormatKHR pairs[4]{};
+        expect(surfaceFormats(device, info->surface, &available, pairs) == VK_SUCCESS,
+            "formats2 fixture enumeration");
+        if (expectedFormatInput) {
+            const auto& mode = *static_cast<const VkSurfacePresentModeEXT*>(expectedFormatInput);
+            if (mode.presentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                // A driver-owned constraint can remove a storage format.
+                const auto end = std::remove_if(pairs, pairs + available, [](const auto& pair) {
+                    return pair.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+                });
+                available = static_cast<uint32_t>(end - pairs);
+            }
+        }
+        if (!output) {
+            *count = available;
+            return VK_SUCCESS;
+        }
+        if (formats2Incomplete) {
+            --formats2Incomplete;
+            return VK_INCOMPLETE;
+        }
+        const uint32_t written = std::min(*count, available);
+        for (uint32_t i = 0; i < written; ++i) {
+            expect(output[i].sType == VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR,
+                "lower formats2 must receive initialized output structures");
+            output[i].surfaceFormat = pairs[i];
+            if (auto* compression = static_cast<VkImageCompressionPropertiesEXT*>(output[i].pNext)) {
+                expect(compression->sType == VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_PROPERTIES_EXT &&
+                    !compression->pNext, "lower compression output must be initialized");
+                compression->imageCompressionFlags = VK_IMAGE_COMPRESSION_FIXED_RATE_EXPLICIT_EXT;
+                compression->imageCompressionFixedRateFlags =
+                    pairs[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32
+                        ? VK_IMAGE_COMPRESSION_FIXED_RATE_1BPC_BIT_EXT
+                        : VK_IMAGE_COMPRESSION_FIXED_RATE_2BPC_BIT_EXT;
+            }
+        }
+        *count = written;
+        return written < available ? VK_INCOMPLETE : VK_SUCCESS;
+    }
+
+    void checkFormats2(GamescopeScalingSurface& bridge, VkSurfaceKHR surface, bool hdr) {
+        VkSurfacePresentModeEXT mode{
+            .sType = VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_EXT,
+            .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+        };
+        VkPhysicalDeviceSurfaceInfo2KHR info{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR,
+            .pNext = &mode,
+            .surface = surface,
+        };
+        expectedFormatInput = &mode;
+        const uint32_t expectedCount = hdr ? 4 : 2;
+        uint32_t count{};
+        expect(bridge.applicationFormats2({}, info, &count, nullptr, surfaceFormats2) == VK_SUCCESS &&
+            count == expectedCount, "chained formats2 count must retain opt-in HDR exposure");
+        VkSurfaceFormat2KHR output[5]{};
+        VkImageCompressionPropertiesEXT compression[5]{};
+        for (uint32_t i = 0; i < 5; ++i) {
+            compression[i] = {.sType = VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_PROPERTIES_EXT};
+            output[i] = {.sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR,
+                .pNext = &compression[i], .surfaceFormat = {VK_FORMAT_UNDEFINED, {}}};
+        }
+        count = 5;
+        expect(bridge.applicationFormats2({}, info, &count, output, surfaceFormats2) == VK_SUCCESS &&
+            count == expectedCount, "compression outputs must not replace the advertised HDR list");
+        const auto legacy = bridge.applicationFormats({}, surface, surfaceFormats);
+        expect(legacy && legacy->size() == count, "formats and formats2 count parity");
+        for (uint32_t i = 0; i < count; ++i) {
+            expect(output[i].surfaceFormat.format == (*legacy)[i].format &&
+                output[i].surfaceFormat.colorSpace == (*legacy)[i].colorSpace,
+                "formats2 must preserve legacy order and HDR colour spaces");
+            expect(output[i].sType == VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR &&
+                output[i].pNext == &compression[i] && !compression[i].pNext &&
+                compression[i].sType == VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_PROPERTIES_EXT,
+                "formats2 must preserve caller structure headers and linkage");
+            expect(compression[i].imageCompressionFlags == VK_IMAGE_COMPRESSION_FIXED_RATE_EXPLICIT_EXT &&
+                compression[i].imageCompressionFixedRateFlags ==
+                    (output[i].surfaceFormat.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32
+                        ? VK_IMAGE_COMPRESSION_FIXED_RATE_1BPC_BIT_EXT
+                        : VK_IMAGE_COMPRESSION_FIXED_RATE_2BPC_BIT_EXT),
+                "reordered and virtual HDR pairs need their matching lower storage properties");
+        }
+        expect(output[count].surfaceFormat.format == VK_FORMAT_UNDEFINED &&
+            !compression[count].imageCompressionFlags, "formats2 must not write beyond returned count");
+        count = 1;
+        expect(bridge.applicationFormats2({}, info, &count, output, surfaceFormats2) == VK_INCOMPLETE &&
+            count == 1, "short formats2 output must report VK_INCOMPLETE");
+        count = 0;
+        expect(bridge.applicationFormats2({}, info, &count, output, surfaceFormats2) == VK_INCOMPLETE &&
+            count == 0, "non-null zero-sized formats2 output must not become a count query");
+        mode.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        count = 5;
+        expect(bridge.applicationFormats2({}, info, &count, output, surfaceFormats2) == VK_SUCCESS &&
+            count == (hdr ? 3u : 2u), "driver constraints must remove unsupported HDR storage");
+        for (uint32_t i = 0; i < count; ++i)
+            expect(output[i].surfaceFormat.colorSpace != VK_COLOR_SPACE_HDR10_ST2084_EXT,
+                "unconstrained legacy enumeration must not leak PQ into a constrained query");
+        expect(info.pNext == &mode && info.surface == surface &&
+            mode.presentMode == VK_PRESENT_MODE_MAILBOX_KHR && !mode.pNext,
+            "formats2 query must not mutate caller input");
+        mode.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        formats2Incomplete = 1;
+        expect(bridge.applicationFormats2({}, info, &count, nullptr, surfaceFormats2) == VK_SUCCESS &&
+            count == expectedCount && formats2Incomplete == 0,
+            "formats2 must retry an incomplete lower enumeration");
+        formats2Incomplete = 3;
+        count = 55;
+        expect(!bridge.applicationFormats2({}, info, &count, nullptr, surfaceFormats2) && count == 55,
+            "unstable lower enumeration must fail closed with bounded retries");
+        formats2Incomplete = 0;
+        formats2Fail = true;
+        expect(!bridge.applicationFormats2({}, info, &count, nullptr, surfaceFormats2) && count == 55,
+            "lower format-query errors retain untouched driver dispatch");
+        formats2Fail = false;
+        formats2Oversized = true;
+        expect(!bridge.applicationFormats2({}, info, &count, nullptr, surfaceFormats2) && count == 55,
+            "oversized driver results must remain bounded");
+        formats2Oversized = false;
+        count = 1;
+        VkBaseOutStructure unknown{.sType = static_cast<VkStructureType>(0x7ffffffe)};
+        output[0].pNext = &unknown;
+        const auto calls = formats2Calls;
+        expect(!bridge.applicationFormats2({}, info, &count, output, surfaceFormats2) &&
+            count == 1 && output[0].pNext == &unknown && formats2Calls == calls,
+            "unknown output chains must retain untouched lower dispatch");
+        info.surface = VK_NULL_HANDLE;
+        expect(!bridge.applicationFormats2({}, info, &count, nullptr, surfaceFormats2) &&
+            formats2Calls == calls, "unowned surfaces must not issue bridge queries");
+        expectedFormatInput = nullptr;
     }
     PFN_vkVoidFunction VKAPI_PTR next(VkInstance, const char* name) {
         if (std::strcmp(name, "vkCreateWaylandSurfaceKHR") == 0)
@@ -401,7 +557,7 @@ int main() {
     expect(newCaller && newCaller->calls == 2 && newCaller->entryInterval.count == 1 &&
             newCaller->duration.maximum == 1,
         "caller identity did not reset the bounded frame window");
-    const auto otherSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(71));
+    const auto otherSwapchain = fakeHandle<VkSwapchainKHR>(71);
     expect(!frameCalls.observe(2, otherSwapchain, start + 5s, start + 5001ms, {}, {}),
         "a different swapchain inherited old frame intervals");
     const auto lateCall = frameCalls.observe(2, otherSwapchain, start + 2h, start + 2h + 50ms, {}, {});
@@ -558,6 +714,7 @@ int main() {
             const auto formats = bridge.applicationFormats(VK_NULL_HANDLE, surface, surfaceFormats);
             expect(formats && formats->size() == (enabled ? 4u : 2u),
                 "HDR formats require explicit opt-in and confirmed output capability");
+            checkFormats2(bridge, surface, enabled);
             for (const auto colorSpace : {VK_COLOR_SPACE_HDR10_ST2084_EXT,
                     VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT})
                 expect(std::ranges::any_of(*formats, [colorSpace](const auto& format) {
@@ -585,7 +742,7 @@ int main() {
                 expect(bridge.prepareSwapchain(VK_NULL_HANDLE, hdrInfo, surfaceFormats) == VK_ERROR_FORMAT_NOT_SUPPORTED,
                     "invalid HDR format pairs must fail closed");
                 hdrInfo.imageFormat = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-                const auto swapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(800));
+                const auto swapchain = fakeHandle<VkSwapchainKHR>(800);
                 expect(bridge.createSwapchain(surface, swapchain, hdrInfo, hdrInfo.imageExtent, 3, "hdr-test", VK_PRESENT_MODE_FIFO_KHR), "HDR protocol creation");
                 expect(mako_test_surface_feedback_color() == VK_COLOR_SPACE_HDR10_ST2084_EXT,
                     "compositor feedback must preserve the application's original colour space");
@@ -756,15 +913,14 @@ int main() {
         for (int mode : {7, 8}) {
             mako_test_surface_mode(mode);
             expect(!bridge.createSwapchain(surface,
-                reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(700 + mode)),
+                fakeHandle<VkSwapchainKHR>(700 + mode),
                 feedbackInfo, {1920, 1080}, 6, "vkd3d", VK_PRESENT_MODE_FIFO_KHR),
                 "protocol allocation failure");
             expect(mako_test_surface_objects() == surfaceObjects,
                 "failed swapchain protocol setup leaked objects");
         }
         mako_test_surface_mode(0);
-        const auto firstSwapchain = reinterpret_cast<VkSwapchainKHR>(
-            static_cast<uintptr_t>(1001));
+        const auto firstSwapchain = fakeHandle<VkSwapchainKHR>(1001);
         const int feedbacks = mako_test_surface_feedbacks();
         expect(bridge.createSwapchain(surface, firstSwapchain,
             feedbackInfo, {1920, 1080}, 6, "vkd3d", VK_PRESENT_MODE_FIFO_KHR),
@@ -784,12 +940,12 @@ int main() {
         checkApplicationExtent(bridge, surface, {1920, 1080});
         expect(extentLog.str() == stableQueryLog,
             "unchanged capability queries must not emit per-frame extent logs");
-        const auto overrideSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(3006));
+        const auto overrideSwapchain = fakeHandle<VkSwapchainKHR>(3006);
         expect(bridge.createSwapchain(surface, overrideSwapchain, feedbackInfo,
             {2560, 1440}, 6, "vkd3d", VK_PRESENT_MODE_FIFO_KHR) &&
             bridge.acquisitionResult(surface, overrideSwapchain) == VK_SUCCESS,
             "an explicit render extent must remain valid when Gamescope retains the window size");
-        const auto staleSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(3001));
+        const auto staleSwapchain = fakeHandle<VkSwapchainKHR>(3001);
         mako_test_surface_resize(2560, 1440);
         const int createGeometryQueries = mako_test_surface_geometry_queries();
         expect(bridge.createSwapchain(surface, staleSwapchain, feedbackInfo,
@@ -810,7 +966,7 @@ int main() {
         expect(bridge.acquisitionResult(surface, overrideSwapchain) == VK_SUCCESS,
             "window observations must not reinterpret an explicit render extent as stale");
         bridge.destroySwapchain(surface, overrideSwapchain);
-        const auto freshSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(3002));
+        const auto freshSwapchain = fakeHandle<VkSwapchainKHR>(3002);
         expect(bridge.createSwapchain(surface, freshSwapchain, feedbackInfo,
             {2560, 1440}, 6, "vkd3d", VK_PRESENT_MODE_FIFO_KHR) &&
             bridge.acquisitionResult(surface, freshSwapchain) == VK_SUCCESS &&
@@ -821,7 +977,7 @@ int main() {
         checkApplicationExtent(bridge, surface, {1152, 720});
         expect(bridge.acquisitionResult(surface, freshSwapchain) == VK_ERROR_OUT_OF_DATE_KHR,
             "a later capability query must invalidate the old source size");
-        const auto lowSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(3003));
+        const auto lowSwapchain = fakeHandle<VkSwapchainKHR>(3003);
         auto lowInfo = feedbackInfo;
         lowInfo.imageExtent = {2304, 1440};
         expect(bridge.createSwapchain(surface, lowSwapchain, lowInfo,
@@ -850,7 +1006,7 @@ int main() {
         };
 #endif
 #if defined(VK_KHR_swapchain_maintenance1) || defined(VK_EXT_swapchain_maintenance1)
-        const auto explicitSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(3004));
+        const auto explicitSwapchain = fakeHandle<VkSwapchainKHR>(3004);
         auto explicitInfo = feedbackInfo;
         explicitInfo.pNext = &explicitScaling;
         expect(bridge.createSwapchain(surface, explicitSwapchain, explicitInfo,
@@ -870,7 +1026,7 @@ int main() {
         bridge.destroySwapchain(surface, explicitSwapchain);
 #endif
         mako_test_surface_mode(4);
-        const auto lostSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(3005));
+        const auto lostSwapchain = fakeHandle<VkSwapchainKHR>(3005);
         const int objectsBeforeLostWindow = mako_test_surface_objects();
         expect(!bridge.createSwapchain(surface, lostSwapchain, feedbackInfo,
             {1920, 1080}, 6, "vkd3d", VK_PRESENT_MODE_FIFO_KHR) &&
@@ -915,7 +1071,7 @@ int main() {
                 "an unrepresentable extent must not fabricate supported capabilities");
         }
         checkApplicationExtent(bridge, surface, {1920, 1080});
-        const auto timedSwapchain = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(500));
+        const auto timedSwapchain = fakeHandle<VkSwapchainKHR>(500);
         expect(bridge.createSwapchain(surface, timedSwapchain, feedbackInfo, {1920, 1080}, 5,
                 "MAKO Renderer", VK_PRESENT_MODE_FIFO_KHR, 120),
             "timed bridge creation");
@@ -983,8 +1139,7 @@ int main() {
             "present path must not query X11 geometry");
         expect(mako_test_surface_window() == 71 && mako_test_surface_server() == 9, "actual X11 window/server binding");
 
-        const auto sameSurfaceReplacement = reinterpret_cast<VkSwapchainKHR>(
-            static_cast<uintptr_t>(1002));
+        const auto sameSurfaceReplacement = fakeHandle<VkSwapchainKHR>(1002);
         expect(bridge.createSwapchain(surface, sameSurfaceReplacement,
             feedbackInfo, {1920, 1080}, 7, "vkd3d", VK_PRESENT_MODE_FIFO_KHR),
             "create replacement swapchain protocol object");
@@ -1012,8 +1167,7 @@ int main() {
         expect(xlibFormats && xlibFormats->size() == 2 &&
             xlibFormats->front().format == VK_FORMAT_B8G8R8A8_UNORM,
             "Xlib bridge must retain the application's SDR format order");
-        const auto replacementSwapchain = reinterpret_cast<VkSwapchainKHR>(
-            static_cast<uintptr_t>(2001));
+        const auto replacementSwapchain = fakeHandle<VkSwapchainKHR>(2001);
         const auto replacementFeedback = swapchainInfo(replacement);
         expect(bridge.createSwapchain(replacement, replacementSwapchain,
             replacementFeedback, {1920, 1080}, 5, "vkd3d", std::nullopt),
@@ -1050,8 +1204,8 @@ int main() {
         expect(bridge.create(VK_NULL_HANDLE, next, info, nullptr, &surface) == VK_SUCCESS,
             "ownership stress surface");
         const auto feedback = swapchainInfo(surface);
-        const auto first = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(8001));
-        const auto second = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(8002));
+        const auto first = fakeHandle<VkSwapchainKHR>(8001);
+        const auto second = fakeHandle<VkSwapchainKHR>(8002);
         const auto create = [&](VkSwapchainKHR handle) {
             return bridge.createSwapchain(surface, handle, feedback,
                 {1920, 1080}, 5, "vkd3d", std::nullopt);
@@ -1193,7 +1347,7 @@ int main() {
         for (int cycle = 0; cycle < 128; ++cycle) {
             const VkExtent2D source = cycle % 2 ? VkExtent2D{800, 450} : VkExtent2D{640, 360};
             const VkExtent2D target = cycle % 2 ? VkExtent2D{640, 360} : VkExtent2D{800, 450};
-            const auto handle = reinterpret_cast<VkSwapchainKHR>(static_cast<uintptr_t>(3010));
+            const auto handle = fakeHandle<VkSwapchainKHR>(3010);
             checkApplicationExtent(bridge, surface, source, 1.5F);
             auto info = feedbackInfo;
             const bool scaled = (cycle & 2) != 0;
