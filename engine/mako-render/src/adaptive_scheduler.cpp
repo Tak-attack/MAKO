@@ -33,6 +33,7 @@ namespace {
     constexpr double adaptiveSdrCadenceResumeBaseFps = 12.0;
     constexpr size_t adaptiveSdrCadenceResumeFrameCount = 3;
     constexpr double adaptiveIntervalSmoothing = 0.25;
+    constexpr double adaptiveTargetSatisfiedRatio = 0.98;
     constexpr auto adaptivePacedLoadWatchDuration = std::chrono::seconds{8};
     constexpr auto adaptivePacedLoadSettlingDuration =
         std::chrono::milliseconds{250};
@@ -42,11 +43,9 @@ namespace {
     constexpr size_t adaptiveCadenceDropFrameCount = 3;
     constexpr double adaptiveTransientFastBurstCadenceRatio = 3.0;
     constexpr double adaptiveTransientFastBurstTargetRatio = 2.0;
-    // Compare adjacent workloads in frame-rate units rather than accepting a
-    // device-specific percentage boundary. Extra generated work is useful
-    // only when its displayed-FPS gain pays for every real FPS it costs.
-    // Higher rungs also need a small target-relative margin: near break-even
-    // measurements can otherwise accept a large real-frame loss due to noise.
+    // Prefer the first workload that delivers the target over a proven deficit.
+    // Otherwise extra output must still pay for the real frames it costs.
+    // Both paths require a meaningful gain rather than promoting on noise.
     struct AdaptiveLoadOutcome {
         double baseFps{0.0};
         double outputFps{0.0};
@@ -64,14 +63,21 @@ namespace {
         };
     }
 
-    [[nodiscard]] bool adaptiveHigherLoadEarnsItsRealFrameCost(
+    [[nodiscard]] bool adaptiveHigherLoadIsUseful(
             const uint32_t targetFps, const size_t testedLimit,
             const AdaptiveLoadOutcome lower,
-            const AdaptiveLoadOutcome higher) {
+            const AdaptiveLoadOutcome higher,
+            const bool targetDeliveryQualified) {
         const double outputGain = higher.outputFps - lower.outputFps;
-        const double realFrameCost = std::max(
-            0.0, lower.baseFps - higher.baseFps
-        );
+        const double targetFloor = static_cast<double>(targetFps) *
+            adaptiveTargetSatisfiedRatio;
+        const bool reachesTarget = testedLimit > 1 && targetDeliveryQualified &&
+            lower.outputFps < targetFloor && higher.outputFps >= targetFloor;
+        // Target/multiplier pacing intentionally lowers the real-frame rate.
+        // Accept that trade only with delivered target evidence; a projected
+        // rate or an already sufficient lower workload cannot claim it.
+        const double realFrameCost = reachesTarget ? 0.0
+            : std::max(0.0, lower.baseFps - higher.baseFps);
         const double comparisonScale = std::max({
             1.0, lower.baseFps, higher.baseFps,
             lower.outputFps, higher.outputFps
@@ -103,7 +109,6 @@ namespace {
     constexpr auto adaptiveRecoveryStabilizationDuration = std::chrono::seconds(3);
     constexpr auto adaptiveRampEvaluationDuration = std::chrono::seconds(1);
     constexpr auto adaptiveTargetDeficitDuration = std::chrono::seconds(1);
-    constexpr double adaptiveTargetSatisfiedRatio = 0.98;
     constexpr auto adaptiveTargetConstraintDiagnosticDuration =
         std::chrono::seconds(2);
     constexpr auto adaptiveNearTargetNativeHoldDuration =
@@ -355,6 +360,8 @@ void AdaptiveScheduler::consumeHistoryWarmupFrame(const TimePoint frameStarted) 
 
 void AdaptiveScheduler::reportGeneratedFrameDelivery(
         const GeneratedFrameDelivery delivery) {
+    if (this->state.ramp.evaluationAt)
+        this->state.ramp.targetDeliveryReports++;
     auto& rescue = this->state.rescue;
     if (rescue.verificationUntil && rescue.pendingGeneratedFrames > 0) {
         rescue.deliveryHealthy = rescue.deliveryHealthy &&
@@ -1979,6 +1986,7 @@ AdaptiveFramePlan AdaptiveScheduler::planFrame(
     );
     if (!cadence.planningReady) {
         lowerLoad.reset();
+        this->state.ramp.targetSampleComplete = false;
         return cadence.terminalPlan;
     }
     const double baseFps = cadence.baseFps;
@@ -2013,7 +2021,7 @@ AdaptiveFramePlan AdaptiveScheduler::planFrame(
     this->state.stabilization.until.reset();
     this->advancePacedLoadValidation(now, cadence.rawIntervalSeconds,
         orderedFifoGenerationLimit, integerBaseCapGenerationLimit);
-    this->updateGenerationLimit(now, baseFps);
+    this->updateGenerationLimit(now, baseFps, cadence.rawIntervalSeconds);
 
     const double desiredOutputsPerRealFrame =
         this->state.cadence.smoothedIntervalSeconds *
@@ -2205,6 +2213,7 @@ void AdaptiveScheduler::resetTiming(
     this->cancelRescueMeasurement("timing-reset");
     this->state.ramp.lowerLoadSample.reset();
     this->state.cadence.lastRealFrame = now;
+    this->state.ramp.targetSampleComplete = false;
     this->state.cadence.smoothedIntervalSeconds = 0.0;
     this->state.cadence.dropFrames = 0;
     if (this->state.fastBurst.startedAt) {
@@ -2891,11 +2900,11 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advancePacedLoadValidation(
         this->state.outputPlanner.resetTargetClock();
         ramp.pacingResumeUntil = now + adaptivePacedLoadSettlingDuration;
     }
-    if (adaptiveHigherLoadEarnsItsRealFrameCost(this->config.targetFps,
-            paced.testedLimit, previous, current)) {
+    if (adaptiveHigherLoadIsUseful(this->config.targetFps,
+            paced.testedLimit, previous, current, true)) {
         this->diagnostics->stableCadence("adaptive-paced-load-accepted",
             paced.testedLimit, paced.baselineBaseFps, current.baseFps,
-            "settled-real-frame-cost-paid");
+            "settled-output-qualified");
         paced.reset();
         return;
     }
@@ -2927,7 +2936,7 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advancePacedLoadValidation(
 
 MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::updateGenerationLimit(
         const std::chrono::steady_clock::time_point now,
-        const double baseFps) {
+        const double baseFps, const double rawIntervalSeconds) {
     const size_t configuredLimit = std::min(
         this->config.generatedFrameCapacity,
         this->config.maximumMultiplier - 1
@@ -3023,6 +3032,17 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::updateGenerationLimit(
     }
 
     if (this->state.ramp.evaluationAt) {
+        auto& ramp = this->state.ramp;
+        ramp.targetTrialFrames++;
+        ramp.targetSampleComplete = ramp.targetSampleComplete &&
+            ramp.targetDeliveryReports == ramp.targetTrialFrames;
+        if (now <= ramp.targetSampleStartsAt) {
+            // Let the old output clock turn over before measuring the trial.
+            ramp.targetGeneratedBeforeSample = ramp.delivery.acceptedForPresentation();
+        } else {
+            ramp.targetSampleSeconds += rawIntervalSeconds;
+            ramp.targetSampleFrames++;
+        }
         if (now < *this->state.ramp.evaluationAt)
             return;
 
@@ -3054,11 +3074,39 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::updateGenerationLimit(
             this->config.targetFps, testedLimit, baseFps
         );
         const bool deliveryHealthy = this->state.ramp.delivery.healthy();
-        const bool accepted = deliveryHealthy &&
-            adaptiveHigherLoadEarnsItsRealFrameCost(
-                this->config.targetFps, testedLimit,
-                previousOutcome, currentOutcome
-            );
+        const bool costPaid = adaptiveHigherLoadIsUseful(this->config.targetFps,
+            testedLimit, previousOutcome, currentOutcome, false);
+        const bool completeTargetTrial = ramp.targetSampleComplete &&
+            ramp.delivery.requested() > 0 &&
+            ramp.delivery.acceptedForPresentation() == ramp.delivery.requested();
+        const double sampleSeconds =
+            std::chrono::duration<double>(adaptiveRampEvaluationDuration).count();
+        if (!costPaid && completeTargetTrial &&
+                adaptiveHigherLoadIsUseful(this->config.targetFps,
+                    testedLimit, previousOutcome, currentOutcome, true) &&
+                ramp.targetSampleSeconds + 1e-9 < sampleSeconds) {
+            // Only the new target preference needs the extra turnover sample.
+            // Ordinary cost decisions keep their original one-second trial.
+            ramp.evaluationAt = ramp.targetSampleStartsAt + adaptiveRampEvaluationDuration;
+            return;
+        }
+        // Use the settled trial's accepted output, not its final smoothed FPS.
+        // Missing reports, partial delivery, and bypassed intervals cannot
+        // turn a short fast tail into permission to sacrifice real cadence.
+        const double measuredOutputFps = ramp.targetSampleSeconds > 0.0
+            ? std::min(static_cast<double>(this->config.targetFps),
+                static_cast<double>(ramp.targetSampleFrames +
+                    ramp.delivery.acceptedForPresentation() -
+                    ramp.targetGeneratedBeforeSample) / ramp.targetSampleSeconds)
+            : 0.0;
+        const bool targetDeliveryQualified = completeTargetTrial &&
+            ramp.targetSampleSeconds + 1e-9 >= sampleSeconds &&
+            measuredOutputFps >= static_cast<double>(this->config.targetFps) *
+                adaptiveTargetSatisfiedRatio;
+        const bool accepted = deliveryHealthy && (costPaid ||
+            (targetDeliveryQualified && adaptiveHigherLoadIsUseful(
+                this->config.targetFps, testedLimit, previousOutcome,
+                {.baseFps = baseFps, .outputFps = measuredOutputFps}, true)));
 
         this->diagnostics->rampResult(
             accepted,
@@ -3296,6 +3344,13 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::updateGenerationLimit(
     this->state.outputPlanner.generationLimit++;
     this->state.ramp.evaluationAt = now + adaptiveRampEvaluationDuration;
     this->state.ramp.delivery.reset();
+    this->state.ramp.targetSampleSeconds = 0.0;
+    this->state.ramp.targetSampleStartsAt = now + adaptivePacedLoadSettlingDuration;
+    this->state.ramp.targetSampleFrames = 0;
+    this->state.ramp.targetDeliveryReports = 0;
+    this->state.ramp.targetTrialFrames = 0;
+    this->state.ramp.targetGeneratedBeforeSample = 0;
+    this->state.ramp.targetSampleComplete = true;
     this->state.ramp.targetDeficitSince.reset();
     this->state.outputPlanner.resetTargetClock();
     this->diagnostics->ramp(

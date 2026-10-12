@@ -276,6 +276,7 @@ class DiagnosticsHelperTests(unittest.TestCase):
             "MAKO Renderer: present diagnostics: operation=adaptive-paced-load-baseline-probe context=1 generated_limit=1 baseline_base_fps=40 current_base_fps=40 reason=fresh-adjacent-lower-load",
             "MAKO Renderer: present diagnostics: operation=adaptive-load-shed context=1 previous_generated_limit=1 tested_generated_limit=2 previous_base_fps=54 current_base_fps=40 previous_output_fps=108 current_output_fps=120 reason=paced-unpaid-real-frame-cost",
             "MAKO Renderer: present diagnostics: operation=adaptive-paced-load-accepted context=1 generated_limit=3 baseline_base_fps=33 current_base_fps=30 reason=settled-real-frame-cost-paid",
+            "MAKO Renderer: present diagnostics: operation=adaptive-paced-load-accepted context=1 generated_limit=2 baseline_base_fps=54 current_base_fps=40 reason=settled-output-qualified",
             "MAKO Renderer: present diagnostics: operation=adaptive-paced-load-cancelled context=1 generated_limit=4 baseline_base_fps=28 current_base_fps=24 reason=pacing-policy-changed",
         ]
         with tempfile.TemporaryDirectory() as directory:

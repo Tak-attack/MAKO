@@ -2673,6 +2673,90 @@ namespace {
             "rejected 3x workload did not retain the proven 2x level");
     }
 
+    void testHigherPromotionPrefersMeasuredTarget() {
+        for (const uint32_t target : {60U, 120U, 144U, 240U}) {
+            for (const size_t multiplier : {3U, 4U, 5U}) {
+                for (const bool smooth : {false, true}) {
+                    for (const auto policy : {AdaptiveRecoveryPolicy::OrderedSdr,
+                            AdaptiveRecoveryPolicy::ConservativeHdr}) {
+                        Harness harness(target, multiplier, smooth, policy,
+                            false, 2s, target, false);
+                        harness.start();
+                        const double baseline = static_cast<double>(target) * 0.96 /
+                            static_cast<double>(multiplier - 1);
+                        harness.runAtFps(baseline, 4s);
+                        harness.scheduler.restoreGenerationLimit(harness.now,
+                            multiplier - 2, "target-test-lower-rung");
+                        for (size_t frame = 0; frame < 1500 &&
+                                !harness.scheduler.snapshot().rampEvaluationActive; ++frame)
+                            harness.frameAtFps(baseline);
+                        require(harness.scheduler.snapshot().rampEvaluationActive &&
+                                harness.scheduler.snapshot().generationLimit == multiplier - 1,
+                            "target fixture did not begin its adjacent higher trial");
+                        const double pacedFps = static_cast<double>(target) /
+                            static_cast<double>(multiplier);
+                        for (size_t frame = 0; frame < 300 &&
+                                harness.scheduler.snapshot().rampEvaluationActive; ++frame)
+                            harness.frameAtFps(pacedFps);
+                        require(harness.scheduler.validatedGenerationLimit() == multiplier - 1,
+                            "delivered target was rejected: target=" + std::to_string(target) +
+                                " multiplier=" + std::to_string(multiplier) +
+                                " smooth=" + std::to_string(smooth) +
+                                " policy=" + std::to_string(static_cast<int>(policy)));
+                        const auto ramps = harness.diagnostics.count("ramp");
+                        harness.runAtFps(pacedFps, 4s);
+                        require(harness.scheduler.validatedGenerationLimit() == multiplier - 1 &&
+                                harness.diagnostics.count("ramp") == ramps,
+                            "target delivery failed to retain its lowest sufficient workload");
+                    }
+                }
+            }
+        }
+    }
+
+    void testTargetPreferenceRequiresWholeTrialDelivery() {
+        for (const size_t failure : {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U}) {
+            Harness harness(120, 3, false, AdaptiveRecoveryPolicy::OrderedSdr,
+                false, 2s, 120, false);
+            harness.start();
+            const double baseline = failure == 4 ? 58.0 : 56.0;
+            harness.runAtFps(baseline, 4s);
+            harness.scheduler.restoreGenerationLimit(harness.now, 1,
+                "target-evidence-lower-rung");
+            for (size_t frame = 0; frame < 1200 &&
+                    !harness.scheduler.snapshot().rampEvaluationActive; ++frame)
+                harness.frameAtFps(baseline);
+            require(harness.scheduler.snapshot().rampEvaluationActive,
+                "target evidence fixture never started its 3x trial");
+            const auto started = harness.now;
+            for (size_t frame = 0; frame < 150 &&
+                    harness.scheduler.snapshot().rampEvaluationActive; ++frame) {
+                if (frame == 20 && failure == 5)
+                    harness.frame(1ms, false, false); // Production omits empty-plan delivery reports.
+                if (frame == 20 && failure == 6)
+                    harness.scheduler.resetTiming(harness.now);
+                if (frame == 20 && failure == 7)
+                    harness.frameAtFps(40.0, true, false); // Bypassed generated acquisition.
+                const double fps = failure == 2
+                    ? (harness.now - started < 800ms ? 35.0 : 42.0)
+                    : failure == 3 ? 38.0
+                    : failure == 4 ? (harness.now - started < 900ms ? 39.0 : 40.0)
+                    : 40.0;
+                const auto plan = harness.frameAtFps(fps, false, false);
+                if (failure == 0 && frame == 3)
+                    continue; // Missing observation, even though the projection reaches 120.
+                harness.scheduler.reportGeneratedFrameDelivery({plan.size(),
+                    failure == 1 && frame == 3 && !plan.empty()
+                        ? plan.size() - 1 : plan.size()});
+            }
+            const auto* result = harness.diagnostics.last("ramp-result");
+            require(result && !result->accepted &&
+                    result->reason == "unpaid-real-frame-cost" &&
+                    harness.scheduler.validatedGenerationLimit() == 1,
+                "incomplete delivery, a fast tail, a target deficit, or an unpaid measured margin bypassed the cost guard");
+        }
+    }
+
     void testAdaptiveHigherLoadNeedsMeaningfulNetGain() {
         for (const auto [probeFps, shouldAccept] : {
                 std::pair{30.0, false}, std::pair{32.0, true}}) {
@@ -3457,20 +3541,19 @@ namespace {
         return plan;
     }
 
-    void testIntegerPacingRechecksRealFrameCostAcrossMultipliers() {
+    void testIntegerPacingPrefersDeliveredTargetAcrossMultipliers() {
         for (const bool fifo : {false, true}) {
             for (const size_t multiplier : {3U, 4U, 5U}) {
                 for (const bool paid : {false, true}) {
                     Harness harness(120, multiplier, true,
                         AdaptiveRecoveryPolicy::OrderedSdr, false, 2s,
                         120, false, true, true);
-                    const double lowerOutputFps = paid ? 100.0
-                        : multiplier == 3 ? 108.0 : 114.0;
+                    const double lowerOutputFps = multiplier == 3 ? 108.0 : 114.0;
                     promoteForPacedLoadTest(harness, multiplier, lowerOutputFps);
                     require(harness.scheduler.snapshot().pacedLoadValidationPending,
                         "integer pacing lost its recent accepted baseline");
                     const auto initialRamps = harness.diagnostics.count("ramp");
-                    const double settledFps = 120.0 /
+                    const double settledFps = (paid ? 120.0 : lowerOutputFps) /
                         static_cast<double>(multiplier);
                     for (size_t frame = 0; frame < 100; ++frame) {
                         pacedLoadFrame(harness, settledFps, multiplier - 1, fifo);
@@ -3482,7 +3565,7 @@ namespace {
                         "settled integer pacing did not complete its bounded check");
                     require(snapshot.validatedGenerationLimit ==
                             (paid ? multiplier - 1 : multiplier - 2),
-                        "settled pacing did not apply the ordinary real-frame cost rule");
+                        "settled pacing did not prefer the delivered target or reject overload");
                     require(snapshot.historyWarmupRemaining == 0 &&
                             !snapshot.automaticBaseCapSuppressed &&
                             !snapshot.discontinuityRecoveryActive,
@@ -3622,12 +3705,11 @@ namespace {
                         Harness harness(120, multiplier, true,
                             AdaptiveRecoveryPolicy::OrderedSdr, false, 2s,
                             120, false, true, true);
-                        // Deliberately make the old baseline predict the
-                        // opposite decision. Only current lower-load delivery
-                        // may decide the delayed handoff's real-frame cost.
-                        const double unpaidOutput = multiplier == 3 ? 108.0 : 114.0;
-                        promoteForPacedLoadTest(harness, multiplier,
-                            paid ? unpaidOutput : 100.0);
+                        // The old deficit cannot authorize a higher load when
+                        // the fresh lower workload already reaches the target.
+                        const double lowerOutput = paid
+                            ? (multiplier == 3 ? 108.0 : 114.0) : 120.0;
+                        promoteForPacedLoadTest(harness, multiplier, 100.0);
                         harness.runAtFps(144.0 / static_cast<double>(multiplier), delay);
                         require(!harness.scheduler.snapshot().pacedLoadValidationPending,
                             "unapplied pacing blocked gameplay past its bounded watch");
@@ -3641,7 +3723,7 @@ namespace {
                                 multiplier - 2 &&
                                 harness.diagnostics.contains("adaptive-paced-load-baseline-probe"),
                             "delayed pacing failed to start its fresh adjacent-load probe");
-                        const double freshLowerFps = (paid ? 100.0 : unpaidOutput) /
+                        const double freshLowerFps = lowerOutput /
                             static_cast<double>(multiplier - 1);
                         for (size_t frame = 0; frame < 150; ++frame) {
                             if (fifo)
@@ -3787,7 +3869,7 @@ namespace {
                 break;
         }
         for (size_t frame = 0; frame < 150; ++frame) {
-            pacedLoadFrame(harness, 54.0, 1, false);
+            pacedLoadFrame(harness, 60.0, 1, false);
             if (!harness.scheduler.snapshot().pacedLoadValidationPending)
                 break;
         }
@@ -3855,7 +3937,7 @@ namespace {
         for (const bool paid : {false, true}) {
             Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr,
                 false, 2s, 120, false, false, true);
-            promoteForPacedLoadTest(harness, 3, paid ? 108.0 : 100.0);
+            promoteForPacedLoadTest(harness, 3, 100.0);
             harness.runAtFps(48.0, 16s);
             for (size_t frame = 0; frame < 500; ++frame) {
                 harness.frameAtFps(40.0);
@@ -3875,7 +3957,7 @@ namespace {
             require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit == 1,
                 "delayed accepted Fractional handoff skipped its fresh comparison");
             for (size_t frame = 0; frame < 150; ++frame) {
-                harness.frameAtFps(paid ? 50.0 : 54.0);
+                harness.frameAtFps(paid ? 54.0 : 60.0);
                 if (!harness.scheduler.snapshot().pacedLoadValidationPending)
                     break;
             }
@@ -4975,9 +5057,9 @@ namespace {
             "precondition failed: FF7-style 3x probe did not begin");
 
         while (harness.scheduler.snapshot().rampEvaluationActive)
-            harness.frameAtFps(33.3623);
+            harness.frameAtFps(31.5);
         require(harness.scheduler.snapshot().validatedGenerationLimit == 1,
-            "counterproductive FF7-style 3x probe was accepted");
+            "counterproductive below-target 3x probe was accepted");
         const size_t rampsAfterFailure = harness.diagnostics.count("ramp");
 
         // A lower source alone cannot rebase the failed trial without
@@ -5916,6 +5998,8 @@ int main() {
         {"rejected higher level backs off", testRejectedHigherLevelRetainsProvenLoadAndBacksOff},
         {"ordered SDR rejects unpaid below-target 3x", testOrderedSdrRejectsUnpaidHigherLevelBelowTarget},
         {"Adaptive higher load needs meaningful net gain", testAdaptiveHigherLoadNeedsMeaningfulNetGain},
+        {"higher promotion prefers measured target", testHigherPromotionPrefersMeasuredTarget},
+        {"target preference needs whole-trial delivery", testTargetPreferenceRequiresWholeTrialDelivery},
         {"confirmed focus return has bounded fast resume", testConfirmedFocusReturnBoundedFastResume},
         {"menu return holds target-proven lower load", testMenuReturnHoldsTargetProvenLowerMultiplier},
         {"menu return requalifies changed scene across modes", testMenuReturnRequalifiesChangedSceneAcrossModes},
@@ -5935,7 +6019,7 @@ int main() {
         {"Smooth Cadence rejects unproven 2x convergence", testSmoothCadenceRejectsTwoXThatDoesNotConverge},
         {"Smooth Cadence convergence requires matching ordered FIFO", testSmoothCadenceConvergenceRequiresTargetMatchedOrderedFifo},
         {"VRR FIFO uses only a validated higher rung", testVrrFullFifoUsesOnlyValidatedHigherRung},
-        {"integer pacing rechecks 3x through 5x real-frame cost", testIntegerPacingRechecksRealFrameCostAcrossMultipliers},
+        {"integer pacing prefers delivered target at 3x through 5x", testIntegerPacingPrefersDeliveredTargetAcrossMultipliers},
         {"paced load needs fresh continuous evidence", testPacedLoadRequiresFreshContinuousEvidence},
         {"delayed integer pacing refreshes its adjacent baseline", testDelayedIntegerPacingRefreshesAdjacentBaseline},
         {"fresh pacing probes discard interrupted lower evidence", testFreshPacingProbeDiscardsInterruptedLowerEvidence},

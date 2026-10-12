@@ -337,7 +337,8 @@ namespace mako::layer {
             size_t fallbackLimit = 0, double baselineBaseFps = 0.0);
         // This larger multiplier-validation stage follows the same inline
         // contract as the per-present stages above.
-        inline void updateGenerationLimit(TimePoint now, double baseFps);
+        inline void updateGenerationLimit(TimePoint now, double baseFps,
+            double rawIntervalSeconds);
         inline void advancePacedLoadValidation(TimePoint now,
             double rawIntervalSeconds,
             std::optional<size_t> orderedFifoGenerationLimit,
@@ -694,6 +695,13 @@ namespace mako::layer {
                 bool targetConstraintReported{false};
                 GeneratedDeliveryWindow delivery;
                 size_t previousLimit{0};
+                double targetSampleSeconds{0.0};
+                TimePoint targetSampleStartsAt{};
+                size_t targetSampleFrames{0};
+                size_t targetDeliveryReports{0};
+                size_t targetTrialFrames{0};
+                size_t targetGeneratedBeforeSample{0};
+                bool targetSampleComplete{false};
                 double baselineBaseFps{0.0};
                 size_t lastFailedLimit{0};
                 size_t consecutiveFailures{0};

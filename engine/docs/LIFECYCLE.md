@@ -103,7 +103,7 @@ This table centralizes lifecycle timers. Frame-count gates are included because 
 | Private spatial drain | Up to 50 ms total in one present call | Bound replacement progress without device-wide idle |
 | Replacement warm-up | 250 ms real-only, then three real history frames | Prevent interpolation across old/new swapchain history |
 | Adaptive stabilization | 3 seconds at initial startup; 1 second after ordinary recreation, cadence reset, or recovery | Establish a trustworthy base cadence before increasing load |
-| Adaptive ramp | 1 second target deficit; 250 ms step delay; 1 second evaluation | Add one generated level at a time and measure its value |
+| Adaptive ramp | 1 second target deficit; 250 ms step delay; 1 second evaluation, extended by 250 ms when target preference requires a settled delivery sample | Add one generated level at a time and measure its value |
 | Adaptive ramp retry | 5, 15, 30, then 60 seconds after repeated rejection; two seconds of stability for rearm | Avoid oscillating into a known-unhelpful load level |
 | Adaptive interrupted or failed probe | 2-second cooldown after interruption; 15-second cooldown after failure; 2 seconds of stable evidence before rearm | Keep a cadence disruption from immediately restarting the same load experiment |
 | Adaptive near-target preference | 1 second of qualifying evidence; opposite evidence decays twice as fast; each sample contributes at most 100 ms | Prefer native pacing near target without allowing one long frame or rapid oscillation to dominate the decision |
@@ -183,7 +183,7 @@ Fixed 2x–5x requests one to four generated frames between real frames. Confirm
 
 ### Adaptive
 
-Adaptive selects a deterministic per-present plan under the target and 2x–5x ceiling. It warms history, stabilizes cadence, tests adjacent workload levels, and rejects added work whose output gain does not pay for its real-frame cost. Fractional output credit and partial-admission spacing remain scheduler-owned.
+Adaptive selects a deterministic per-present plan under the target and 2x–5x ceiling. It warms history, stabilizes cadence, and tests adjacent workload levels through the shared [Adaptive workload policy](ADAPTIVE-VALIDATION.md#adjacent-workload-promotion). The policy prefers the lowest qualified workload that reaches the target; below-target promotions must pay for their real-frame cost. Fractional output credit and partial-admission spacing remain scheduler-owned.
 
 [Adaptive validation](ADAPTIVE-VALIDATION.md#adaptive-mode) owns qualification thresholds, pacing handoffs, retry rules, and hardware evidence. These performance decisions cannot prove Vulkan capability, completion, or transport failure.
 
@@ -215,7 +215,7 @@ Normal ordered generated-image acquisition can be unbounded when no compatibilit
 | Exact same-device/surface null-old replacement inference | Recover lifecycle continuity from applications that omit explicit old-swapchain linkage | Requires a unique exact match and never reuses an unrelated context |
 | 50 ms retirement grace | Cover compositor observation beyond the application's destroy call | Grace is not the proof: image retirement fences and terminal waits remain authoritative |
 | Dynamic Cadence native-only probes | Implement the user's optional request to discover a hidden native-rate change under ordered FIFO | Disabled by default, bounded, verified, and able only to remove synthetic work |
-| Adaptive workload promotion | Find a useful multiplier without a GPU-utilization API | One device-independent adjacent-load rule requires target-capped displayed gain to pay for measured real-FPS cost; failure preserves the best lower baseline |
+| Adaptive workload promotion | Find a useful multiplier without a GPU-utilization API | One device-independent adjacent-load rule prefers measured target delivery, retains real-FPS cost checks below target, and preserves the best lower baseline after failure |
 | Near-target native preference | Avoid fractional generation when native cadence is already smooth enough | One second of confirming evidence and asymmetric decay |
 | Gamescope VRR pacing ownership | Keep explicit requested or active VRR out of the higher-multiplier fixed-refresh cap ladder while allowing validated integer FIFO handoffs | Verified server-zero properties; eligible Fixed, proven Steady 2x, validated Steady 3x–5x, and accepted constant Fractional plans can use FIFO under their own guards; live changes reset only affected pacing helpers |
 | Unbounded ordered acquisition where permitted | Avoid rejecting healthy but variably delayed compositor acquisition | Relief headroom and no configured or mode-specific deadline; see the acquisition policy above |
