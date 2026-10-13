@@ -6,7 +6,7 @@ Use this guide when MAKO Decky opens and games use `mako-run`. For `mako-launch`
 
 Confirm **MAKO Renderer is installed** in MAKO Decky. Fully close the game and save its current launch settings so you can restore them afterward.
 
-**Steam or Proton:** temporarily use these Launch Options:
+**Steam or Proton:** prepend the two diagnostics variables to your existing Launch Options, preserving any other settings. For a basic launch, the result is:
 
 ```text
 MAKO_PRESENT_DIAGNOSTICS=1 MAKO_PRESENT_DIAGNOSTICS_THRESHOLD_MS=25 /home/deck/.local/bin/mako-run %command%

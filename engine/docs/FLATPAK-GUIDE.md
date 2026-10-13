@@ -88,14 +88,14 @@ These settings persist for this app. Repeat with another `appid` for each additi
 
 ## Optional HDR
 
-The manual setup above defaults to SDR. To enable experimental HDR, turn **Enable HDR** on in the game profile, close the app, and replace its HDR overrides:
+The manual setup above defaults to SDR. To enable experimental HDR, close the app and replace its HDR overrides. These sandbox settings control exposure; the host Qt UI's **Launch Settings** apply to `mako-launch` and do not configure Flatpak apps.
 
 ```bash
 flatpak override --user --env=MAKO_DISABLE_HDR_EXPOSURE=0 "$appid"
 flatpak override --user --env=DXVK_HDR=1 "$appid"
 ```
 
-Restart the app, then enable HDR inside the game. This requires an HDR-capable display and compositor; keep Gamescope WSI disabled. To return to SDR, turn **Enable HDR** off and, with the app closed, restore the overrides:
+Restart the app, then enable HDR inside the game. This requires an HDR-capable display and compositor; keep Gamescope WSI disabled. To return to SDR, close the app and restore the overrides:
 
 ```bash
 flatpak override --user --env=MAKO_DISABLE_HDR_EXPOSURE=1 "$appid"

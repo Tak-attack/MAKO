@@ -21,6 +21,31 @@ import { InfoHiddenContext } from "./MakoInfo";
 // Use Decky's resolved class, never a hard-coded Steam CSS module name.
 const infoSelector = `[data-mako-info="true"], .${gamepadDialogClasses.FieldDescription}, .Mako_OptionDescription`;
 const ribbonSelector = '[data-mako-info-toggle="true"]';
+const focusGroupSelector = '[data-mako-focus-scroll="group"]';
+
+function scrollFocusGroup(group: HTMLElement) {
+  const scroller = findFocusScrollContainer(group);
+  if (!scroller) {
+    group.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
+    return;
+  }
+
+  const bounds = group.getBoundingClientRect();
+  const viewportTop =
+    scroller === group.ownerDocument.scrollingElement
+      ? 0
+      : scroller.getBoundingClientRect().top + scroller.clientTop;
+  // Leave more room for the selected tab's controls, keeping the whole grid
+  // visible on short panels and respecting both ends of the scroll range.
+  const inset = Math.max(0, scroller.clientHeight / 3 - bounds.height / 2);
+  scroller.scrollTop = Math.max(
+    0,
+    Math.min(
+      scroller.scrollHeight - scroller.clientHeight,
+      scroller.scrollTop + bounds.top - viewportTop - inset,
+    ),
+  );
+}
 
 function adjacentControl(
   panel: Element,
@@ -82,7 +107,7 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
   const [focused, setFocused] = useState(false);
   const ribbon = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number>();
-  const centredFocusGroup = useRef<HTMLElement | null>(null);
+  const pendingFocusGroup = useRef<HTMLElement | null>(null);
   const focusAnchor = useRef<{
     target: HTMLElement;
     top: number;
@@ -127,34 +152,51 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
     )
       return;
 
-    const group = target.closest<HTMLElement>(
-      '[data-mako-focus-scroll="group"]',
-    );
-    if (!group || !group.contains(event.relatedTarget))
-      centredFocusGroup.current = null;
+    const group = target.closest<HTMLElement>(focusGroupSelector);
+    const previous =
+      event.relatedTarget instanceof Element ? event.relatedTarget : null;
+    const previousGroup = previous?.closest(focusGroupSelector);
+    if (!group || !group.contains(previous)) {
+      // Panel DOM order follows vertical navigation. Only an entry from a
+      // control above the grid should reposition it; unknown origins stay put.
+      pendingFocusGroup.current =
+        group &&
+        previous &&
+        event.currentTarget.contains(previous) &&
+        !previous.contains(group) &&
+        (group.compareDocumentPosition(previous) &
+          Node.DOCUMENT_POSITION_PRECEDING)
+          ? group
+          : null;
+    }
 
-    // Centre a grid on entry, then keep navigation within it steady. Never let an
-    // older request scroll away from a newer focus or an R1-restored position.
+    // Carry entry placement through rapid moves within the grid. Leaving it
+    // only reveals the next control, without recentering the panel.
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = undefined;
       if (target.isConnected && target.ownerDocument.activeElement === target) {
-        const enteringGroup = group && centredFocusGroup.current !== group;
-        (enteringGroup ? group : target).scrollIntoView({
-          block: enteringGroup
-            ? "center"
-            : group || target.closest('[data-mako-focus-scroll="nearest"]')
-              ? "nearest"
-              : "center",
-          inline: "nearest",
-          behavior: "auto",
-        });
-        centredFocusGroup.current = group;
+        if (group && pendingFocusGroup.current === group) {
+          scrollFocusGroup(group);
+        } else {
+          target.scrollIntoView({
+            block:
+              group ||
+              previousGroup ||
+              target.closest('[data-mako-focus-scroll="nearest"]')
+                ? "nearest"
+                : "center",
+            inline: "nearest",
+            behavior: "auto",
+          });
+        }
+        pendingFocusGroup.current = null;
       }
     });
   };
 
   const toggle = (source?: HTMLElement) => {
     cancelScroll();
+    pendingFocusGroup.current = null;
     const panel = ribbon.current?.closest(".Mako_InfoVisibility");
     const activeElement = ribbon.current?.ownerDocument
       .activeElement as HTMLElement | null;
