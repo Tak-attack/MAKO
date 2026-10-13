@@ -16,20 +16,32 @@ vi.mock("@decky/ui", () => ({
   gamepadDialogClasses: { FieldDescription: "Steam_FieldDescription" },
   Focusable: ({
     onButtonDown,
+    onGamepadFocus,
+    onGamepadBlur,
     "flow-children": _flow,
     children,
     ...props
   }: React.HTMLAttributes<HTMLDivElement> & {
     onButtonDown?: (event: GamepadEvent) => void;
+    onGamepadFocus?: (event: GamepadEvent) => void;
+    onGamepadBlur?: (event: GamepadEvent) => void;
     "flow-children"?: string;
   }) => {
     const ref = useRef<HTMLDivElement>(null);
     useEffect(() => {
       const element = ref.current!;
       const handle = (event: Event) => onButtonDown?.(event as GamepadEvent);
+      const focus = (event: Event) => onGamepadFocus?.(event as GamepadEvent);
+      const blur = (event: Event) => onGamepadBlur?.(event as GamepadEvent);
       element.addEventListener("vgp_onbuttondown", handle);
-      return () => element.removeEventListener("vgp_onbuttondown", handle);
-    }, [onButtonDown]);
+      element.addEventListener("vgp_onfocus", focus);
+      element.addEventListener("vgp_onblur", blur);
+      return () => {
+        element.removeEventListener("vgp_onbuttondown", handle);
+        element.removeEventListener("vgp_onfocus", focus);
+        element.removeEventListener("vgp_onblur", blur);
+      };
+    }, [onButtonDown, onGamepadFocus, onGamepadBlur]);
     return (
       <div ref={ref} {...props}>
         {children}
@@ -524,6 +536,121 @@ test("leaving a tab grid before its scroll runs cancels entry positioning", () =
     behavior: "auto",
   });
   expect(vi.mocked(other.scrollIntoView).mock.contexts).toEqual([other]);
+});
+
+test("tab entry recognizes controls rendered in a separate Steam window", () => {
+  const frame = document.createElement("iframe");
+  document.body.append(frame);
+  const targetDocument = frame.contentDocument!;
+  const { unmount } = render(
+    createPortal(
+      <div data-testid="scroller" style={{ overflowY: "auto" }}>
+        <InfoVisibility>
+          <button>Before tabs</button>
+          <div role="tablist" data-mako-focus-scroll="group">
+            <button>Tab</button>
+          </div>
+        </InfoVisibility>
+      </div>,
+      targetDocument.body,
+    ),
+  );
+  try {
+    const scroller = targetDocument.querySelector<HTMLElement>(
+      '[data-testid="scroller"]',
+    )!;
+    Object.defineProperties(scroller, {
+      scrollHeight: { value: 1400 },
+      clientHeight: { value: 240 },
+    });
+    const group = targetDocument.querySelector<HTMLElement>('[role="tablist"]')!;
+    vi.spyOn(group, "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(0, 700 - scroller.scrollTop, 280, 100),
+    );
+    const before = scroller.querySelector<HTMLButtonElement>("button")!;
+    const tab = group.querySelector<HTMLButtonElement>("button")!;
+    tab.scrollIntoView = vi.fn();
+    before.focus();
+    tab.focus();
+    flushAnimationFrames();
+    expect(targetDocument.activeElement).toBe(tab);
+    expect(group.getBoundingClientRect().top + 50).toBeCloseTo(80);
+  } finally {
+    unmount();
+    frame.remove();
+  }
+});
+
+test("controller focus scrolls without browser focus and keeps rapid moves stable", () => {
+  render(
+    <div data-testid="scroller" style={{ overflowY: "auto" }}>
+      <InfoVisibility>
+        <div role="button">Before tabs</div>
+        <div role="tablist" data-mako-focus-scroll="group">
+          <div role="tab">Top tab</div>
+          <div role="tab">Bottom tab</div>
+        </div>
+        <div role="button">After tabs</div>
+      </InfoVisibility>
+    </div>,
+  );
+  const scroller = screen.getByTestId("scroller");
+  Object.defineProperties(scroller, {
+    scrollHeight: { value: 1400 },
+    clientHeight: { value: 240 },
+  });
+  const group = screen.getByRole("tablist");
+  vi.spyOn(group, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, 700 - scroller.scrollTop, 280, 100),
+  );
+  const before = screen.getByRole("button", { name: "Before tabs" });
+  const after = screen.getByRole("button", { name: "After tabs" });
+  const first = screen.getByRole("tab", { name: "Top tab" });
+  const second = screen.getByRole("tab", { name: "Bottom tab" });
+  const browserFocus = document.activeElement;
+  const gamepad = (target: HTMLElement, type: "focus" | "blur") =>
+    fireEvent(target, new CustomEvent(`vgp_on${type}`, { bubbles: true }));
+  gamepad(before, "focus");
+  gamepad(before, "blur");
+  gamepad(first, "focus");
+  gamepad(first, "blur");
+  gamepad(second, "focus");
+  // A duplicate browser notification and late blur cannot erase controller entry.
+  fireEvent.focusIn(second, { relatedTarget: first });
+  gamepad(first, "blur");
+  fireEvent.focusOut(first, { relatedTarget: document.body });
+  flushAnimationFrames();
+  expect(document.activeElement).toBe(browserFocus);
+  expect(group.getBoundingClientRect().top + 50).toBeCloseTo(80);
+  const entryScrollTop = scroller.scrollTop;
+
+  vi.mocked(after.scrollIntoView).mockClear();
+  gamepad(second, "blur");
+  gamepad(after, "focus");
+  flushAnimationFrames();
+  expect(after.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+    block: "nearest",
+    inline: "nearest",
+    behavior: "auto",
+  });
+  vi.mocked(first.scrollIntoView).mockClear();
+  scroller.scrollTop = entryScrollTop + 20;
+  gamepad(after, "blur");
+  gamepad(first, "focus");
+  flushAnimationFrames();
+  expect(first.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+    block: "nearest",
+    inline: "nearest",
+    behavior: "auto",
+  });
+  expect(scroller.scrollTop).toBe(entryScrollTop + 20);
+
+  vi.mocked(second.scrollIntoView).mockClear();
+  gamepad(first, "blur");
+  gamepad(second, "focus");
+  gamepad(second, "blur");
+  flushAnimationFrames();
+  expect(second.scrollIntoView).not.toHaveBeenCalled();
 });
 
 test("a disappearing info control moves to the next visible, enabled control", () => {

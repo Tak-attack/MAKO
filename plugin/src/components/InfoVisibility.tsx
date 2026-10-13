@@ -108,6 +108,8 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
   const ribbon = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number>();
   const pendingFocusGroup = useRef<HTMLElement | null>(null);
+  const lastFocusedControl = useRef<HTMLElement | null>(null);
+  const activeFocusedControl = useRef<HTMLElement | null>(null);
   const focusAnchor = useRef<{
     target: HTMLElement;
     top: number;
@@ -142,19 +144,25 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
     focusAnchor.current = undefined;
   }, [hidden]);
 
-  const onFocusCapture: FocusEventHandler<HTMLDivElement> = (event) => {
+  const queueFocusScroll = (
+    panel: HTMLElement,
+    target: HTMLElement,
+    previous: Element | null,
+    gamepad: boolean,
+  ) => {
+    if (!panel.contains(target)) return;
+    // Steam may emit both controller and browser focus for one move. Keep the
+    // original request, including its entry direction, when that happens.
+    if (activeFocusedControl.current === target) return;
     cancelScroll();
-    const target = event.target;
-    if (
-      focusAnchor.current ||
-      !event.currentTarget.contains(target) ||
-      target.closest(ribbonSelector)
-    )
+    lastFocusedControl.current = target;
+    activeFocusedControl.current = target;
+    if (focusAnchor.current || target.closest(ribbonSelector)) {
+      pendingFocusGroup.current = null;
       return;
+    }
 
     const group = target.closest<HTMLElement>(focusGroupSelector);
-    const previous =
-      event.relatedTarget instanceof Element ? event.relatedTarget : null;
     const previousGroup = previous?.closest(focusGroupSelector);
     if (!group || !group.contains(previous)) {
       // Panel DOM order follows vertical navigation. Only an entry from a
@@ -162,7 +170,7 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
       pendingFocusGroup.current =
         group &&
         previous &&
-        event.currentTarget.contains(previous) &&
+        panel.contains(previous) &&
         !previous.contains(group) &&
         (group.compareDocumentPosition(previous) &
           Node.DOCUMENT_POSITION_PRECEDING)
@@ -174,7 +182,11 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
     // only reveals the next control, without recentering the panel.
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = undefined;
-      if (target.isConnected && target.ownerDocument.activeElement === target) {
+      if (
+        target.isConnected &&
+        activeFocusedControl.current === target &&
+        (gamepad || target.ownerDocument.activeElement === target)
+      ) {
         if (group && pendingFocusGroup.current === group) {
           scrollFocusGroup(group);
         } else {
@@ -192,6 +204,45 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
         pendingFocusGroup.current = null;
       }
     });
+  };
+
+  const onFocusCapture: FocusEventHandler<HTMLDivElement> = (event) => {
+    // Steam portals can belong to another window: instanceof Element checks
+    // against this module's window would reject their valid relatedTarget.
+    const previous =
+      event.relatedTarget?.nodeType === 1
+        ? event.relatedTarget
+        : lastFocusedControl.current;
+    queueFocusScroll(event.currentTarget, event.target, previous, false);
+  };
+
+  const onGamepadFocus = (event: GamepadEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.nodeType !== 1) return;
+    queueFocusScroll(
+      event.currentTarget as HTMLElement,
+      target,
+      lastFocusedControl.current,
+      true,
+    );
+  };
+
+  const clearActiveFocus = (target: EventTarget | null) => {
+    if (activeFocusedControl.current !== target) return;
+    cancelScroll();
+    activeFocusedControl.current = null;
+  };
+
+  const onBlurCapture: FocusEventHandler<HTMLDivElement> = (event) => {
+    if (activeFocusedControl.current !== event.target) return;
+    clearActiveFocus(event.target);
+    if (
+      event.relatedTarget &&
+      !event.currentTarget.contains(event.relatedTarget)
+    ) {
+      lastFocusedControl.current = null;
+      pendingFocusGroup.current = null;
+    }
   };
 
   const toggle = (source?: HTMLElement) => {
@@ -241,6 +292,9 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
       flow-children="column"
       onButtonDown={onButtonDown}
       onFocusCapture={onFocusCapture}
+      onBlurCapture={onBlurCapture}
+      onGamepadFocus={onGamepadFocus}
+      onGamepadBlur={(event) => clearActiveFocus(event.target)}
     >
       <style>{`
         .Mako_InfoVisibility .${gamepadDialogClasses.FieldDescription},
