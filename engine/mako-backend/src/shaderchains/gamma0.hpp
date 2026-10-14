@@ -8,6 +8,7 @@
 #include "mako-common/vulkan/image.hpp"
 #include "mako-common/vulkan/vulkan.hpp"
 
+#include <memory>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -23,9 +24,11 @@ namespace mako::backend {
         /// @param idx generated frame index
         /// @param sourceImages source images
         /// @param additionalInput additional input image
+        /// @param sharedScratch same-context first-output resources, or null to own them
         Gamma0(const Ctx& ctx, size_t idx,
             const std::vector<std::vector<vk::Image>>& sourceImages,
-            const vk::Image& additionalInput);
+            const vk::Image& additionalInput,
+            const Gamma0* sharedScratch = nullptr);
 
         /// prepare the shaderchain initially
         /// @param images vector to fill with image handles
@@ -39,9 +42,9 @@ namespace mako::backend {
 
         /// get the generated images
         /// @return vector of images
-        [[nodiscard]] const auto& getImages() const { return this->images; }
+        [[nodiscard]] const auto& getImages() const { return *this->images; }
     private:
-        std::vector<vk::Image> images;
+        std::shared_ptr<std::vector<vk::Image>> images;
 
         std::vector<ManagedShader> sets;
         VkExtent2D dispatchExtent{};

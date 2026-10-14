@@ -16,13 +16,17 @@ using namespace mako::backend;
 
 Gamma0::Gamma0(const Ctx& ctx, size_t idx,
         const std::vector<std::vector<vk::Image>>& sourceImages,
-        const vk::Image& additionalInput) {
+        const vk::Image& additionalInput, const Gamma0* sharedScratch) {
     const VkExtent2D extent = sourceImages.at(0).at(0).getExtent();
 
     // create output images
-    this->images.reserve(3);
-    for(size_t i = 0; i < 3; i++)
-        this->images.emplace_back(ctx.vk, extent, ctx.imageMemoryPool);
+    this->images = sharedScratch ? sharedScratch->images
+        : std::make_shared<std::vector<vk::Image>>();
+    if (!sharedScratch) {
+        this->images->reserve(3);
+        for (size_t i = 0; i < 3; i++)
+            this->images->emplace_back(ctx.vk, extent, ctx.imageMemoryPool);
+    }
 
     // create descriptor sets
     const auto& shader = (ctx.perf ?
@@ -33,7 +37,7 @@ Gamma0::Gamma0(const Ctx& ctx, size_t idx,
             .sampleds(sourceImages.at((i + (sourceImages.size() - 1)) % sourceImages.size()))
             .sampleds(sourceImages.at(i % sourceImages.size()))
             .sampled(additionalInput)
-            .storages(this->images)
+            .storages(*this->images)
             .sampler(ctx.bnwSampler)
             .sampler(ctx.eabSampler)
             .buffer(ctx.constantBuffers.at(idx))
@@ -44,7 +48,7 @@ Gamma0::Gamma0(const Ctx& ctx, size_t idx,
 }
 
 void Gamma0::prepare(std::vector<VkImage>& images) const {
-    for (const auto& img : this->images)
+    for (const auto& img : *this->images)
         images.push_back(img.handle());
 }
 

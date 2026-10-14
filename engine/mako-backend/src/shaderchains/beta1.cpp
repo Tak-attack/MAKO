@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "beta1.hpp"
+#include "../helpers/image_prefix.hpp"
 #include "../helpers/utils.hpp"
 #include "mako-common/helpers/pointers.hpp"
 #include "mako-common/vulkan/command_buffer.hpp"
@@ -9,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -16,15 +18,19 @@
 using namespace mako::backend;
 
 Beta1::Beta1(const Ctx& ctx,
-        const std::vector<vk::Image>& sourceImages) {
+        const std::vector<vk::Image>& sourceImages,
+        const std::vector<vk::Image>& prepassScratch)
+        : tempImages0(backend::requiredPrefix(prepassScratch, 2, "Beta1 Alpha0 scratch")),
+          tempImages1(backend::requiredPrefix(sourceImages, 2, "Beta1 Beta0 scratch")) {
     const VkExtent2D extent = sourceImages.at(0).getExtent();
 
-    // create temporary & output images
-    this->tempImages0.reserve(2);
-    this->tempImages1.reserve(2);
-    for(uint32_t i = 0; i < 2; i++) {
-        this->tempImages0.emplace_back(ctx.vk, extent, ctx.imageMemoryPool);
-        this->tempImages1.emplace_back(ctx.vk, extent, ctx.imageMemoryPool);
+    // Alpha1 consumed Alpha0 before Beta1 runs. Its first dispatch consumes
+    // Beta0, so the next dispatch can reuse those images as the second bank.
+    // Compute dependencies and the context completion fence preserve ordering.
+    for (const auto& image : this->tempImages0) {
+        const auto scratchExtent = image.getExtent();
+        if (scratchExtent.width != extent.width || scratchExtent.height != extent.height)
+            throw std::invalid_argument("Beta1 prepass scratch extent does not match");
     }
 
     this->images.reserve(6);
@@ -65,10 +71,7 @@ Beta1::Beta1(const Ctx& ctx,
 }
 
 void Beta1::prepare(std::vector<VkImage>& images) const {
-    for (size_t i = 0; i < 2; i++) {
-        images.push_back(this->tempImages0.at(i).handle());
-        images.push_back(this->tempImages1.at(i).handle());
-    }
+    // Borrowed scratch is initialized by Alpha0/Beta0.
     for (const auto& img : this->images)
         images.push_back(img.handle());
 }

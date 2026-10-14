@@ -8,6 +8,7 @@
 #include "mako-common/vulkan/image.hpp"
 #include "mako-common/vulkan/vulkan.hpp"
 
+#include <span>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -20,9 +21,11 @@ namespace mako::backend {
     public:
         /// create a beta shaderchain
         /// @param ctx context
-        /// @param sourceImages source images
+        /// @param sourceImages Beta0 outputs, consumed by the first dispatch
+        /// @param prepassScratch Alpha0 outputs already consumed by Alpha1
         Beta1(const Ctx& ctx,
-            const std::vector<vk::Image>& sourceImages);
+            const std::vector<vk::Image>& sourceImages,
+            const std::vector<vk::Image>& prepassScratch);
 
         /// prepare the shaderchain initially
         /// @param images vector to fill with image handles
@@ -37,8 +40,8 @@ namespace mako::backend {
         /// @return vector of images
         [[nodiscard]] const auto& getImages() const { return this->images; }
     private:
-        std::vector<vk::Image> tempImages0;
-        std::vector<vk::Image> tempImages1;
+        std::span<const vk::Image> tempImages0;
+        std::span<const vk::Image> tempImages1;
         std::vector<vk::Image> images;
 
         std::vector<ManagedShader> sets;

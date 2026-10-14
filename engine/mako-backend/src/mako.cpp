@@ -674,7 +674,7 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
             Alpha1(ctx, alphaHistoryCounts.at(6), alpha0.at(6).getImages())
         },
         beta0(ctx, alpha1.at(0).getImages()),
-        beta1(ctx, beta0.getImages()) {
+        beta1(ctx, beta0.getImages(), alpha0.at(0).getImages()) {
     const auto& modelSourceImages = selectModelSourceImages(
         this->sourceImages, this->workingSourceImages
     );
@@ -682,6 +682,9 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
         this->destImages, this->workingDestImages
     );
 
+    // Generated outputs run sequentially on the same compute queue. Keep
+    // descriptors/uniforms per output, but share the intermediate images.
+    // Compute dependencies order the previous readers and writers.
     // build main passes
     for (size_t i = 0; i < destImages.size(); ++i) {
         auto& pass = this->passes.emplace_back();
@@ -694,24 +697,28 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
             if (j == 0) { // first pass has no prior data
                 pass.gamma0.emplace_back(ctx, i,
                     this->alpha1.at(6 - j).getImages(),
-                    this->blackImage
+                    this->blackImage,
+                    i == 0 ? nullptr : &this->passes.front().gamma0.at(j)
                 );
                 pass.gamma1.emplace_back(ctx, i,
                     pass.gamma0.at(j).getImages(),
                     this->alpha0.at(6 - j).getImages(),
                     this->blackImage,
-                    this->beta1.getImages().at(5)
+                    this->beta1.getImages().at(5),
+                    i == 0 ? nullptr : &this->passes.front().gamma1.at(j)
                 );
             } else { // other passes use prior data
                 pass.gamma0.emplace_back(ctx, i,
                     this->alpha1.at(6 - j).getImages(),
-                    pass.gamma1.at(j - 1).getImage()
+                    pass.gamma1.at(j - 1).getImage(),
+                    i == 0 ? nullptr : &this->passes.front().gamma0.at(j)
                 );
                 pass.gamma1.emplace_back(ctx, i,
                     pass.gamma0.at(j).getImages(),
                     this->alpha0.at(6 - j).getImages(),
                     pass.gamma1.at(j - 1).getImage(),
-                    this->beta1.getImages().at(6 - j)
+                    this->beta1.getImages().at(6 - j),
+                    i == 0 ? nullptr : &this->passes.front().gamma1.at(j)
                 );
             }
 
@@ -729,7 +736,8 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
                     pass.gamma1.at(j).getTempImages1(),
                     this->blackImage,
                     this->beta1.getImages().at(6 - j),
-                    this->blackImage
+                    this->blackImage,
+                    i == 0 ? nullptr : &this->passes.front().delta1.at(j - 4)
                 );
             } else if (j > 4) { // further passes do
                 pass.delta0.emplace_back(ctx, i,
@@ -745,7 +753,8 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
                     pass.gamma1.at(j).getTempImages1(),
                     pass.delta1.at(j - 5).getImage0(),
                     this->beta1.getImages().at(6 - j),
-                    pass.delta1.at(j - 5).getImage1()
+                    pass.delta1.at(j - 5).getImage1(),
+                    i == 0 ? nullptr : &this->passes.front().delta1.at(j - 4)
                 );
             }
         }
@@ -781,7 +790,9 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
     }
     beta0.prepare(images);
     beta1.prepare(images);
-    for (const auto& pass : this->passes) {
+    // Every output references the same scratch images: initialize once.
+    if (!this->passes.empty()) {
+        const auto& pass = this->passes.front();
         for (size_t i = 0; i < 7; ++i) {
             pass.gamma0.at(i).prepare(images);
             pass.gamma1.at(i).prepare(images);

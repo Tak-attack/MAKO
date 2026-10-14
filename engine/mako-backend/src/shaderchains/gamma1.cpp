@@ -21,7 +21,8 @@ Gamma1::Gamma1(const Ctx& ctx, size_t idx,
         const std::vector<vk::Image>& sourceImages,
         const std::vector<vk::Image>& prepassScratch,
         const vk::Image& additionalInput0,
-        const vk::Image& additionalInput1) : tempImages1(std::cref(prepassScratch)) {
+        const vk::Image& additionalInput1, const Gamma1* sharedScratch)
+        : tempImages1(std::cref(prepassScratch)) {
     const size_t m = ctx.perf ? 1 : 2; // multiplier
     const VkExtent2D extent = sourceImages.at(0).getExtent();
     const auto scratch = backend::requiredPrefix(prepassScratch, 2 * m, "Gamma1 prepass scratch");
@@ -32,16 +33,18 @@ Gamma1::Gamma1(const Ctx& ctx, size_t idx,
     }
 
     // Alpha1 has consumed Alpha0's outputs before the prepass signals. Reuse
-    // them across generated passes; the existing per-image barriers serialize
+    // them across generated passes; the compute dependencies serialize
     // accesses, and prepareWork fences generation before the next prepass.
-    for (size_t i = 0; i < (2 * m); i++) {
-        this->tempImages0.emplace_back(ctx.vk, extent, ctx.imageMemoryPool);
+    this->tempImages0 = sharedScratch ? sharedScratch->tempImages0
+        : std::make_shared<std::vector<vk::Image>>();
+    if (sharedScratch) {
+        this->image = sharedScratch->image;
+    } else {
+        for (size_t i = 0; i < (2 * m); i++)
+            this->tempImages0->emplace_back(ctx.vk, extent, ctx.imageMemoryPool);
+        this->image = std::make_shared<vk::Image>(ctx.vk, extent,
+            ctx.imageMemoryPool, VK_FORMAT_R16G16B16A16_SFLOAT);
     }
-    this->image.emplace(ctx.vk,
-        VkExtent2D { extent.width, extent.height },
-        ctx.imageMemoryPool,
-        VK_FORMAT_R16G16B16A16_SFLOAT
-    );
 
     // create descriptor sets
     const auto& shaders = (ctx.perf ?
@@ -49,21 +52,21 @@ Gamma1::Gamma1(const Ctx& ctx, size_t idx,
     this->sets.reserve(4);
     this->sets.emplace_back(ManagedShaderBuilder()
         .sampleds(sourceImages)
-        .storages(this->tempImages0)
+        .storages(*this->tempImages0)
         .sampler(ctx.bnbSampler)
         .build(ctx.vk, ctx.pool, shaders.at(1)));
     this->sets.emplace_back(ManagedShaderBuilder()
-        .sampleds(this->tempImages0)
+        .sampleds(*this->tempImages0)
         .storages(scratch)
         .sampler(ctx.bnbSampler)
         .build(ctx.vk, ctx.pool, shaders.at(2)));
     this->sets.emplace_back(ManagedShaderBuilder()
         .sampleds(scratch)
-        .storages(this->tempImages0)
+        .storages(*this->tempImages0)
         .sampler(ctx.bnbSampler)
         .build(ctx.vk, ctx.pool, shaders.at(3)));
     this->sets.emplace_back(ManagedShaderBuilder()
-        .sampleds(this->tempImages0)
+        .sampleds(*this->tempImages0)
         .sampled(additionalInput0)
         .sampled(additionalInput1)
         .storage(*this->image)
@@ -77,8 +80,8 @@ Gamma1::Gamma1(const Ctx& ctx, size_t idx,
 }
 
 void Gamma1::prepare(std::vector<VkImage>& images) const {
-    for (size_t i = 0; i < this->tempImages0.size(); i++) {
-        images.push_back(this->tempImages0.at(i).handle());
+    for (size_t i = 0; i < this->tempImages0->size(); i++) {
+        images.push_back(this->tempImages0->at(i).handle());
     }
     images.push_back(this->image->handle());
 }

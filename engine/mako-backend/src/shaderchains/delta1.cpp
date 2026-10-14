@@ -22,7 +22,7 @@ Delta1::Delta1(const Ctx& ctx, size_t idx,
         const std::vector<vk::Image>& temporaryImages0,
         const vk::Image& additionalInput0,
         const vk::Image& additionalInput1,
-        const vk::Image& additionalInput2) {
+        const vk::Image& additionalInput2, const Delta1* sharedScratch) {
     const size_t m = ctx.perf ? 1 : 2; // multiplier
     const VkExtent2D extent = sourceImages0.at(0).getExtent();
     const auto source1 = backend::requiredPrefix(sourceImages1, m, "Delta1 source 1");
@@ -34,16 +34,12 @@ Delta1::Delta1(const Ctx& ctx, size_t idx,
     // dispatches can overwrite those dead outputs and Gamma1's unused tail.
     // Keep Gamma1's first m images intact for the second half of this chain.
     const auto scratch = backend::deltaScratch(sourceImages0, sourceImages1, m);
-    this->image0.emplace(ctx.vk,
-        VkExtent2D { extent.width, extent.height },
-        ctx.imageMemoryPool,
-        VK_FORMAT_R16G16B16A16_SFLOAT
-    );
-    this->image1.emplace(ctx.vk,
-        VkExtent2D { extent.width, extent.height },
-        ctx.imageMemoryPool,
-        VK_FORMAT_R16G16B16A16_SFLOAT
-    );
+    this->image0 = sharedScratch ? sharedScratch->image0
+        : std::make_shared<vk::Image>(ctx.vk, extent,
+            ctx.imageMemoryPool, VK_FORMAT_R16G16B16A16_SFLOAT);
+    this->image1 = sharedScratch ? sharedScratch->image1
+        : std::make_shared<vk::Image>(ctx.vk, extent,
+            ctx.imageMemoryPool, VK_FORMAT_R16G16B16A16_SFLOAT);
 
     // create descriptor sets
     const auto& shaders = (ctx.perf ?

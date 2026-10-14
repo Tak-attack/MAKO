@@ -9,6 +9,7 @@
 #include "mako-common/vulkan/image.hpp"
 #include "mako-common/vulkan/vulkan.hpp"
 
+#include <memory>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -26,11 +27,13 @@ namespace mako::backend {
         /// @param prepassScratch same-extent Alpha0 outputs, consumed before generation
         /// @param additionalInput0 additional input image
         /// @param additionalInput1 additional input image
+        /// @param sharedScratch same-context first-output resources, or null to own them
         Gamma1(const Ctx& ctx, size_t idx,
             const std::vector<vk::Image>& sourceImages,
             const std::vector<vk::Image>& prepassScratch,
             const vk::Image& additionalInput0,
-            const vk::Image& additionalInput1);
+            const vk::Image& additionalInput1,
+            const Gamma1* sharedScratch = nullptr);
 
         /// prepare the shaderchain initially
         /// @param images vector to fill with image handles
@@ -47,15 +50,15 @@ namespace mako::backend {
 
         /// get the first same-extent temporary image set
         /// @return temporary images available to the immediately following stage
-        [[nodiscard]] const auto& getTempImages0() const { return this->tempImages0; }
+        [[nodiscard]] const auto& getTempImages0() const { return *this->tempImages0; }
 
         /// get the second same-extent temporary image set
         /// @return temporary images available to the immediately following stage
         [[nodiscard]] const auto& getTempImages1() const { return this->tempImages1.get(); }
     private:
-        std::vector<vk::Image> tempImages0;
+        std::shared_ptr<std::vector<vk::Image>> tempImages0;
         ls::R<const std::vector<vk::Image>> tempImages1;
-        ls::lazy<vk::Image> image;
+        std::shared_ptr<vk::Image> image;
 
         std::vector<ManagedShader> sets;
         VkExtent2D dispatchExtent{};
