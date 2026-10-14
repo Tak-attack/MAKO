@@ -96,7 +96,7 @@
   "CONFIG_WORKAROUNDS_TITLE": "互換性設定",
   "CONFIG_FLOW_SCALE": "フロースケール",
   "CONFIG_FLOW_SCALE_DESC": "フレーム生成のモーション推定解像度です。低い値は GPU 負荷を減らし、高い値は画質を優先します。",
-  "CONFIG_BASE_FPS_CAP": "ベースFPS制限",
+  "CONFIG_BASE_FPS_CAP": "ベース FPS 制限",
   "CONFIG_BASE_FPS_CAP_OFF": "オフ",
   "CONFIG_BASE_FPS_CAP_DESC": "フレーム生成前の実フレームレートを制限します。DirectX、Zink 経由の OpenGL、Vulkan に対応します。",
   "CONFIG_BASE_FPS_CAP_STEADY_RELATION": "安定ベースFPS制限（{fps} FPS）によって制御されています。手動値は保存されたままです。",
