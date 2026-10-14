@@ -21,6 +21,7 @@
 #include "runtime_transition.hpp"
 #include "spatial_scaler.hpp"
 #include "spatial_scaling_policy.hpp"
+#include "spatial_command_recording.hpp"
 
 #include <array>
 #include <chrono>
@@ -413,6 +414,7 @@ namespace mako::layer {
             vk::Semaphore readySemaphore;
             vk::Fence completionFence;
             bool completionInFlight{false};
+            SpatialCommandRecording recording;
         };
         std::optional<SpatialScaler> spatialScaler;
         std::optional<bool> shaderHdrReducedPrecision;
@@ -493,6 +495,10 @@ namespace mako::layer {
         void applyPendingSpatialScaler(const vk::Vulkan& vk);
         void prepareSpatialScalingPass(const vk::Vulkan& vk,
             SpatialScalingPass& pass);
+        void recordSpatialScalingPass(const vk::Vulkan& vk,
+            SpatialScalingPass& pass, VkImage applicationImage,
+            VkImage frameGenerationSource = VK_NULL_HANDLE);
+        void invalidateSpatialScalingRecordings() noexcept;
         [[nodiscard]] bool spatialScalingPassesReady(
             const vk::Vulkan& vk);
         void configureDirectSpatialFrameGenerationOutputs(

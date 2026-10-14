@@ -96,11 +96,7 @@ VkResult Swapchain::presentSpatiallyScaledFrame(
         invocation.imageIndex
     );
     const auto scalingStarted = startPresentDiagnostic();
-    pass.commandBuffer.begin(invocation.vk);
-    this->spatialScaler->record(
-        invocation.vk, pass.commandBuffer, applicationImage
-    );
-    pass.commandBuffer.end(invocation.vk);
+    this->recordSpatialScalingPass(invocation.vk, pass, applicationImage);
     pass.commandBuffer.submit(
         invocation.vk,
         invocation.waitSemaphores, VK_NULL_HANDLE, 0,
@@ -217,11 +213,7 @@ VkResult Swapchain::presentOriginalImage(
             invocation.imageIndex
         );
         const auto scalingStarted = startPresentDiagnostic();
-        pass.commandBuffer.begin(invocation.vk);
-        this->spatialScaler->record(
-            invocation.vk, pass.commandBuffer, applicationImage
-        );
-        pass.commandBuffer.end(invocation.vk);
+        this->recordSpatialScalingPass(invocation.vk, pass, applicationImage);
         pass.commandBuffer.submit(
             invocation.vk,
             std::array{waitSemaphore}, VK_NULL_HANDLE, 0,
@@ -281,12 +273,8 @@ void Swapchain::submitSourceCopy(const PresentInvocation& invocation,
                 SpatialFramePipelinePlacement::PreFrameGeneration) {
         auto& pass = this->spatialScalingPasses.at(invocation.imageIndex);
         this->prepareSpatialScalingPass(invocation.vk, pass);
-        pass.commandBuffer.begin(invocation.vk);
-        this->spatialScaler->record(
-            invocation.vk, pass.commandBuffer,
-            swapchainImage, sourceImage.handle()
-        );
-        pass.commandBuffer.end(invocation.vk);
+        this->recordSpatialScalingPass(
+            invocation.vk, pass, swapchainImage, sourceImage.handle());
 
         const auto sourceSubmitStarted = startPresentDiagnostic();
         const auto sourceTimelineValue =

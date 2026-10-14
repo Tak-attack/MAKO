@@ -170,6 +170,9 @@ if(MAKO_BUILD_VK_LAYER)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(mako-spatial-command-recording-tests "tests/spatial_command_recording_tests.cpp")
+    target_include_directories(mako-spatial-command-recording-tests PRIVATE src)
+    add_test(NAME spatial-command-recording COMMAND mako-spatial-command-recording-tests)
     add_test(NAME renderer-source-inventory
         COMMAND "${CMAKE_COMMAND}" -P
             "${CMAKE_CURRENT_BINARY_DIR}/check-source-inventory.cmake")
@@ -185,6 +188,8 @@ if(BUILD_TESTING)
         set_tests_properties(${test_name} PROPERTIES
             LABELS "portable-policy")
     endfunction()
+
+    mako_register_portable_policy_test(mako-spatial-command-recording-tests spatial-command-recording)
 
     add_dependencies(mako-portable-policy-test-binaries
         mako-external-fd-tests mako-descriptor-pool-tests)

@@ -649,6 +649,7 @@ void Swapchain::applyPendingSpatialScaler(const vk::Vulkan& vk) {
     }
 
     const auto requested = this->spatialTransition.value();
+    this->invalidateSpatialScalingRecordings();
     *this->spatialScaler = std::move(*this->preparedSpatialScaler);
     this->preparedSpatialScaler.reset();
     if (!this->info.hdrDisplayResize) {
@@ -700,6 +701,24 @@ void Swapchain::applyPendingSpatialScaler(const vk::Vulkan& vk) {
     }
 }
 
+void Swapchain::recordSpatialScalingPass(const vk::Vulkan& vk,
+        SpatialScalingPass& pass, const VkImage applicationImage,
+        const VkImage frameGenerationSource) {
+    // prepareSpatialScalingPass established completion before this recording
+    // is reused or replaced. Do not retain a key if recording fails midway.
+    pass.recording.update(applicationImage, frameGenerationSource, [&] {
+        pass.commandBuffer.begin(vk, 0);
+        this->spatialScaler->record(
+            vk, pass.commandBuffer, applicationImage, frameGenerationSource);
+        pass.commandBuffer.end(vk);
+    });
+}
+
+void Swapchain::invalidateSpatialScalingRecordings() noexcept {
+    for (auto& pass : this->spatialScalingPasses)
+        pass.recording.invalidate();
+}
+
 void Swapchain::prepareSpatialScalingPass(const vk::Vulkan& vk,
         SpatialScalingPass& pass) {
     if (pass.completionInFlight) {
@@ -736,6 +755,7 @@ void Swapchain::configureDirectSpatialFrameGenerationOutputs(
         const vk::Vulkan& vk, SpatialScaler& scaler,
         const std::span<const vk::Image> outputs,
         const std::string_view reason) noexcept {
+    this->invalidateSpatialScalingRecordings();
     if (!directSpatialFrameGenerationOutputEligible(
             this->spatialFramePipelinePlacement,
             this->info.spatialScalingActive, outputs.size())) {
@@ -774,6 +794,7 @@ void Swapchain::configureDirectSpatialFrameGenerationOutputs(
 }
 
 void Swapchain::clearDirectSpatialFrameGenerationOutputs() noexcept {
+    this->invalidateSpatialScalingRecordings();
     if (this->spatialScaler)
         this->spatialScaler->clearDirectFrameGenerationOutputs();
     if (this->preparedSpatialScaler)

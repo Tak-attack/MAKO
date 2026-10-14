@@ -244,11 +244,7 @@ VkResult Swapchain::retireAcquiredImagesAndPresent(const vk::Vulkan& vk,
             originalImageIndex
         );
         this->prepareSpatialScalingPass(vk, scalingPass);
-        scalingPass.commandBuffer.begin(vk);
-        this->spatialScaler->record(
-            vk, scalingPass.commandBuffer, originalImage
-        );
-        scalingPass.commandBuffer.end(vk);
+        this->recordSpatialScalingPass(vk, scalingPass, originalImage);
         scalingPass.commandBuffer.submit(
             vk, applicationWaitSemaphores, VK_NULL_HANDLE, 0,
             std::array{scalingPass.readySemaphore.handle()},
