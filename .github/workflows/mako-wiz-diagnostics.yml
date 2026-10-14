@@ -42,7 +42,15 @@ jobs:
 
             const mascotUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${context.payload.repository.default_branch}/plugin/assets/mako-wiz.webp`;
             const mascot = `<p align="center"><img src="${mascotUrl}" alt="MAKO Wiz, a cyberpunk shark wearing a wizard hat" width="160" /></p>`;
-            const guide = Buffer.from(file.content, 'base64').toString('utf8').trim();
+            // Relative document links must point to repository files from an issue comment.
+            const guideUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${encodeURIComponent(context.payload.repository.default_branch)}/${path}`;
+            const guide = Buffer.from(file.content, 'base64').toString('utf8').trim()
+              .replace(/\]\(([^)\s]+)\)/g, (link, target) => {
+                if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(target)) {
+                  return link;
+                }
+                return `](${new URL(target, guideUrl).href})`;
+              });
             const body = [
               '<!-- mako-wiz-diagnostics -->',
               mascot,
