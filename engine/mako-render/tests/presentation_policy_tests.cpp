@@ -923,18 +923,25 @@ int main() {
                 variablePolicy, true, 0),
         "Adaptive ordered pressure did not enter bounded zero-wait retry");
     expect(adaptiveOrderedDeliveryMissRequiresFallback(
-                true, true, 2, 0) &&
+                true, true, 2, 0, true) &&
             adaptiveOrderedDeliveryMissRequiresFallback(
-                true, true, 2, 1) &&
+                true, true, 2, 1, true) &&
             !adaptiveOrderedDeliveryMissRequiresFallback(
-                true, true, 2, 2) &&
+                true, true, 2, 2, true) &&
             !adaptiveOrderedDeliveryMissRequiresFallback(
-                true, true, 0, 0) &&
+                true, true, 0, 0, true) &&
             !adaptiveOrderedDeliveryMissRequiresFallback(
-                false, true, 2, 0) &&
+                false, true, 2, 0, true) &&
             !adaptiveOrderedDeliveryMissRequiresFallback(
-                true, false, 2, 0),
-        "Adaptive ordered delivery misses lost immediate fallback policy");
+                true, false, 2, 0, true),
+        "Adaptive ordered multiplier probes lost immediate fallback policy");
+    for (size_t requested = 1; requested <= 4; ++requested) {
+        for (size_t admitted = 0; admitted < requested; ++admitted) {
+            expect(!adaptiveOrderedDeliveryMissRequiresFallback(
+                    true, true, requested, admitted, false),
+                "zero-wait admission miss demoted an already validated load");
+        }
+    }
     for (uint32_t applicationImages = 2; applicationImages <= 4; ++applicationImages) {
         for (size_t generated = 1; generated <= 4; ++generated) {
             const size_t images = applicationImages + generated;

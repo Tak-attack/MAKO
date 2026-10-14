@@ -116,6 +116,37 @@ unrelated application output
 
 
 class DiagnosticsHelperTests(unittest.TestCase):
+    def test_wayland_protocol_errors_survive_every_preset(self):
+        errors = [
+            "wl_display#1: error 1: invalid method in synthetic protocol request",
+            "wp_linux_drm_syncobj_surface_v1#37: error 4: synthetic synchronization failure",
+            "wl_surface@9: error 2: synthetic surface failure",
+            "gamescope_swapchain#52: error 1: synthetic swapchain failure",
+            "[destroyed object]: error 7: synthetic buffer import failure",
+        ]
+        unrelated = [
+            "unrelated application output",
+            "application: error 7: unrelated failure",
+            "wl_surface#9.attach(wl_buffer#10, 0, 0)",
+            "prefix wl_display#1: error 1: quoted diagnostic",
+            "wl_display#x: error 1: malformed object ID",
+            "wl_display#1: error unknown: malformed error code",
+        ]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "protocol-error.log"
+            path.write_text("\n".join(unrelated + errors + unrelated) + "\n", encoding="utf-8")
+            for preset in self._run("--list").stdout.splitlines():
+                with self.subTest(preset=preset):
+                    result = self._run("--log", str(path), preset)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.splitlines(), errors)
+                    self.assertIn(f"matched_trace_lines={len(errors)}", result.stderr)
+
+            result = self._run("--log", str(path), "--lines", "1", "all")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), errors[-1:])
+            self.assertIn("omitted_trace_lines=4", result.stderr)
+
     def test_renderer_exception_details_survive_every_preset(self):
         records = [
             "unrelated application output",

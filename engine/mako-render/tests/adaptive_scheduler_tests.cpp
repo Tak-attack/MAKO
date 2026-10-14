@@ -5597,6 +5597,54 @@ namespace {
         }
     }
 
+    void testNonblockingAdmissionMissKeepsAcceptedLoad() {
+        // A game-minimum pool can normally deliver 30 real + 30 generated
+        // frames, yet occasionally have no image ready for a zero-wait poll.
+        // Exercise the admission classifier together with real scheduler
+        // delivery accounting so one missed output cannot create seconds of
+        // native-only plans. Refresh and Smooth Cadence do not qualify a miss.
+        for (const bool stableCadence : {false, true}) {
+            for (const uint32_t refresh : {60U, 90U, 120U, 144U}) {
+                Harness harness(60, 3, stableCadence,
+                    AdaptiveRecoveryPolicy::OrderedSdr, false,
+                    ls::dynamicCadenceProbeIntervalDuration(
+                        ls::GameConfDefaults::dynamicCadenceProbeIntervalSeconds
+                    ), refresh, false, true);
+                harness.start();
+                harness.runAtFps(30.0, 12s);
+                require(harness.scheduler.snapshot().validatedGenerationLimit == 1 &&
+                        !harness.scheduler.snapshot().rampEvaluationActive,
+                    "precondition failed: 30-to-60 FPS load was not qualified");
+                require(orderedGeneratedBatchNeedsNonblockingAdmission(3, 3, 1),
+                    "game-minimum pool did not use zero-wait admission");
+                const size_t backoffs = harness.diagnostics.count("ramp-backoff");
+                const size_t recoveries = harness.diagnostics.count(
+                    "adaptive-recovery-resume-scheduled");
+                for (size_t miss = 0; miss < 3; ++miss) {
+                    const auto plan = harness.frameAtFps(30.0, false, false);
+                    require(plan.size() == 1,
+                        "qualified 30-to-60 FPS plan lost its generated output");
+                    require(!adaptiveOrderedDeliveryMissRequiresFallback(
+                            true, true, plan.size(), 0,
+                            harness.scheduler.snapshot().rampEvaluationActive),
+                        "isolated zero-wait miss requested generated-load recovery");
+                    harness.scheduler.reportGeneratedFrameDelivery({
+                        .requested = plan.size(),
+                        .acceptedForPresentation = 0,
+                    });
+                    require(harness.frameAtFps(30.0).size() == 1 &&
+                            harness.scheduler.snapshot().validatedGenerationLimit == 1,
+                        "generated output did not resume on the next real frame");
+                    harness.runAtFps(30.0, 3s);
+                }
+                require(harness.diagnostics.count("ramp-backoff") == backoffs &&
+                        harness.diagnostics.count(
+                            "adaptive-recovery-resume-scheduled") == recoveries,
+                    "isolated zero-wait misses started a scheduler cooldown");
+            }
+        }
+    }
+
     void testQualifiedTransportFailureBacksOffAcceptedLoad() {
         Harness harness(
             100,
@@ -6077,6 +6125,7 @@ int main() {
         {"Smooth rescue preserves scene adaptation", testSmoothRescueFailurePreservesSceneAdaptation},
         {"image recovery uses proven lower load", testGeneratedImageRecoveryFallsBackToProvenLoad},
         {"transport-failed multiplier probes keep proven load", testTransportFailureDuringAnyMultiplierProbeRetainsProvenLoad},
+        {"zero-wait admission misses keep accepted load", testNonblockingAdmissionMissKeepsAcceptedLoad},
         {"qualified transport failure backs off accepted load", testQualifiedTransportFailureBacksOffAcceptedLoad},
         {"qualified transport failure demotes accepted 3x to 2x", testQualifiedTransportFailureDemotesAcceptedThreeXToTwoX},
         {"delivery pressure cannot bridge upward", testDeliveryPressureCannotBridgeToHigherMultiplier},

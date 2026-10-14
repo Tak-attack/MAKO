@@ -339,17 +339,18 @@ namespace mako::layer {
             requestedGeneratedFrames > 0;
     }
 
-    /// Some Adaptive ordered shortfalls are direct transport evidence against
-    /// the current generated load, such as headroom preflight during a higher
-    /// multiplier evaluation. A bounded VRR timeout instead uses the
-    /// pressure preflight above, so its caller preserves the scheduler while
-    /// transport availability is retried.
+    /// Headroom preflight can reject an active multiplier experiment, but a
+    /// zero-wait miss is not evidence against an already validated load.
+    /// Preserve that load so the next real frame can retry admission without
+    /// a stabilization interval and multiplier backoff. Bounded VRR timeouts
+    /// use the separate pressure preflight above.
     [[nodiscard]] inline bool adaptiveOrderedDeliveryMissRequiresFallback(
             const bool adaptive,
             const bool orderedTransport,
             const size_t requestedGeneratedFrames,
-            const size_t admittedGeneratedFrames) noexcept {
-        return adaptive && orderedTransport &&
+            const size_t admittedGeneratedFrames,
+            const bool multiplierEvaluationActive) noexcept {
+        return adaptive && orderedTransport && multiplierEvaluationActive &&
             requestedGeneratedFrames > 0 &&
             admittedGeneratedFrames < requestedGeneratedFrames;
     }

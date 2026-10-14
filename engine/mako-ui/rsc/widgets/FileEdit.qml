@@ -6,6 +6,7 @@ import QtQuick.Dialogs
 RowLayout {
     property string title
     property string filter
+    property string allFilesFilter
     property string text
     signal update(string text)
 
@@ -27,7 +28,7 @@ RowLayout {
     FileDialog {
         id: picker
         title: root.title
-        nameFilters: [root.filter, "All Files (*)"]
+        nameFilters: [root.filter, root.allFilesFilter]
         onAccepted: root.update(selectedFile.toString().replace("file://", ""))
     }
 }

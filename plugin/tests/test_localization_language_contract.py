@@ -77,6 +77,109 @@ class LocalizationLanguageContractTests(unittest.TestCase):
                         f"{language}.{key} changed named placeholders",
                     )
 
+    @staticmethod
+    def localized_catalogs():
+        renderer = json.loads(RENDERER_TRANSLATIONS.read_text(encoding="utf-8"))["catalogs"]
+        decky_english = json.loads((DECKY_I18N_ROOT / "template.json").read_text(encoding="utf-8"))
+        for language, catalog in renderer.items():
+            if language == "en":
+                continue
+            yield "Qt", language, catalog, renderer["en"]
+            decky = json.loads((DECKY_I18N_ROOT / f"{language}.json").read_text(encoding="utf-8"))
+            yield "Decky", language, decky, decky_english
+
+    def test_localized_catalogs_do_not_fall_back_to_english_copy(self):
+        # Brands, algorithm identifiers and units remain literal in every locale.
+        invariant_names = {
+            "CAS", "DLS", "FXAA", "SMAA", "DPX / Cineon",
+            "Technicolor", "Technicolor 2", "MAKO Scaler", "MAKO Renderer",
+            "MAKO + DeckyFG", "Lossless Scaling", "Gamescope VRR", "FPS", "FPS)",
+        }
+        # These words have the same spelling in English and the target language.
+        same_spelling = {
+            "pt-BR": {"Experimental", "Nostalgia"},
+            "pt-PT": {"Experimental", "Nostalgia"},
+            "es": {"Error", "Error:", "Experimental", "Factor", "Nostalgia", "Sepia"},
+            "de": {"Details", "Installation", "Name", "Sepia", "Vignette"},
+        }
+        for component, language, catalog, english in self.localized_catalogs():
+            allowed = invariant_names | same_spelling.get(language, set())
+            for key, value in catalog.items():
+                with self.subTest(component=component, language=language, key=key):
+                    if value == english[key] and re.search(r"[A-Za-z]{3}", value):
+                        self.assertIn(value.strip(), allowed, "untranslated English UI copy")
+
+    def test_localized_catalogs_do_not_mix_scripts_or_english_feature_names(self):
+        cyrillic = r"[\u0400-\u04ff]"
+        east_asian = r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]"
+        latin_locales = {"pt-BR", "pt-PT", "es", "de"}
+        untranslated_features = (
+            "LS1 Quality", "LS1 Performance", "HDR Look", "Ultra Performance",
+            "Frame-gen", "Frame-Gen",
+        )
+        for component, language, catalog, _ in self.localized_catalogs():
+            for key, value in catalog.items():
+                with self.subTest(component=component, language=language, key=key):
+                    if language in latin_locales:
+                        self.assertNotRegex(value, cyrillic + "|" + east_asian)
+                    elif language in {"ru", "uk"}:
+                        self.assertNotRegex(value, east_asian)
+                        # Distinguish the two Cyrillic alphabets as well.
+                        foreign_letters = r"[ыъэЫЪЭ]" if language == "uk" else r"[іїєґІЇЄҐ]"
+                        self.assertNotRegex(value, foreign_letters)
+                    else:
+                        self.assertNotRegex(value, cyrillic)
+                        if language == "zh":
+                            self.assertNotRegex(value, r"[\u3040-\u30ff\uac00-\ud7af]")
+                        elif language == "ja":
+                            self.assertNotRegex(value, r"[\uac00-\ud7af]")
+                        elif language == "ko":
+                            self.assertNotRegex(value, r"[\u3040-\u30ff]")
+                    for feature in untranslated_features:
+                        self.assertNotIn(feature, value)
+
+    def test_new_shared_control_names_agree_in_every_language(self):
+        renderer = json.loads(RENDERER_TRANSLATIONS.read_text(encoding="utf-8"))["catalogs"]
+        controls = {
+            "ADAPTIVE_TARGET_REFRESH_RATE": "adaptiveTargetRefreshRate",
+            "ADAPTIVE_FALLBACK_TARGET_FPS": "fallbackTargetFps",
+            "POWER_HANDHELD": "powerHandheld",
+            "POWER_DOCKED": "powerDocked",
+            "CONFIG_VKBASALT_CUSTOM_ADD": "addCustomShader",
+            "CONFIG_VKBASALT_CUSTOM_REFRESH": "refreshCustomShaders",
+            "CONFIG_VKBASALT_CUSTOM_DELETE": "deleteSelectedCustomShaders",
+            "REMOTE_PLAY_TITLE": "remotePlay",
+            "REMOTE_PLAY_INSTALL": "overrideRemotePlay",
+            "REMOTE_PLAY_STATUS": "remotePlayStatus",
+            "REMOTE_PLAY_ATTENTION": "remotePlayAttention",
+            "SCALING_METHOD_LS1": "scalingMethodLs1",
+            "SCALING_METHOD_LS1_PERFORMANCE": "scalingMethodLs1Performance",
+        }
+        for component, language, decky, _ in self.localized_catalogs():
+            if component != "Decky":
+                continue
+            for decky_key, qt_key in controls.items():
+                with self.subTest(language=language, control=decky_key):
+                    self.assertEqual(decky[decky_key], renderer[language][qt_key])
+
+
+    def test_qt_bundled_effects_use_localized_labels_matching_decky(self):
+        qml = (REPOSITORY_ROOT / "engine/mako-ui/rsc/UI.qml").read_text(encoding="utf-8")
+        effect_ids = json.loads(re.search(r"property var bundledEffectIds: (\[[^\n]+\])", qml)[1])
+        label_binding = re.search(r"property var bundledEffectLabels: \[([^\n]+)\]", qml)[1]
+        labels = [value.strip() for value in label_binding.split(",")]
+        self.assertEqual(len(effect_ids), len(labels))
+        self.assertEqual(labels[0], "t.off")
+        for label in labels:
+            self.assertRegex(label, r"^t\.[a-zA-Z]+[0-9]*$", "effect label bypasses localization")
+        renderer = json.loads(RENDERER_TRANSLATIONS.read_text(encoding="utf-8"))["catalogs"]
+        for language, catalog in renderer.items():
+            source_name = "template" if language == "en" else language
+            decky = json.loads((DECKY_I18N_ROOT / f"{source_name}.json").read_text(encoding="utf-8"))
+            for effect_id, label in zip(effect_ids[1:], labels[1:]):
+                with self.subTest(language=language, effect=effect_id):
+                    self.assertEqual(catalog[label[2:]], decky["CONFIG_VKBASALT_SHADER_" + effect_id.upper()])
+
     def test_steam_aliases_resolve_only_to_advertised_languages(self):
         decky_metadata = json.loads(
             (DECKY_I18N_ROOT / "language_metadata.json").read_text(

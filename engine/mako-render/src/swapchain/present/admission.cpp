@@ -303,32 +303,31 @@ void Swapchain::handleGeneratedImageAdmissionPressure(
         const uint64_t acquireTimeoutNanoseconds,
         const char* const action) {
     this->recoveryState.generatedImageAdmission.reportBypassedFrame();
+    const bool higherMultiplierEvaluationActive =
+        this->adaptiveScheduler &&
+        this->adaptiveScheduler->snapshot().rampEvaluationActive;
     const bool adaptiveOrderedAdmissionMiss =
         classifyAdaptiveLoadFailure && this->adaptiveScheduler &&
         adaptiveOrderedDeliveryMissRequiresFallback(
             this->profile.adaptive,
             this->privateOrderedTransport,
             plan.requestedGeneratedFrames.size(),
-            admittedGeneratedFrames
+            admittedGeneratedFrames,
+            higherMultiplierEvaluationActive
         );
-    const bool higherMultiplierEvaluationActive =
-        adaptiveOrderedAdmissionMiss &&
-        this->adaptiveScheduler->snapshot().rampEvaluationActive;
     if (adaptiveOrderedAdmissionMiss) {
-        const auto observedAt = DiagnosticsClock::now();
-        if (!this->adaptiveScheduler->rejectActiveRampForTransportMiss(
-                observedAt)) {
-            this->adaptiveScheduler->beginTransportRecovery(
-                observedAt, true
-            );
-        }
+        static_cast<void>(
+            this->adaptiveScheduler->rejectActiveRampForTransportMiss(
+                DiagnosticsClock::now()
+            )
+        );
     }
     const auto constrainedAdaptiveOrderedWsiCapacity =
         retainPartialAdmissionCapacity
             ? adaptiveOrderedWsiLimitAfterPartialAdmission(
                 this->profile.adaptive,
                 this->privateOrderedTransport,
-                higherMultiplierEvaluationActive,
+                adaptiveOrderedAdmissionMiss,
                 plan.requestedGeneratedFrames.size(),
                 admittedGeneratedFrames,
                 this->adaptiveOrderedWsiGeneratedCapacityLimit

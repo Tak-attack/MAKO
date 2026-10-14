@@ -294,6 +294,7 @@ ApplicationWindow {
 
                             title: t.selectLosslessDll
                             filter: t.dllFilter
+                            allFilesFilter: t.allFilesFilter
 
                             text: backend.dll
                             onUpdate: text => backend.dll = text
@@ -737,7 +738,7 @@ ApplicationWindow {
                             id: effectStack
                             Layout.fillWidth: true
                             property var bundledEffectIds: ["none", "hdr_look", "clarity", "levels_plus", "vibrance", "colourfulness", "curves", "deband", "technicolor2", "dpx", "bleach_bypass", "noir", "technicolor", "monochrome", "sepia", "film_grain", "vignette", "cartoon", "nostalgia", "chromatic_aberration"]
-                            property var bundledEffectLabels: [t.off, "HDR Look (SDR)", "Clarity", "Levels Plus", "Vibrance", "Colourfulness", "Curves", "Deband", "Technicolor 2", "DPX / Cineon", "Bleach Bypass", "Noir", "Technicolor", "Monochrome", "Sepia", "Film Grain", "Vignette", "Cartoon", "Nostalgia", "Chromatic Aberration"]
+                            property var bundledEffectLabels: [t.off, t.shaderEffectHdrLook, t.shaderEffectClarity, t.shaderEffectLevelsPlus, t.shaderEffectVibrance, t.shaderEffectColourfulness, t.shaderEffectCurves, t.shaderEffectDeband, t.shaderEffectTechnicolor2, t.shaderEffectDpx, t.shaderEffectBleachBypass, t.shaderEffectNoir, t.shaderEffectTechnicolor, t.shaderEffectMonochrome, t.shaderEffectSepia, t.shaderEffectFilmGrain, t.shaderEffectVignette, t.shaderEffectCartoon, t.shaderEffectNostalgia, t.shaderEffectChromaticAberration]
 
                             property var customEffects: backend.custom_shader_effects
                             property var missingIds: backend.vkbasalt_shader.split(":").filter(function(id) {

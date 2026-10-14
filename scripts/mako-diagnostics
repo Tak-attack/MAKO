@@ -216,6 +216,11 @@ add_pattern "$renderer_prefix render layer active; identity=VK_LAYER_MAKO_render
 # A presentation or initialization failure explains missing later telemetry in
 # any preset. Its adjacent exception details are folded into the same record.
 add_pattern "$renderer_prefix [^:]*failed:"
+# libwayland reports compositor protocol errors without a Renderer prefix.
+# Keep its exact error shape, including older @ object IDs and destroyed
+# proxies: an EPIPE bridge failure can otherwise hide the server's cause.
+# This does not admit ordinary Wayland request traces or arbitrary game logs.
+add_pattern '^([[:alpha:]_][[:alnum:]_]*[#@][0-9]+|[[]destroyed object[]]): error -?[0-9]+:'
 # Interleaved Vulkan processes are common on SteamOS. Keep their identity and
 # swapchain metadata in every focused report so policy and slow-operation
 # records can be attributed without expanding the report to unrelated output.

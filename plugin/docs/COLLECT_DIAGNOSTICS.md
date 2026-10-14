@@ -47,6 +47,8 @@ If the command is missing, select **Install MAKO Renderer** in Decky and retry. 
 
 For a slowdown after a long session, replace `--lines 5000` with `--lines 200000`. Collect before starting another game.
 
+Every preset retains Wayland protocol errors already written to the selected session log, including messages such as `wl_display#1: error ...` or `[destroyed object]: error ...`. These can explain a later `flush-failed` / broken-pipe presentation failure. The report cannot recover an error that the client never read or logged, and it does not collect the separate Gamescope system journal.
+
 For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution.
 
 ## 4. Restore your settings
