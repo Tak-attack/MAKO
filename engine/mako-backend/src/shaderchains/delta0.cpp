@@ -2,13 +2,16 @@
 
 #include "delta0.hpp"
 #include "../helpers/image_prefix.hpp"
+#include "../helpers/managed_shader.hpp"
 #include "../helpers/utils.hpp"
 #include "mako-common/helpers/pointers.hpp"
 #include "mako-common/vulkan/command_buffer.hpp"
 #include "mako-common/vulkan/image.hpp"
 #include "mako-common/vulkan/vulkan.hpp"
 
+#include <array>
 #include <cstddef>
+#include <functional>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -60,6 +63,9 @@ Delta0::Delta0(const Ctx& ctx, size_t idx,
 }
 
 void Delta0::render(const vk::Vulkan& vk, const vk::CommandBuffer& cmd, size_t idx) const {
-    this->sets0.at(idx % this->sets0.size()).dispatch(vk, cmd, dispatchExtent);
-    this->sets1.at(idx % this->sets1.size()).dispatch(vk, cmd, dispatchExtent);
+    const std::array batch{
+        ManagedDispatch{std::cref(this->sets0.at(idx % this->sets0.size())), dispatchExtent},
+        ManagedDispatch{std::cref(this->sets1.at(idx % this->sets1.size())), dispatchExtent},
+    };
+    ManagedShader::dispatchIndependent(vk, cmd, batch);
 }

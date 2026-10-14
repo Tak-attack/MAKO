@@ -8,6 +8,7 @@
 #include "mako-common/vulkan/image.hpp"
 #include "mako-common/vulkan/vulkan.hpp"
 
+#include <functional>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -29,11 +30,10 @@ namespace mako::backend {
         /// @param images vector to fill with image handles
         void prepare(std::vector<VkImage>& images) const;
 
-        /// render the alpha shaderchain
-        /// @param vk the vulkan instance
-        /// @param cmd command buffer
-        /// @param idx frame index
-        void render(const vk::Vulkan& vk, const vk::CommandBuffer& cmd, size_t idx) const;
+        /// Describe the selected history slot for grouped recording.
+        [[nodiscard]] ManagedDispatch getDispatch(size_t index) const {
+            return {std::cref(this->sets.at(index % this->sets.size())), this->dispatchExtent};
+        }
 
         /// get the generated images
         /// @return vector of images

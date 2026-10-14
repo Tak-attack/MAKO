@@ -3,9 +3,7 @@
 #include "alpha1.hpp"
 #include "../helpers/utils.hpp"
 #include "mako-common/helpers/pointers.hpp"
-#include "mako-common/vulkan/command_buffer.hpp"
 #include "mako-common/vulkan/image.hpp"
-#include "mako-common/vulkan/vulkan.hpp"
 
 #include <cstddef>
 #include <vector>
@@ -47,8 +45,4 @@ void Alpha1::prepare(std::vector<VkImage>& images) const {
     for (const auto& vec : this->images)
         for (const auto& img : vec)
             images.push_back(img.handle());
-}
-
-void Alpha1::render(const vk::Vulkan& vk, const vk::CommandBuffer& cmd, size_t idx) const {
-    this->sets.at(idx % this->sets.size()).dispatch(vk, cmd, dispatchExtent);
 }

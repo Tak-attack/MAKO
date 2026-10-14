@@ -16,6 +16,12 @@
 
 namespace mako::backend {
 
+    class ManagedShader;
+    struct ManagedDispatch {
+        ls::R<const ManagedShader> shader;
+        VkExtent2D extent;
+    };
+
     /// managed shader handling dispatch and barriers
     /// this class is NOT memory-safe
     class ManagedShader {
@@ -28,6 +34,9 @@ namespace mako::backend {
         /// @throws ls::vulkan_error on failure
         void dispatch(const vk::Vulkan& vk,
             const vk::CommandBuffer& cmd, VkExtent2D extent) const;
+        /// Group only dispatches with no shared read/write or write/write images.
+        static void dispatchIndependent(const vk::Vulkan& vk,
+            const vk::CommandBuffer& cmd, std::span<const ManagedDispatch> dispatches);
     private:
         ls::R<const vk::Shader> shader;
 

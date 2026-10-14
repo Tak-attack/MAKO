@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "managed_shader.hpp"
+#include "independent_dispatch.hpp"
 #include "mako-common/vulkan/buffer.hpp"
 #include "mako-common/vulkan/command_buffer.hpp"
 #include "mako-common/vulkan/descriptor_pool.hpp"
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <functional>
 #include <span>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -136,4 +138,25 @@ void ManagedShader::dispatch(const vk::Vulkan& vk, const vk::CommandBuffer& cmd,
         this->barriers,
         extent.width, extent.height, 1
     );
+}
+
+void ManagedShader::dispatchIndependent(const vk::Vulkan& vk,
+        const vk::CommandBuffer& cmd, std::span<const ManagedDispatch> dispatches) {
+    std::vector<std::span<const vk::Barrier>> accesses;
+    accesses.reserve(dispatches.size());
+    for (const auto& dispatch : dispatches)
+        accesses.emplace_back(dispatch.shader.get().barriers);
+    if (!independentComputeDispatches(accesses))
+        throw std::logic_error("Dependent shaders in an independent dispatch group");
+
+    std::vector<vk::Barrier> barriers;
+    for (const auto access : accesses)
+        barriers.insert(barriers.end(), access.begin(), access.end());
+    if (dispatches.empty()) return;
+    cmd.insertComputeBarriers(vk, barriers);
+    for (const auto& dispatch : dispatches) {
+        const auto& shader = dispatch.shader.get();
+        cmd.dispatchAfterBarrier(vk, shader.shader, shader.descriptorSet,
+            dispatch.extent.width, dispatch.extent.height, 1);
+    }
 }

@@ -10,6 +10,7 @@
 #include "mako-common/vulkan/vulkan.hpp"
 
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -17,10 +18,10 @@
 namespace ctx { struct Ctx; }
 
 namespace mako::backend {
-    /// gamma shaderchain
+    /// delta refinement shaderchain
     class Delta1 {
     public:
-        /// create a gamma shaderchain
+        /// create a delta refinement shaderchain
         /// @param ctx context
         /// @param idx generated frame index
         /// @param sourceImages0 source images
@@ -30,6 +31,8 @@ namespace mako::backend {
         /// @param additionalInput1 additional input image
         /// @param additionalInput2 additional input image
         /// @param sharedScratch same-context first-output resources, or null to own them
+        /// @param parallelScratch0 dead coarser Alpha0 scratch, or empty for serial execution
+        /// @param parallelScratch1 second disjoint bank with the same format and extent
         Delta1(const Ctx& ctx, size_t idx,
             const std::vector<vk::Image>& sourceImages0,
             const std::vector<vk::Image>& sourceImages1,
@@ -37,13 +40,15 @@ namespace mako::backend {
             const vk::Image& additionalInput0,
             const vk::Image& additionalInput1,
             const vk::Image& additionalInput2,
-            const Delta1* sharedScratch = nullptr);
+            const Delta1* sharedScratch = nullptr,
+            std::span<const vk::Image> parallelScratch0 = {},
+            std::span<const vk::Image> parallelScratch1 = {});
 
         /// prepare the shaderchain initially
         /// @param images vector to fill with image handles
         void prepare(std::vector<VkImage>& images) const;
 
-        /// render the gamma shaderchain
+        /// render the delta refinement shaderchain
         /// @param vk the vulkan instance
         /// @param cmd command buffer
         void render(const vk::Vulkan& vk, const vk::CommandBuffer& cmd) const;
@@ -59,6 +64,7 @@ namespace mako::backend {
         std::shared_ptr<vk::Image> image0;
         std::shared_ptr<vk::Image> image1;
 
+        bool parallelBranches{false};
         std::vector<ManagedShader> sets;
         VkExtent2D dispatchExtent{};
     };

@@ -6,6 +6,7 @@
 #include "extraction/dll_reader.hpp"
 #include "extraction/shader_registry.hpp"
 #include "helpers/limits.hpp"
+#include "helpers/managed_shader.hpp"
 #include "helpers/timestamp_upload_cache.hpp"
 #include "helpers/utils.hpp"
 #include "mako-common/helpers/errors.hpp"
@@ -737,7 +738,9 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
                     this->blackImage,
                     this->beta1.getImages().at(6 - j),
                     this->blackImage,
-                    i == 0 ? nullptr : &this->passes.front().delta1.at(j - 4)
+                    i == 0 ? nullptr : &this->passes.front().delta1.at(j - 4),
+                    this->alpha0.at(7 - j).getTemporaryImages0(),
+                    this->alpha0.at(7 - j).getTemporaryImages1()
                 );
             } else if (j > 4) { // further passes do
                 pass.delta0.emplace_back(ctx, i,
@@ -754,7 +757,9 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
                     pass.delta1.at(j - 5).getImage0(),
                     this->beta1.getImages().at(6 - j),
                     pass.delta1.at(j - 5).getImage1(),
-                    i == 0 ? nullptr : &this->passes.front().delta1.at(j - 4)
+                    i == 0 ? nullptr : &this->passes.front().delta1.at(j - 4),
+                    this->alpha0.at(7 - j).getTemporaryImages0(),
+                    this->alpha0.at(7 - j).getTemporaryImages1()
                 );
             }
         }
@@ -969,10 +974,20 @@ void Context::schedulePrepass(const VkFence completionFence) {
         if (this->profiling)
             this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 1);
         this->mipmaps.render(ctx.vk, cmdbuf, this->fidx);
-        for (size_t i = 0; i < 7; ++i) {
-            this->alpha0.at(6 - i).render(ctx.vk, cmdbuf);
-            this->alpha1.at(6 - i).render(ctx.vk, cmdbuf, this->fidx);
+        // Pyramid levels share no writable images. Record one dependency per
+        // stage, allowing the seven levels to fill the GPU together.
+        std::vector<ManagedDispatch> batch;
+        batch.reserve(this->alpha0.size());
+        for (size_t stage = 0; stage < 3; ++stage) {
+            batch.clear();
+            for (size_t i = 0; i < 7; ++i)
+                batch.push_back(this->alpha0.at(6 - i).getDispatch(stage));
+            ManagedShader::dispatchIndependent(ctx.vk, cmdbuf, batch);
         }
+        batch.clear();
+        for (size_t i = 0; i < 7; ++i)
+            batch.push_back(this->alpha1.at(6 - i).getDispatch(this->fidx));
+        ManagedShader::dispatchIndependent(ctx.vk, cmdbuf, batch);
         this->beta0.render(ctx.vk, cmdbuf, this->fidx);
         this->beta1.render(ctx.vk, cmdbuf);
 

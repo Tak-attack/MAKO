@@ -65,6 +65,13 @@ namespace vk {
             std::span<const vk::Barrier> barriers,
             uint32_t x, uint32_t y, uint32_t z) const;
 
+        /// Apply compute dependencies for a group of independent dispatches.
+        void insertComputeBarriers(const vk::Vulkan& vk,
+            std::span<const vk::Barrier> barriers) const;
+        /// Dispatch after the caller has established all required dependencies.
+        void dispatchAfterBarrier(const vk::Vulkan& vk, const vk::Shader& shader,
+            const vk::DescriptorSet& set, uint32_t x, uint32_t y, uint32_t z) const;
+
         /// copy buffer to image
         /// @param vk the vulkan instance
         /// @param buffer the source buffer

@@ -8,6 +8,7 @@
 #include "mako-common/vulkan/image.hpp"
 #include "mako-common/vulkan/vulkan.hpp"
 
+#include <functional>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
@@ -28,10 +29,14 @@ namespace mako::backend {
         /// @param images vector to fill with image handles
         void prepare(std::vector<VkImage>& images) const;
 
-        /// render the pre-alpha shaderchain
-        /// @param vk the vulkan instance
-        /// @param cmd command buffer
-        void render(const vk::Vulkan& vk, const vk::CommandBuffer& cmd) const;
+        /// Describe one independent pyramid stage for grouped recording.
+        [[nodiscard]] ManagedDispatch getDispatch(size_t index) const {
+            return {std::cref(this->sets.at(index)), index == 2 ? this->dispatchExtent1 : this->dispatchExtent0};
+        }
+
+        /// Dead after the prepass; matching coarser-level images can serve Delta1.
+        [[nodiscard]] const auto& getTemporaryImages0() const { return this->tempImages0; }
+        [[nodiscard]] const auto& getTemporaryImages1() const { return this->tempImages1; }
 
         /// get the generated images
         /// @return vector of images

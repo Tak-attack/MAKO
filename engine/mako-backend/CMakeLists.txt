@@ -74,6 +74,12 @@ if(BUILD_TESTING)
         target_link_libraries(mako-backend-fp16-conversion-tests PRIVATE mako-backend SPIRV-Tools-opt)
         add_test(NAME backend-experimental-lsfg-fp16 COMMAND mako-backend-fp16-conversion-tests)
     endif()
+    add_executable(mako-independent-dispatch-tests "tests/independent_dispatch_tests.cpp")
+    target_include_directories(mako-independent-dispatch-tests PRIVATE src)
+    target_link_libraries(mako-independent-dispatch-tests PRIVATE mako-common)
+    add_test(NAME backend-independent-dispatch COMMAND mako-independent-dispatch-tests)
+    set_tests_properties(backend-independent-dispatch PROPERTIES LABELS "portable-policy")
+
     add_executable(mako-backend-hot-path-tests
         "tests/hot_path_tests.cpp")
     target_include_directories(mako-backend-hot-path-tests

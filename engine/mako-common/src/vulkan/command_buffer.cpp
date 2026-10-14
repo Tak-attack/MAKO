@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include <vulkan/vulkan_core.h>
@@ -81,6 +82,12 @@ void CommandBuffer::dispatch(const vk::Vulkan& vk,
         const vk::DescriptorSet& set,
         const std::span<const vk::Barrier> barriers,
         uint32_t x, uint32_t y, uint32_t z) const {
+    this->insertComputeBarriers(vk, barriers);
+    this->dispatchAfterBarrier(vk, shader, set, x, y, z);
+}
+
+void CommandBuffer::insertComputeBarriers(const vk::Vulkan& vk,
+        const std::span<const vk::Barrier> barriers) const {
     vk.df().CmdPipelineBarrier(*this->commandBuffer,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -89,6 +96,11 @@ void CommandBuffer::dispatch(const vk::Vulkan& vk,
         0, VK_NULL_HANDLE,
         static_cast<uint32_t>(barriers.size()), barriers.data()
     );
+}
+
+void CommandBuffer::dispatchAfterBarrier(const vk::Vulkan& vk,
+        const vk::Shader& shader, const vk::DescriptorSet& set,
+        uint32_t x, uint32_t y, uint32_t z) const {
     vk.df().CmdBindPipeline(*this->commandBuffer,
         VK_PIPELINE_BIND_POINT_COMPUTE,
         shader.pipeline()
