@@ -372,7 +372,7 @@
   "LIVE_STATUS_WAITING_DESC": "ライブ指標は利用できませんが、MAKO は動作中かもしれません。一部のゲームやエミュレーターは指標を報告しません。フレーム生成かスケーリングを手動で確認してください。",
   "LIVE_STATUS_FEATURES_OFF_DESC": "このプロファイルではフレーム生成とスケーリングがオフです。",
   "LIVE_STATUS_FG_INACTIVE": "設定ではオンですが、現在フレームは生成されていません。",
-  "LIVE_STATUS_FG_MENU_SUSPENDED": Steamメニュー、またはDeckyメニューが開いている間は、フレーム生成が無効になります。",
+  "LIVE_STATUS_FG_MENU_SUSPENDED": "Steamメニュー、またはDeckyメニューが開いている間は、フレーム生成が無効になります。",
   "LIVE_STATUS_OFF": "オフ",
   "LIVE_STATUS_SCALING_INACTIVE": "設定ではオンですが、ゲーム画像はアップスケールされていません。",
   "LIVE_STATUS_SCALING_MEMORY_LIMIT": "要求されたレンダー解像度が、この GPU のメモリ安全上限を超えています。ゲーム内解像度を下げてください。",
