@@ -4516,6 +4516,75 @@ namespace {
             "strict scheduling did not return recovered cadence to the 100 FPS target");
     }
 
+    void testFractionalRefreshGuardAcrossCutsceneGameplayTransitions() {
+        for (const bool smooth : {false, true}) {
+            for (const bool recovery : {false, true}) {
+                for (const bool fifoFeedback : {false, true}) {
+                    for (const double gameplayFps : {55.0, 58.0, 60.0}) {
+                        ls::GameConf profile;
+                        profile.adaptive = true;
+                        profile.adaptive_auto_base_fps_cap = false;
+                        profile.adaptive_max_multiplier = 2;
+                        profile.adaptive_stable_cadence = smooth;
+                        profile.dynamic_cadence_recovery = recovery;
+                        profile.frame_generation_refresh_threshold = 50;
+                        profile.adaptive_target_refresh_rate = true;
+                        profile.target_fps = adaptiveTargetFpsForDisplay(
+                            90, profile.adaptive,
+                            profile.adaptive_target_refresh_rate, 60);
+                        require(effectiveFrameGenerationEnabled(profile, 60) &&
+                                effectiveBaseFpsCap(profile, 60) == 0.0,
+                            "50 Hz guard changed uncapped Fractional policy on a 60 Hz display");
+                        const auto policy = generationSchedulerPolicy(profile, 60);
+                        require(policy && policy->targetFps == 60 &&
+                                policy->dynamicCadenceRecovery == recovery,
+                            "display matching or refresh guard changed native recovery selection");
+                        Harness harness(policy->targetFps, policy->maximumMultiplier,
+                            policy->stableCadence, AdaptiveRecoveryPolicy::OrderedSdr,
+                            policy->dynamicCadenceRecovery,
+                            ls::dynamicCadenceProbeIntervalDuration(
+                                policy->dynamicCadenceProbeIntervalSeconds),
+                            60, policy->nearTargetNativePreference);
+                        harness.start();
+                        AdaptiveFramePlan previous;
+                        const auto phase = [&](const double sourceFps) {
+                            const auto started = harness.now;
+                            size_t settledGenerated = 0;
+                            while (harness.now - started < 8s) {
+                                // Model the application interval with and without
+                                // generated FIFO work hiding a faster native rate.
+                                const double observedFps = fifoFeedback && !previous.empty()
+                                    ? std::min(sourceFps, 60.0 / (previous.size() + 1))
+                                    : sourceFps;
+                                previous = harness.deliveredFrameAtFps(observedFps);
+                                requireValidTimestamps(previous, 1);
+                                if (harness.now - started >= 6s)
+                                    settledGenerated += previous.size();
+                            }
+                            return settledGenerated;
+                        };
+                        const auto context = " (smooth=" + std::to_string(smooth) +
+                            ", recovery=" + std::to_string(recovery) +
+                            ", fifo=" + std::to_string(fifoFeedback) +
+                            ", gameplay=" + std::to_string(gameplayFps) + ")";
+                        require(phase(30.0) > 50,
+                            "30 FPS cutscene did not sustain 2x generation" + context);
+                        const size_t gameplayGenerated = phase(gameplayFps);
+                        if (gameplayFps >= 58.0 && (!fifoFeedback || recovery)) {
+                            require(gameplayGenerated == 0,
+                                "near-target gameplay retained generated frames" + context);
+                        } else {
+                            require(gameplayGenerated > 0,
+                                "refresh guard became a native-FPS cutoff or enabled hidden recovery" + context);
+                        }
+                        require(phase(30.0) > 50,
+                            "return to a 30 FPS cutscene did not resume generation" + context);
+                    }
+                }
+            }
+        }
+    }
+
     void testDynamicCadenceRecoversSelfHiddenNativeRateIncrease() {
         Harness harness(
             60, 2, false, AdaptiveRecoveryPolicy::OrderedSdr, true
@@ -6092,6 +6161,7 @@ int main() {
         {"Smooth Cadence exits below retention range", testSmoothCadenceExitsBelowRetentionRange},
         {"persistent loss rejects Smooth Cadence", testPersistentDeliveryLossRejectsSmoothCadenceProbe},
         {"Smooth Cadence exits after native recovery", testSmoothCadenceReturnsToTargetAfterBaseRecovery},
+        {"Fractional refresh guard survives cutscene/gameplay transitions", testFractionalRefreshGuardAcrossCutsceneGameplayTransitions},
         {"dynamic cadence recovers a self-hidden native rate", testDynamicCadenceRecoversSelfHiddenNativeRateIncrease},
         {"dynamic cadence discards interrupted native samples", testDynamicCadenceProbeCannotSpanGeneratedAcquireBackoff},
         {"dynamic cadence drains only previously queued output", testDynamicCadenceDrainsPreviouslyQueuedOutput},

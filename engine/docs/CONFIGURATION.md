@@ -53,6 +53,8 @@ Turn on **Enable Frame-gen (Restart)** before launching. **Real FPS** counts gam
 | **Smooth Cadence** | Favours consistent delivery; compare on/off for responsiveness. |
 | **Gamescope VRR** | Follows Steam, or temporarily requests VRR on/off on a supported display during play. |
 
+For games switching between 30 FPS cutscenes and 60 FPS gameplay on a 60 Hz display, try Fractional Adaptive with a 2x ceiling and a 60 FPS target, **Real Frame Priority** set to **Automatic**, **Base FPS Cap** off, and **Dynamic Cadence Recovery** enabled. Recovery briefly removes generated work to detect a faster native rate hidden by presentation pacing; its checks can lower output FPS or hitch. **Match Display Refresh Rate** can supply the target when Gamescope confirms 60 Hz. **Auto-disable Frame Generation by Refresh Rate** instead checks display Hz: a 50 Hz threshold allows generation on a 60 Hz display regardless of the game's real FPS. It is not a native-FPS cutoff.
+
 ### Scaling
 
 Enable Scaling before launching. Set Steam's **Game Resolution** to the display maximum, then choose a lower in-game resolution. Gamescope is recommended; try different display modes if needed.
