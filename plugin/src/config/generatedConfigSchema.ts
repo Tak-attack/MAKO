@@ -131,6 +131,7 @@ export const VKBASALT_SHADER_FILM_GRAIN = "film_grain" as const;
 export const VKBASALT_SHADER_CARTOON = "cartoon" as const;
 export const VKBASALT_SHADER_NOSTALGIA = "nostalgia" as const;
 export const VKBASALT_SHADER_CHROMATIC_ABERRATION = "chromatic_aberration" as const;
+export const VKBASALT_SHADER_CROP_STRETCH = "crop_stretch" as const;
 export const VKBASALT_SHADER_CLARITY = "clarity" as const;
 export const VKBASALT_SHADER_LEVELS_PLUS = "levels_plus" as const;
 export const VKBASALT_STRENGTH_MIN = 0.0 as const;

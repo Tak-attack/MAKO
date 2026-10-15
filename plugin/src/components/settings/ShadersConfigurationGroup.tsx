@@ -32,6 +32,7 @@ import {
   VKBASALT_SHADER_BLEACH_BYPASS,
   VKBASALT_SHADER_CARTOON,
   VKBASALT_SHADER_CHROMATIC_ABERRATION,
+  VKBASALT_SHADER_CROP_STRETCH,
   VKBASALT_SHADER_CLARITY,
   VKBASALT_SHADER_COLOURFULNESS,
   VKBASALT_SHADER_CURVES,
@@ -70,6 +71,7 @@ interface ShadersConfigurationGroupProps extends ConfigurationControlProps {
   customShaderEffects?: CustomShaderEffect[];
   onAddShader?: (path: string) => Promise<void>;
   onRefreshShaders?: () => Promise<void>;
+  onCustomizeShaders?: () => Promise<void>;
   onDeleteShaders?: (shaderIds: string[]) => Promise<void>;
 }
 
@@ -112,6 +114,7 @@ export function ShadersConfigurationGroup({
   customShaderEffects = [],
   onAddShader,
   onRefreshShaders,
+  onCustomizeShaders,
   onDeleteShaders,
   onConfigChange,
 }: ShadersConfigurationGroupProps) {
@@ -254,6 +257,10 @@ export function ShadersConfigurationGroup({
         "Chromatic Aberration",
       ),
     },
+    {
+      data: VKBASALT_SHADER_CROP_STRETCH,
+      label: t("CONFIG_VKBASALT_SHADER_CROP_STRETCH", "Crop & Stretch"),
+    },
   ];
 
   const customIds = new Set(customShaderEffects.map((effect) => effect.id));
@@ -284,10 +291,7 @@ export function ShadersConfigurationGroup({
         <ToggleField
           label={
             <MakoRestartLabel
-              label={t(
-                "CONFIG_ENABLE_VKBASALT",
-                "Enable Shaders (Restart)",
-              )}
+              label={t("CONFIG_ENABLE_VKBASALT", "Enable shaders (Restart)")}
             />
           }
           description={t(
@@ -346,6 +350,24 @@ export function ShadersConfigurationGroup({
               noFocusRing
               style={{ width: "100%", minWidth: 0, paddingBottom: "6px" }}
             >
+              <div
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "12px 4px 8px",
+                }}
+              >
+                <DialogButton
+                  disabled={busy || !selectedEffects.length}
+                  style={{ ...customShaderButtonStyle, width: "100%" }}
+                  onClick={() => {
+                    if (onCustomizeShaders)
+                      void runShaderAction(onCustomizeShaders);
+                  }}
+                >
+                  {t("SHADER_EDITOR_TITLE", "Customize shaders")}
+                </DialogButton>
+              </div>
               {(onAddShader || onRefreshShaders) && (
                 <MakoFocusable
                   flow-children="row"
@@ -357,7 +379,7 @@ export function ShadersConfigurationGroup({
                     width: "100%",
                     minWidth: 0,
                     boxSizing: "border-box",
-                    padding: "12px 4px 8px",
+                    padding: "4px 4px 8px",
                   }}
                 >
                   {onAddShader && (
@@ -381,7 +403,7 @@ export function ShadersConfigurationGroup({
                         })
                       }
                     >
-                      {t("CONFIG_VKBASALT_CUSTOM_ADD", "Add Custom Shader")}
+                      {t("CONFIG_VKBASALT_CUSTOM_ADD", "Add custom shader")}
                     </DialogButton>
                   )}
                   {onRefreshShaders && (
@@ -496,7 +518,7 @@ export function ShadersConfigurationGroup({
               <SliderField
                 label={t(
                   "CONFIG_VKBASALT_DLS_DENOISE",
-                  "DLS Denoise ({value}%)",
+                  "DLS denoise ({value}%)",
                   { value: Math.round(config.vkbasalt_dls_denoise * 100) },
                 )}
                 description={t(

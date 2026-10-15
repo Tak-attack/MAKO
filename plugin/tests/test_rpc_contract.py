@@ -21,7 +21,9 @@ from py_modules.mako_plugin.flatpak_service import (  # noqa: E402
     FlatpakAppInfo,
     FlatpakOverrideResponse,
 )
+from py_modules.mako_plugin.shader_parameters import ShaderParameter, ShaderEffectParameters, ShaderParameterPresentation
 from py_modules.mako_plugin.types import (  # noqa: E402
+    ShaderParametersResponse,
     ConfigSchemaResponse,
     CustomShaderEffect,
     ConfigurationResponse,
@@ -146,6 +148,10 @@ class RpcContractTests(unittest.TestCase):
             ModelStatusResponse: "ModelStatusResult",
             DllStatsResponse: "DllStatsResult",
             ConfigurationResponse: "ConfigResult",
+            ShaderParametersResponse: "ShaderParametersResult",
+            ShaderParameter: "ShaderParameter",
+            ShaderParameterPresentation: "ShaderParameterPresentation",
+            ShaderEffectParameters: "ShaderEffectParameters",
             CustomShaderEffect: "CustomShaderEffect",
             ConfigSchemaResponse: "ConfigSchemaResult",
             LaunchOptionResponse: "LaunchOptionResult",

@@ -1384,6 +1384,114 @@ void test_profile_management_alignment() {
     }
 }
 
+void test_shader_parameter_editor_persistence() {
+    QTemporaryDir directory;
+    require(directory.isValid(), "temporary shader editor directory failed");
+    const auto previousConfig = qgetenv("MAKO_CONFIG"), previousLaunch = qgetenv("MAKO_LAUNCH_CONFIG"), previousConfigHome = qgetenv("XDG_CONFIG_HOME");
+    qputenv("MAKO_CONFIG", directory.filePath("conf.toml").toUtf8());
+    qputenv("MAKO_LAUNCH_CONFIG", directory.filePath("launcher.conf").toUtf8());
+    qputenv("XDG_CONFIG_HOME", directory.path().toUtf8());
+    const auto helperPath = directory.filePath("shader-tool");
+    QFile helper(helperPath);
+    require(helper.open(QIODevice::WriteOnly), "cannot create shader helper fixture");
+    helper.write(R"SH(#!/bin/sh
+cat <<'JSON'
+{"schema":1,"effects":[{"id":"Tone","name":"Tone","path":"/tone.fx","error":null,"parameters":[{"key":"makoShader_546f6e65_537472656e677468_0","label":"Strength","description":"","category":"","type":"float","default":0.25,"value":0.5,"min":0,"max":1,"step":0.01,"items":[]},{"key":"makoShader_546f6e65_53656564_0","label":"Seed","description":"","category":"","type":"uint","default":0,"value":0,"min":1,"max":null,"step":null,"items":[]}]}]}
+JSON
+)SH");
+    helper.close();
+    require(helper.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner), "cannot make shader helper executable");
+    {
+        mako::ui::Backend backend("/proc", {}, helperPath);
+        backend.enableVkBasaltUpdated(true);
+        backend.vkBasaltShaderUpdated(QStringLiteral("vibrance"));
+        const auto load = [&] {
+            backend.loadShaderParameters();
+            QElapsedTimer timeout; timeout.start();
+            while (backend.shaderParametersLoading() && timeout.elapsed() < 3000) { QCoreApplication::processEvents(); QThread::msleep(1); }
+            require(!backend.shaderParametersLoading() && backend.shaderParameterError().isEmpty() && backend.shaderParameterEffects().size() == 1, "shader metadata did not load asynchronously");
+        };
+        load();
+        const auto path = backend.getVkBasaltConfigPath().toStdString();
+        const auto key = QStringLiteral("makoShader_546f6e65_537472656e677468_0");
+        require(backend.setShaderParameters({{key, 0.75}}), "shader value was not saved");
+        require(backend.setShaderParameters({{QStringLiteral("makoShader_546f6e65_53656564_0"), 4294967295.0}}), "large unsigned shader value was not saved");
+        const auto saved = ls::readVkBasaltConfiguration(path);
+        require(saved.find("makoShader_546f6e65_53656564_0 = 4294967295") != std::string::npos, "integer serialization used scientific notation or lost precision");
+        require(saved.find("makoShader_546f6e65_537472656e677468_0 = 0.75") != std::string::npos, "saved shader value is missing");
+        require(!backend.setShaderParameters({{key, 2.0}}) && ls::readVkBasaltConfiguration(path) == saved, "invalid shader value changed the profile");
+        require(!backend.setShaderParameters({{QStringLiteral("effects"), 1.0}}), "unknown parameter accepted");
+        // An external edit must invalidate the metadata snapshot before any write.
+        ls::writeVkBasaltConfiguration(path, saved + "# changed externally\n");
+        require(!backend.setShaderParameters({{key, 0.2}}), "stale shader editor overwrote external changes");
+        load();
+        require(backend.setShaderParameters({{key, QVariant()}}) && ls::readVkBasaltConfiguration(path).find(" = default") != std::string::npos, "reset did not use the reflected default");
+        require(backend.setShaderParameters({{QStringLiteral("makoShader_546f6e65_53656564_0"), QVariant()}}), "reset refused the authored default outside its UI range");
+        backend.loadShaderParameters();
+        ls::writeVkBasaltConfiguration(path, ls::readVkBasaltConfiguration(path) + "# edit during discovery\n");
+        QElapsedTimer discoveryTimeout; discoveryTimeout.start();
+        while (backend.shaderParametersLoading() && discoveryTimeout.elapsed() < 3000) { QCoreApplication::processEvents(); QThread::msleep(1); }
+        require(!backend.shaderParametersLoading() && !backend.shaderParameterError().isEmpty() && backend.shaderParameterEffects().isEmpty(), "discovery displayed controls from a changed configuration");
+        backend.loadShaderParameters();
+        require(backend.createProfile(QStringLiteral("Other shader profile")), "cannot copy shader profile");
+        require(!backend.setShaderParameters({{key, 0.3}}), "shader editor followed a different selected profile");
+        load(); // A newly opened editor must supersede discovery for the previous profile.
+        require(backend.setShaderParameters({{key, 0.4}}), "reopened editor did not load the new profile");
+        const auto goodMetadata = QJsonObject{{"schema", 1}, {"effects", QJsonArray::fromVariantList(backend.shaderParameterEffects())}};
+        const auto publish = [&](const QJsonObject& metadata) {
+            QFile fixture(helperPath);
+            require(fixture.open(QIODevice::WriteOnly | QIODevice::Truncate), "cannot replace shader helper fixture");
+            fixture.write("#!/bin/sh\ncat <<'JSON'\n");
+            fixture.write(QJsonDocument(metadata).toJson(QJsonDocument::Compact));
+            fixture.write("\nJSON\n");
+        };
+        const auto withParameter = [&](const QJsonObject& parameter) {
+            auto metadata = goodMetadata;
+            auto effects = metadata["effects"].toArray();
+            auto effect = effects[0].toObject();
+            effect["parameters"] = QJsonArray{parameter};
+            effects[0] = effect; metadata["effects"] = effects;
+            return metadata;
+        };
+        const auto parameter = goodMetadata["effects"].toArray()[0].toObject()["parameters"].toArray()[0].toObject();
+        for (const auto& mutation : {
+                QJsonObject{{"key", "makoShader_41_537472656e677468_0"}},
+                QJsonObject{{"type", "double"}}, QJsonObject{{"value", true}},
+                QJsonObject{{"default", "0.5"}}, QJsonObject{{"label", QJsonArray{}}},
+                QJsonObject{{"items", QJsonObject{}}}, QJsonObject{{"resettable", "false"}}}) {
+            auto bad = parameter;
+            for (auto it = mutation.begin(); it != mutation.end(); ++it) bad[it.key()] = it.value();
+            publish(withParameter(bad)); backend.loadShaderParameters();
+            QElapsedTimer timer; timer.start();
+            while (backend.shaderParametersLoading() && timer.elapsed() < 3000) { QCoreApplication::processEvents(); QThread::msleep(1); }
+            require(!backend.shaderParametersLoading() && !backend.shaderParameterError().isEmpty() && backend.shaderParameterEffects().isEmpty(), "malformed shader metadata reached the Qt controls");
+            require(!backend.setShaderParameters({{key, .5}}), "invalid metadata retained a writable parameter cache");
+        }
+        auto duplicate = goodMetadata;
+        auto effects = duplicate["effects"].toArray();
+        effects.append(effects[0]); duplicate["effects"] = effects;
+        publish(duplicate); backend.loadShaderParameters();
+        QElapsedTimer timer; timer.start();
+        while (backend.shaderParametersLoading() && timer.elapsed() < 3000) { QCoreApplication::processEvents(); QThread::msleep(1); }
+        require(!backend.shaderParameterError().isEmpty() && backend.shaderParameterEffects().isEmpty(), "duplicate effect identity was accepted");
+        auto keep = parameter;
+        keep["resettable"] = false; keep["min"] = .100000001; keep["max"] = .899999976;
+        publish(withParameter(keep)); load();
+        require(backend.setShaderParameters({{key, .1}}) && backend.setShaderParameters({{key, .9}}), "valid FP32 boundary was rejected");
+        require(!backend.setShaderParameters({{key, .901}}) && !backend.setShaderParameters({{key, .099}}), "invalid boundary value was accepted");
+        require(!backend.setShaderParameters({{key, true}}) && !backend.setShaderParameters({{key, QStringLiteral("0.5")}}), "Qt coerced a boolean or string into a numeric command");
+        require(!backend.setShaderParameters({{key, QVariant()}}), "Qt ignored authored no-reset restriction");
+        auto action = parameter;
+        action["type"] = "bool"; action["value"] = 0; action["default"] = 0;
+        action["presentation"] = QJsonObject{{"widget", "button"}, {"group", key}, {"label", "Capture"}, {"component", 0}, {"count", 1}};
+        publish(withParameter(action)); load();
+        require(backend.shaderParameterEffects()[0].toMap()["parameters"].toList().isEmpty(), "one-frame action became a persistent Qt toggle");
+    }
+    for (const auto& entry : {std::pair{"MAKO_CONFIG", previousConfig}, std::pair{"MAKO_LAUNCH_CONFIG", previousLaunch}, std::pair{"XDG_CONFIG_HOME", previousConfigHome}}) {
+        if (entry.second.isNull()) qunsetenv(entry.first); else qputenv(entry.first, entry.second);
+    }
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -1397,6 +1505,7 @@ int main(int argc, char* argv[]) {
         test_fractional_adaptive_preset();
         test_feature_group_order_and_ownership();
         test_shader_controls();
+        test_shader_parameter_editor_persistence();
         test_compact_restart_markers();
         test_save_lifetime();
         test_decky_shader_profile_round_trip_and_owned_deletion();

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,6 +37,8 @@ namespace ls {
     [[nodiscard]] VkBasaltCustomShader addVkBasaltCustomShader(const std::filesystem::path& configPath, const std::filesystem::path& shaderPath);
     [[nodiscard]] std::string reloadVkBasaltConfiguration(std::string_view content);
     [[nodiscard]] std::string removeVkBasaltCustomShaders(std::string_view content, const std::vector<std::string>& shaderIds);
+
+    [[nodiscard]] std::string updateVkBasaltShaderParameters(std::string_view content, const std::map<std::string, std::string>& changes);
 
     // Atomic replacement for explicit profile edits and their rollback.
     void writeVkBasaltConfiguration(const std::filesystem::path& path, std::string_view content);

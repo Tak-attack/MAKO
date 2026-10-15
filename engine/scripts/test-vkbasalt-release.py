@@ -43,7 +43,7 @@ class VkBasaltReleaseTests(unittest.TestCase):
             "sha256": "0" * 64,
         }
 
-    def _archive(self, root: Path, *, manifest_api: str | None = None, source_revision: str | None = None, hdr: bool = True) -> Path:
+    def _archive(self, root: Path, *, manifest_api: str | None = None, source_revision: str | None = None, hdr: bool = True, shader_tool: bool = False) -> Path:
         live_reload_markers = b" ".join(MODULE.LIVE_RELOAD_MARKERS)
         if hdr:
             live_reload_markers += b" makoSetSwapchainColorSpaceV1"
@@ -83,6 +83,10 @@ class VkBasaltReleaseTests(unittest.TestCase):
                 f"vulkan_api_version={self.pin['vulkan_api_version']}\n"
             ).encode("utf-8"),
         }
+        if shader_tool:
+            members["bin/mako-shader-tool"] = b"\x7fELF\x02shader-tool"
+            members[MODULE.SOURCE_PATHS["lib64"]] += b" makoShader_"
+            members[MODULE.SOURCE_PATHS["lib32"]] += b" makoShader_"
         members[MODULE.SOURCE_PATHS["checksums"]] = "".join(
             f"{hashlib.sha256(content).hexdigest()}  {path}\n"
             for path, content in sorted(members.items())
@@ -97,6 +101,16 @@ class VkBasaltReleaseTests(unittest.TestCase):
             archive_path.read_bytes()
         ).hexdigest()
         return archive_path
+
+    def test_optional_shader_tool_is_verified_and_staged_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            archive = self._archive(root, shader_tool=True)
+            members = MODULE._validate_archive(self.pin, archive)
+            MODULE._stage_native(self.pin, members, root / "native", False)
+            tool = root / "native/bin/mako-shader-tool"
+            self.assertEqual(tool.read_bytes(), members["bin/mako-shader-tool"])
+            self.assertEqual(tool.stat().st_mode & 0o777, 0o755)
 
     def test_validates_and_stages_both_architectures(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -11,6 +11,9 @@ set(UI_RESOURCES
     "rsc/dialogs/CenteredDialog.qml"
     "rsc/dialogs/LargeDialog.qml"
     "rsc/dialogs/RunningGamesDialog.qml"
+    "rsc/dialogs/ShaderParametersWindow.qml"
+    "rsc/dialogs/ShaderParameterControl.qml"
+    "rsc/dialogs/ShaderControlHelpers.js"
     "rsc/panes/Group.qml"
     "rsc/panes/GroupEntry.qml"
     "rsc/panes/Pane.qml"
@@ -95,6 +98,14 @@ if(BUILD_TESTING)
     target_compile_definitions(mako-ui-localization-tests PRIVATE
         MAKO_UI_TRANSLATIONS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/rsc/i18n/translations.json")
     add_test(NAME ui-localization-unit COMMAND mako-ui-localization-tests)
+
+    add_executable(mako-ui-shader-window-tests "tests/shader_parameters_window_tests.cpp")
+    set_target_properties(mako-ui-shader-window-tests PROPERTIES AUTOMOC ON)
+    target_link_libraries(mako-ui-shader-window-tests PRIVATE Qt6::Quick)
+    target_compile_definitions(mako-ui-shader-window-tests PRIVATE
+        MAKO_UI_DIALOGS_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/rsc/dialogs")
+    add_test(NAME ui-shader-window COMMAND mako-ui-shader-window-tests)
+    set_tests_properties(ui-shader-window PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
 
     add_executable(mako-ui-profile-dialog-tests "tests/profile_dialog_tests.cpp")
     target_link_libraries(mako-ui-profile-dialog-tests PRIVATE Qt6::Quick)

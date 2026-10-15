@@ -397,8 +397,8 @@ describe("Configuration controls", () => {
       />,
     );
 
-    expect(screen.getByText("Enable Shaders (Restart)")).toBeTruthy();
-    expect(restartLabel).toHaveBeenCalledWith("Enable Shaders (Restart)");
+    expect(screen.getByText("Enable shaders (Restart)")).toBeTruthy();
+    expect(restartLabel).toHaveBeenCalledWith("Enable shaders (Restart)");
     expect(
       screen.getByText(
         /Enable before launch for bundled sharpening, anti-aliasing, and shaders/,
@@ -407,7 +407,7 @@ describe("Configuration controls", () => {
     expect(screen.queryByText("Experimental")).toBeNull();
     expect(screen.getByText("Sharpening")).toBeTruthy();
     expect(screen.getByText("Sharpness (55%)")).toBeTruthy();
-    expect(screen.getByText("DLS Denoise (20%)")).toBeTruthy();
+    expect(screen.getByText("DLS denoise (20%)")).toBeTruthy();
     expect(screen.getByText("Anti-aliasing")).toBeTruthy();
     expect(screen.getByText("Effects")).toBeTruthy();
     expect(
@@ -485,7 +485,7 @@ describe("Configuration controls", () => {
     filmGrain.focus();
     fireEvent.keyDown(filmGrain, { key: "ArrowRight" });
     expect(document.activeElement).toBe(
-      screen.getByRole("checkbox", { name: "Chromatic Aberration" }),
+      screen.getByRole("checkbox", { name: "Crop & Stretch" }),
     );
     const clearAll = screen.getByRole("button", { name: "Clear all" });
     fireEvent.focus(clearAll);
@@ -617,7 +617,7 @@ describe("Configuration controls", () => {
     expect(
       effectsField.contains(screen.getByTestId("mako-effects-selector")),
     ).toBe(true);
-    expect(effectsField.contains(screen.getByText("Add Custom Shader"))).toBe(
+    expect(effectsField.contains(screen.getByText("Add custom shader"))).toBe(
       false,
     );
     expect(effectsField.contains(screen.getByText("Refresh"))).toBe(false);
@@ -629,7 +629,7 @@ describe("Configuration controls", () => {
     fireEvent.focus(screen.getAllByRole("checkbox")[1]);
     expect(screen.getByTestId("mako-effects-page").style.height).toBe("198px");
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    fireEvent.click(screen.getByText("Add Custom Shader"));
+    fireEvent.click(screen.getByText("Add custom shader"));
     await waitFor(() =>
       expect(onAddShader).toHaveBeenCalledWith("/tmp/tone.fx"),
     );
@@ -644,10 +644,10 @@ describe("Configuration controls", () => {
       false,
     );
     shaderPicker.mockRejectedValueOnce("User Canceled");
-    fireEvent.click(screen.getByText("Add Custom Shader"));
+    fireEvent.click(screen.getByText("Add custom shader"));
     await waitFor(() =>
       expect(
-        screen.getByText("Add Custom Shader").closest("button")?.disabled,
+        screen.getByText("Add custom shader").closest("button")?.disabled,
       ).toBe(false),
     );
     expect(screen.queryByText(/User Canceled/)).toBeNull();
@@ -1307,7 +1307,7 @@ describe("Configuration controls", () => {
       ),
     ).toBeNull();
     expect(screen.queryByText("Enable MangoHud (Restart)")).toBeNull();
-    expect(screen.queryByText("Enable Shaders (Restart)")).toBeNull();
+    expect(screen.queryByText("Enable shaders (Restart)")).toBeNull();
 
     const collapseButton = container.querySelector<HTMLButtonElement>(
       ".MAKO_ExternalToolsCollapseButton_Container button",
@@ -1316,7 +1316,7 @@ describe("Configuration controls", () => {
     fireEvent.click(collapseButton!);
 
     expect(screen.getByText("Enable MangoHud (Restart)")).toBeTruthy();
-    expect(screen.queryByText("Enable Shaders (Restart)")).toBeNull();
+    expect(screen.queryByText("Enable shaders (Restart)")).toBeNull();
     expect(screen.queryByText("Experimental")).toBeNull();
     expect(localStorage.getItem("mako-external-tools-collapsed")).toBe("false");
   });

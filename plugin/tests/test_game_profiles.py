@@ -1481,6 +1481,7 @@ class GameProfileTests(unittest.TestCase):
             ("makoCartoon", "Cartoon.fx"),
             ("makoNostalgia", "Nostalgia.fx"),
             ("makoChromaticAberration", "ChromaticAberration.fx"),
+            ("makoCropStretch", "CropStretch.fx"),
         ):
             self.assertIn(
                 f'{effect_name} = "{self.service.vkbasalt_shader_dir / shader_asset}"\n',
@@ -1492,6 +1493,7 @@ class GameProfileTests(unittest.TestCase):
             "BleachBypass.fx",
             "Cartoon.fx",
             "ChromaticAberration.fx",
+            "CropStretch.fx",
             "Colourfulness.fx",
             "Curves.fx",
             "DPX.fx",
@@ -1603,6 +1605,7 @@ class GameProfileTests(unittest.TestCase):
             ("cartoon", "makoCartoon"),
             ("nostalgia", "makoNostalgia"),
             ("chromatic_aberration", "makoChromaticAberration"),
+            ("crop_stretch", "makoCropStretch"),
             ("clarity", "makoClarity"),
             ("levels_plus", "makoLevelsPlus"),
         ):

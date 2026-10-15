@@ -68,6 +68,7 @@ from shared_config import (
     VKBASALT_SHADER_BLEACH_BYPASS,
     VKBASALT_SHADER_CARTOON,
     VKBASALT_SHADER_CHROMATIC_ABERRATION,
+    VKBASALT_SHADER_CROP_STRETCH,
     VKBASALT_SHADER_CLARITY,
     VKBASALT_SHADER_COLOURFULNESS,
     VKBASALT_SHADER_CURVES,
@@ -295,6 +296,8 @@ def generate_typescript_schema():
         f'"{VKBASALT_SHADER_NOSTALGIA}" as const;',
         "export const VKBASALT_SHADER_CHROMATIC_ABERRATION = "
         f'"{VKBASALT_SHADER_CHROMATIC_ABERRATION}" as const;',
+        "export const VKBASALT_SHADER_CROP_STRETCH = "
+        f'"{VKBASALT_SHADER_CROP_STRETCH}" as const;',
         "export const VKBASALT_SHADER_CLARITY = "
         f'"{VKBASALT_SHADER_CLARITY}" as const;',
         "export const VKBASALT_SHADER_LEVELS_PLUS = "

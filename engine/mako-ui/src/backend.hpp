@@ -66,6 +66,10 @@ namespace mako::ui {
         Q_PROPERTY(float vkbasalt_dls_denoise READ getVkBasaltDlsDenoise WRITE vkBasaltDlsDenoiseUpdated NOTIFY refreshUI)
         Q_PROPERTY(QString vkbasalt_antialiasing READ getVkBasaltAntialiasing WRITE vkBasaltAntialiasingUpdated NOTIFY refreshUI)
         Q_PROPERTY(QString vkbasalt_shader READ getVkBasaltShader WRITE vkBasaltShaderUpdated NOTIFY refreshUI)
+        Q_PROPERTY(QString shader_profile_name READ shaderProfileName NOTIFY refreshUI)
+        Q_PROPERTY(QVariantList shader_parameter_effects READ shaderParameterEffects NOTIFY shaderParametersChanged)
+        Q_PROPERTY(bool shader_parameters_loading READ shaderParametersLoading NOTIFY shaderParametersChanged)
+        Q_PROPERTY(QString shader_parameter_error READ shaderParameterError NOTIFY shaderParametersChanged)
         Q_PROPERTY(QString vkbasalt_config_path READ getVkBasaltConfigPath NOTIFY refreshUI)
         Q_PROPERTY(QVariantList custom_shader_effects READ getCustomShaderEffects NOTIFY refreshUI)
         Q_PROPERTY(QString shader_load_error READ getShaderLoadError NOTIFY refreshUI)
@@ -130,7 +134,7 @@ namespace mako::ui {
 
     public:
         explicit Backend(std::filesystem::path procRoot = "/proc",
-                         QString remotePlayHelper = {});
+                         QString remotePlayHelper = {}, QString shaderHelper = {});
         ~Backend() override;
 
         [[nodiscard]] QVariantList getRunningGames() const;
@@ -295,6 +299,12 @@ namespace mako::ui {
             ).string());
         }
         [[nodiscard]] QVariantList getCustomShaderEffects() const;
+        [[nodiscard]] QString shaderProfileName() const { return isValidProfileIndex() ? QString::fromStdString(m_profiles.at(static_cast<size_t>(m_profile_index)).name) : QString(); }
+        [[nodiscard]] QVariantList shaderParameterEffects() const { return m_shader_parameter_effects; }
+        [[nodiscard]] bool shaderParametersLoading() const { return m_shader_parameters_loading; }
+        [[nodiscard]] QString shaderParameterError() const { return m_shader_parameter_error; }
+        Q_INVOKABLE void loadShaderParameters();
+        Q_INVOKABLE bool setShaderParameters(const QVariantMap& changes);
         [[nodiscard]] QString getShaderLoadError() const { return this->m_shader_load_error; }
         [[nodiscard]] QString getLaunchOption() const;
 
@@ -958,6 +968,7 @@ namespace mako::ui {
 #undef MARK_SHADER_DIRTY
 
     signals:
+        void shaderParametersChanged();
         void refreshUI();
         void runningGamesChanged();
 
@@ -971,6 +982,13 @@ namespace mako::ui {
         int m_power_mode{0};
         QString m_remote_play_helper;
         QProcess m_remote_play_process;
+        QVariantList m_shader_parameter_effects;
+        QProcess* m_shader_parameter_process{nullptr};
+        bool m_shader_parameters_loading{false};
+        QString m_shader_parameter_error;
+        QString m_shader_helper;
+        std::filesystem::path m_shader_parameter_path;
+        std::string m_shader_parameter_content;
         QJsonObject m_remote_play_status;
         QString m_remote_play_message;
         void runRemotePlayAction(const QString& action);

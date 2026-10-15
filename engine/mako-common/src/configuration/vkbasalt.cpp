@@ -28,11 +28,11 @@ constexpr std::array<std::string_view, 3> SHARPENING{
 constexpr std::array<std::string_view, 3> ANTIALIASING{
     "none", "fxaa", "smaa"
 };
-constexpr std::array<std::string_view, 20> SHADERS{
+constexpr std::array<std::string_view, 21> SHADERS{
     "none", "hdr_look", "clarity", "levels_plus", "vibrance", "colourfulness", "curves", "deband",
     "technicolor2", "dpx", "bleach_bypass", "noir", "technicolor",
     "monochrome", "sepia", "film_grain", "vignette", "cartoon",
-    "nostalgia", "chromatic_aberration"
+    "nostalgia", "chromatic_aberration", "crop_stretch"
 };
 
 const std::map<std::string_view, std::string_view> SHADER_EFFECTS{
@@ -53,6 +53,7 @@ const std::map<std::string_view, std::string_view> SHADER_EFFECTS{
     {"cartoon", "makoCartoon"},
     {"nostalgia", "makoNostalgia"},
     {"chromatic_aberration", "makoChromaticAberration"},
+    {"crop_stretch", "makoCropStretch"},
     {"clarity", "makoClarity"},
     {"levels_plus", "makoLevelsPlus"},
 };
@@ -74,6 +75,7 @@ const std::map<std::string_view, std::string_view> SHADER_FILES{
     {"makoCartoon", "Cartoon.fx"},
     {"makoNostalgia", "Nostalgia.fx"},
     {"makoChromaticAberration", "ChromaticAberration.fx"},
+    {"makoCropStretch", "CropStretch.fx"},
     {"makoClarity", "Clarity.fx"},
     {"makoLevelsPlus", "LevelsPlus.fx"},
 };
@@ -395,10 +397,17 @@ std::filesystem::path ls::findVkBasaltConfigurationFile() {
 std::string ls::removeVkBasaltCustomShaders(const std::string_view content,
         const std::vector<std::string>& shaderIds) {
     std::unordered_set<std::string> names;
+    std::vector<std::string> parameterPrefixes;
     for (const auto& id : shaderIds) {
         if (!customShaderId(id) || !customShaderName(id.substr(7)))
             throw ls::error("only custom shader IDs can be deleted");
         names.insert(id.substr(7));
+        std::string prefix = "makoShader_";
+        for (const unsigned char c : id.substr(7)) {
+            prefix += "0123456789abcdef"[c >> 4];
+            prefix += "0123456789abcdef"[c & 15];
+        }
+        parameterPrefixes.push_back(prefix + "_");
     }
     static const std::regex assignment(R"(^(\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*)(.*)$)");
     std::string result;
@@ -414,6 +423,9 @@ std::string ls::removeVkBasaltCustomShaders(const std::string_view content,
         if (std::regex_match(line, match, assignment)) {
             const auto key = match[2].str();
             const auto value = match[3].str();
+            if (std::any_of(parameterPrefixes.begin(), parameterPrefixes.end(),
+                    [&](const auto& prefix) { return key.starts_with(prefix); }))
+                continue;
             if (names.contains(key) && lowercase(configValue(value)).ends_with(".fx"))
                 continue; // Remove every FX assignment so duplicates cannot resurface.
             if (key == "effects") {
@@ -574,4 +586,29 @@ void ls::writeVkBasaltConfiguration(
     } catch (const std::exception& error) {
         throw ls::error("unable to write vkBasalt configuration", error);
     }
+}
+
+std::string ls::updateVkBasaltShaderParameters(const std::string_view content, const std::map<std::string, std::string>& changes) {
+    static const std::regex keyPattern(R"(makoShader_[0-9a-f]+_[0-9a-f]+_[0-9]+)");
+    static const std::regex valuePattern(R"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)");
+    for (const auto& [key, value] : changes)
+        if (!std::regex_match(key, keyPattern) || (value != "default" && !std::regex_match(value, valuePattern)))
+            throw std::runtime_error("Invalid shader parameter assignment");
+    auto remaining = changes;
+    static const std::regex assignment(R"(^(\s*)([A-Za-z][A-Za-z0-9_]*)\s*=\s*([^#]*?)(\s*#.*)?$)");
+    std::istringstream input{std::string(content)};
+    std::ostringstream output;
+    std::string line;
+    while (std::getline(input, line)) {
+        std::smatch match;
+        if (std::regex_match(line, match, assignment) && changes.contains(match[2].str())) {
+            const auto found = remaining.find(match[2].str());
+            if (found != remaining.end()) {
+                output << match[1].str() << found->first << " = " << found->second << match[4].str() << '\n';
+                remaining.erase(found);
+            }
+        } else output << line << '\n';
+    }
+    for (const auto& [key, value] : remaining) output << key << " = " << value << '\n';
+    return output.str();
 }

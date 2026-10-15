@@ -43,9 +43,14 @@ type MakoFocusableProps = Omit<
   "flow-children"?: SteamFocusFlow;
   // Steam's Focusable supports navRef, including in virtual-focus trees.
   navRef?: Ref<MakoNavigationHandle>;
+  // Steam's scroll owner hooks are also omitted from Decky's Focusable types.
+  scrollIntoViewWhenChildFocused?: boolean | "force";
+  fnScrollIntoViewHandler?: (focused: {
+    Element?: HTMLElement | null;
+  }) => boolean;
 };
 
-/** Type Steam's focus layout and navigation handle omitted by Decky. */
+/** Type Steam's focus, navigation, and scroll options omitted by Decky. */
 export function MakoFocusable(props: MakoFocusableProps) {
   return <Focusable {...props} />;
 }

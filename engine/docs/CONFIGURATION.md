@@ -84,12 +84,18 @@ Enable Scaling before launching. Set Steam's **Game Resolution** to the display 
 Enable **Shaders** before launching to use bundled vkBasalt; more effects cost more GPU time.
 
 - **Effects:** select effects in order; uncheck and recheck to move one last. **Off** clears the effect list. **HDR Look (SDR)** changes appearance without enabling HDR.
-- **Sharpening:** Off, CAS, or DLS, with adjustable **Sharpness**. **DLS Denoise** limits sharpening of grain and noise.
+- **Sharpening:** Off, CAS, or DLS, with adjustable **Sharpness**. **DLS denoise** limits sharpening of grain and noise.
 - **Anti-aliasing:** Off, FXAA, or SMAA.
 
-Edit advanced shader parameters in the file shown below these controls. MAKO keeps other settings; restart after manual edits.
+Select **Customize shaders** to open a separate editor for the selected bundled and custom effects. Controls, labels, ranges, choices, and defaults come from the shader compiler. Declared colour controls show a preview with named red, green, blue, and alpha channels; other vectors group their X/Y/Z/W components. Arrays and matrices keep numbered components. Numeric fields retain exact values, including colour values outside the preview’s 0–1 range. Colours are never guessed from a parameter name. Missing or ambiguous presentation hints retain ordinary numeric controls; time, input, and other automatic values stay under shader control. **Reset shader to defaults** resets only the selected effect and respects parameters the author marked as non-resettable. Read-only parameters and momentary actions are omitted; a one-frame button is never presented as a permanent toggle. Boolean components retain author-supplied labels when available. Integer fields use sliders only when their bounds and steps permit whole numbers. The shader selection controls which effects are enabled; the popup only edits their parameters.
 
-**Add Custom Shader** registers a vkBasalt-compatible ReShade `.fx` file; enable it in **Effects**. Keep includes and textures accessible to Flatpak games. **Delete selected custom shaders** removes profile registrations, preserving original files. **Refresh** reloads external edits; failed loads keep the previous chain active.
+The editor saves to the selected profile’s existing shader configuration, shared by its power modes. Copies retain the values; deleting the profile removes them. Removing a custom shader also removes its own parameter values, while unchecking it retains them. Changes apply live when Shaders was enabled at game launch. Slider movements are combined before saving; a shader rebuild may briefly interrupt rendering. Changing a shader’s quality or iteration settings can increase GPU cost. The editor adds no rendering pass or per-frame parameter polling.
+
+The movable editor opens on the left, stays above other windows, and temporarily hides the main configuration window. **Hide controls** collapses it for a clearer view of the game. Closing restores the main window and waits for pending saves; failed saves can be retried or discarded.
+
+This requires a Renderer with the matching shader-parameter helper. Older installations show an update message. Imported effects retain the existing vkBasalt compatibility limits: the editor cannot add support for an incompatible effect or expose compile-time macros as uniform controls. Reopen the editor after editing a shader’s source or changing its includes.
+
+**Add custom shader** registers a vkBasalt-compatible ReShade `.fx` file; enable it in **Effects**. Keep includes and textures accessible to Flatpak games. **Delete selected custom shaders** removes profile registrations, preserving original files. **Refresh** reloads external edits; failed loads keep the previous chain active.
 
 Under **Compatibility**, keep defaults unless a game needs a change:
 
@@ -97,6 +103,12 @@ Under **Compatibility**, keep defaults unless a game needs a change:
 - **Dynamic Cadence Recovery:** off by default. Rechecks games that change native FPS by briefly reducing generated work; these checks can lower output FPS or cause hitches under sustained GPU load. Clears base caps and resets Real Frame Priority. Enabling a cap or changing priority turns Recovery off.
 - **Cadence Probe Interval:** 0.1–3 seconds between recovery checks; default 2 seconds. Shorter intervals react sooner but can hitch more often.
 - **Game Swapchain Images (Restart):** may help games that fail to start, with less generated-frame headroom.
+
+### Crop & Stretch
+
+Select **Crop & Stretch** in **Effects**, then open **Customize shaders**. **Left crop (%)**, **Right crop (%)**, **Top crop (%)**, and **Bottom crop (%)** independently remove part of that edge and stretch the remaining image to fill the output. All four default to zero. For example, Top and Bottom at 5 remove 5% from each edge and stretch the remaining 90% vertically; Left and Right at zero keep the horizontal framing. **Reset shader to defaults** restores the original framing.
+
+The controls apply live through the normal per-profile shader editor. Each edge is limited to 49% so opposing edges cannot cross; the shader also clamps advanced config values. It uses one bilinear texture read in one pass and preserves colour and alpha. There is no cost while the effect is unselected. Cropping affects the whole game image, including HUD elements and subtitles, and independent horizontal/vertical stretching changes aspect ratio. It can remove bars within the game's image, but cannot remove borders added later by Gamescope or the display. Place it before other effects when those effects should use the stretched image.
 
 ### Desktop scaling and resolution
 

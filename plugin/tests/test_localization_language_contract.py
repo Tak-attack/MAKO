@@ -100,7 +100,7 @@ class LocalizationLanguageContractTests(unittest.TestCase):
             "pt-BR": {"Experimental", "Nostalgia"},
             "pt-PT": {"Experimental", "Nostalgia"},
             "es": {"Error", "Error:", "Experimental", "Factor", "Nostalgia", "Sepia"},
-            "de": {"Details", "Installation", "Name", "Sepia", "Vignette"},
+            "de": {"Details", "Installation", "Name", "Sepia", "Vignette", "Alpha"},
         }
         for component, language, catalog, english in self.localized_catalogs():
             allowed = invariant_names | same_spelling.get(language, set())
@@ -148,6 +148,12 @@ class LocalizationLanguageContractTests(unittest.TestCase):
             "CONFIG_VKBASALT_CUSTOM_ADD": "addCustomShader",
             "CONFIG_VKBASALT_CUSTOM_REFRESH": "refreshCustomShaders",
             "CONFIG_VKBASALT_CUSTOM_DELETE": "deleteSelectedCustomShaders",
+            "SHADER_EDITOR_RED": "shaderEditorRed",
+            "SHADER_EDITOR_GREEN": "shaderEditorGreen",
+            "SHADER_EDITOR_BLUE": "shaderEditorBlue",
+            "SHADER_EDITOR_ALPHA": "shaderEditorAlpha",
+            "SHADER_EDITOR_COLOR_PREVIEW": "shaderEditorColorPreview",
+            "SHADER_EDITOR_COLOR_RANGE": "shaderEditorColorRange",
             "REMOTE_PLAY_TITLE": "remotePlay",
             "REMOTE_PLAY_INSTALL": "overrideRemotePlay",
             "REMOTE_PLAY_STATUS": "remotePlayStatus",

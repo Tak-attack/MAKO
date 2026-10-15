@@ -8,6 +8,8 @@ Optional AC/battery profile tables extend Renderer configuration version 2 witho
 
 The optional `adaptive_target_refresh_rate` boolean defaults to false for existing configuration and for older schema-5 runtime records. No saved-target migration or wrapper-format change is required: display feedback affects only the applied target, while `target_fps` remains the requested manual fallback. Native configuration, Decky profile persistence, and runtime-status regression tests preserve these defaults and distinguish requested and applied targets.
 
+The shader editor adds optional `mako-shader-tool` payload discovery while published older Renderer archives remain installable. Older archives cannot open the new editor; installing one removes a stale private helper, with rollback preserving it on failure. Remove this optional-package branch only when all supported install/rollback targets include the matching helper and effect-local parameter runtime. Legacy bare-name shader overrides are persisted user data and remain readable until a tested migration preserves their values for every effect.
+
 ## Policy
 
 The unreleased HDR precision toggle has been replaced by `hdr_quality` without a saved-value migration or legacy-field reader. Older runtime records without this field decode as `quality`, matching their full-precision behavior; retain this missing-field default until all supported Renderers report HDR quality. Older shader binaries without the optional precision hook retain full precision.

@@ -18,6 +18,8 @@ describe("Decky RPC contract", () => {
     await import("../../src/api/makoApi");
 
     expect(callableMock.mock.calls.map(([method]) => method)).toEqual([
+      "get_shader_parameters",
+      "set_shader_parameters",
       "install_mako",
       "uninstall_mako",
       "check_mako_installed",

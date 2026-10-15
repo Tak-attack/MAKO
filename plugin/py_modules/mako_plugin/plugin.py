@@ -28,6 +28,7 @@ from .flatpak_service import (
     FlatpakService,
 )
 from .types import (
+    ShaderParametersResponse,
     ConfigSchemaResponse,
     ConfigurationResponse,
     DllDetectionResponse,
@@ -266,6 +267,12 @@ class Plugin:
     ) -> RuntimeStatusResponse:
         """Return validated requested-versus-applied Renderer state."""
         return self.runtime_state_service.get_status(profile_name)
+
+    async def get_shader_parameters(self, profile_name: str) -> ShaderParametersResponse:
+        return await asyncio.to_thread(self.configuration_service.get_shader_parameters, profile_name)
+
+    async def set_shader_parameters(self, profile_name: str, changes: dict[str, float | None]) -> ShaderParametersResponse:
+        return await asyncio.to_thread(self.configuration_service.set_shader_parameters, profile_name, changes)
 
     async def reload_profile_shaders(self, profile_name: str) -> ConfigurationResponse:
         return self.configuration_service.reload_profile_shaders(profile_name)

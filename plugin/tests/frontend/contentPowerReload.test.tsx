@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => ({
   reloadProfileShaders: vi.fn(),
   createProfile: vi.fn(),
   getProfiles: vi.fn(),
+  showModal: vi.fn(),
+  closeSideMenus: vi.fn(),
+  openQuickAccessMenu: vi.fn(),
 }));
 function pass({ children }: { children: React.ReactNode }) {
   return <div>{children}</div>;
@@ -36,10 +39,15 @@ function empty() {
 }
 vi.mock("@decky/ui", () => ({
   Router: { MainRunningApp: { appid: 123, display_name: "Test Game" } },
+  Navigation: {
+    CloseSideMenus: mocks.closeSideMenus,
+    OpenQuickAccessMenu: mocks.openQuickAccessMenu,
+  },
+  QuickAccessTab: { Decky: 999 },
   PanelSection: pass,
   PanelSectionRow: pass,
   ButtonItem: pass,
-  showModal: vi.fn(),
+  showModal: mocks.showModal,
 }));
 vi.mock("../../src/api/makoApi", () => ({
   getMakoConfig: async () => ({ success: true, config: getDefaults() }),
@@ -157,11 +165,13 @@ vi.mock("../../src/components/FeatureSettings", () => ({
     onConfigChange,
     onDeleteShaders,
     onRefreshShaders,
+    onCustomizeShaders,
   }: {
     config: ReturnType<typeof getDefaults>;
     onConfigChange: (field: string, value: number) => void;
     onDeleteShaders: (ids: string[]) => Promise<void>;
     onRefreshShaders: () => Promise<void>;
+    onCustomizeShaders: () => Promise<void>;
   }) => (
     <>
       <input
@@ -172,6 +182,9 @@ vi.mock("../../src/components/FeatureSettings", () => ({
         }
       />
       <button onClick={() => void onRefreshShaders()}>Refresh shaders</button>
+      <button onClick={() => void onCustomizeShaders()}>
+        Customize shaders
+      </button>
       <span>Native target: {config.target_fps}</span>
       <button onClick={() => void onDeleteShaders(["custom/Tone"])}>
         Delete custom
@@ -424,6 +437,37 @@ test("shader refresh drains saves before requesting a rebuild and preserves the 
     "value",
     "0.73",
   );
+});
+
+test("shader editor drains the profile writer and returns to Decky's existing selection", async () => {
+  localStorage.setItem("mako-active-modality", "shaders");
+  render(<Content />);
+  await act(async () => {});
+  let finishSave!: () => void;
+  mocks.saveGate = new Promise<void>((resolve) => {
+    finishSave = resolve;
+  });
+  fireEvent.change(screen.getByLabelText("Shared shader sharpness"), {
+    target: { value: "0.73" },
+  });
+  fireEvent.click(screen.getByText("Customize shaders"));
+  await act(async () => {});
+  expect(mocks.closeSideMenus).not.toHaveBeenCalled();
+  expect(mocks.showModal).not.toHaveBeenCalled();
+  await act(async () => {
+    finishSave();
+  });
+  expect(mocks.closeSideMenus).toHaveBeenCalledTimes(1);
+  expect(mocks.showModal).toHaveBeenCalledTimes(1);
+  const [modal, parent, options] = mocks.showModal.mock.calls[0];
+  expect(modal.props.profileName).toBe("mako");
+  expect(parent).toBeUndefined();
+  expect(options).toEqual({ bNeverPopOut: true });
+  expect(mocks.openQuickAccessMenu).not.toHaveBeenCalled();
+  modal.props.onReturn();
+  expect(mocks.openQuickAccessMenu).toHaveBeenCalledExactlyOnceWith(999);
+  expect(localStorage.getItem("mako-active-modality")).toBe("shaders");
+  localStorage.removeItem("mako-active-modality");
 });
 
 test("custom shader deletion waits for queued settings and reloads the selected power set", async () => {

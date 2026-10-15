@@ -32,6 +32,7 @@ SOURCE_PATHS = {
     "source": "share/doc/vkbasalt/SOURCE",
     "checksums": "SHA256SUMS",
 }
+OPTIONAL_SOURCE_PATHS = {"bin/mako-shader-tool"}
 LAYER_NAME = "VK_LAYER_VKBASALT_post_processing"
 ENABLE_ENVIRONMENT = {"ENABLE_VKBASALT": "1"}
 DISABLE_ENVIRONMENT = {"DISABLE_VKBASALT": "1"}
@@ -143,7 +144,7 @@ def _archive_members(archive_path: Path) -> dict[str, bytes]:
             if not member.isfile():
                 continue
             normalized = str(PurePosixPath(member.name.removeprefix("./")))
-            if normalized not in SOURCE_PATHS.values():
+            if normalized not in SOURCE_PATHS.values() and normalized not in OPTIONAL_SOURCE_PATHS:
                 continue
             source = archive.extractfile(member)
             if source is None:
@@ -188,6 +189,14 @@ def _validate_archive(pin: dict[str, Any], archive_path: Path) -> dict[str, byte
         actual_member = hashlib.sha256(members[member_path]).hexdigest()
         if expected != actual_member:
             raise ValueError(f"vkBasalt internal checksum failed for {member_path}")
+    for member_path in OPTIONAL_SOURCE_PATHS.intersection(members):
+        binary = members[member_path]
+        if checksums.get(member_path) != hashlib.sha256(binary).hexdigest():
+            raise ValueError(f"vkBasalt internal checksum failed for {member_path}")
+        if not binary.startswith(b"\x7fELF\x02"):
+            raise ValueError("vkBasalt shader tool has the wrong ELF class")
+        if any(b"makoShader_" not in members[SOURCE_PATHS[key]] for key in ("lib64", "lib32")):
+            raise ValueError("vkBasalt shader tool requires matching parameter support in both layers")
     for key, elf_class in (("lib64", 2), ("lib32", 1)):
         binary = members[SOURCE_PATHS[key]]
         if len(binary) < 5 or binary[:4] != b"\x7fELF" or binary[4] != elf_class:
@@ -319,6 +328,8 @@ def _stage_native(
                 0o644,
             ),
         ])
+    if "bin/mako-shader-tool" in members:
+        files.append((target / "bin/mako-shader-tool", members["bin/mako-shader-tool"], 0o755))
     for path, content, mode in files:
         _write(path, content, mode)
 

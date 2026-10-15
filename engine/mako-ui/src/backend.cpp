@@ -10,6 +10,8 @@
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QJsonArray>
+#include <QSet>
+#include <QProcessEnvironment>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QRegularExpression>
@@ -25,16 +27,79 @@
 #include "mako-common/configuration/launch.hpp"
 #include "mako-common/configuration/vkbasalt.hpp"
 
+#include <cmath>
 #include <exception>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 
 using namespace mako;
 using namespace mako::ui;
 
 namespace {
+
+// Independently deployed Qt binding of the helper's schema; malformed identities
+// must never connect a friendly label to another effect's persisted parameter.
+QVariantList shaderMetadata(const QJsonObject& data) {
+    const auto invalid = [] { throw std::runtime_error("Invalid or ambiguous shader parameter metadata"); };
+    if (!data.value("schema").isDouble() || data.value("schema").toDouble() != 1 || !data.value("effects").isArray()) invalid();
+    static const QRegularExpression keyPattern(QStringLiteral("^makoShader_(?:[0-9a-f]{2})+_(?:[0-9a-f]{2})+_(?:0|[1-9][0-9]*)$"));
+    const auto finite = [](const QJsonValue& v) { return v.isDouble() && std::isfinite(v.toDouble()); };
+    QSet<QString> ids, keys;
+    QVariantList result;
+    for (const auto& value : data.value("effects").toArray()) {
+        if (!value.isObject()) invalid();
+        auto effect = value.toObject();
+        for (const auto* field : {"id", "name", "path"}) if (!effect.value(field).isString()) invalid();
+        const auto id = effect.value("id").toString();
+        if (id.isEmpty() || ids.contains(id) || !effect.value("parameters").isArray()) invalid();
+        ids.insert(id);
+        if (!effect.value("error").isNull() && !effect.value("error").isUndefined() && !effect.value("error").isString()) invalid();
+        const auto prefix = QStringLiteral("makoShader_") + QString::fromLatin1(id.toUtf8().toHex()) + '_';
+        QJsonArray parameters;
+        for (const auto& item : effect.value("parameters").toArray()) {
+            if (!item.isObject()) invalid();
+            auto p = item.toObject();
+            for (const auto* field : {"key", "label", "description", "category", "type"}) if (!p.value(field).isString()) invalid();
+            const auto key = p.value("key").toString(), type = p.value("type").toString();
+            if (!keyPattern.match(key).hasMatch() || !key.startsWith(prefix) || keys.contains(key) ||
+                (type != "float" && type != "int" && type != "uint" && type != "bool")) invalid();
+            keys.insert(key);
+            for (const auto* field : {"default", "value", "min", "max", "step"}) {
+                const auto v = p.value(field);
+                if (std::string_view(field) != "default" && std::string_view(field) != "value" && (v.isNull() || v.isUndefined())) { p.insert(field, QJsonValue::Null); continue; }
+                if (!finite(v)) invalid();
+            }
+            for (const auto* field : {"default", "value"}) {
+                const auto number = p.value(field).toDouble();
+                if ((type == "float" && !std::isfinite(static_cast<float>(number))) ||
+                    (type != "float" && number != std::floor(number)) ||
+                    (type == "bool" && number != 0 && number != 1) ||
+                    (type == "int" && (number < INT32_MIN || number > INT32_MAX)) ||
+                    (type == "uint" && (number < 0 || number > UINT32_MAX))) invalid();
+            }
+            if (!p.value("items").isArray()) invalid();
+            for (const auto& label : p.value("items").toArray()) if (!label.isString()) invalid();
+            if (!p.value("items").toArray().isEmpty() && type != "int" && type != "uint") invalid();
+            if (p.contains("resettable") && !p.value("resettable").isBool()) invalid();
+            const auto hint = p.value("presentation").toObject();
+            if (type == "bool" && hint.value("widget").toString() == "button") continue;
+            const auto count = hint.value("count"), component = hint.value("component");
+            const QStringList widgets{QString(), QStringLiteral("input"), QStringLiteral("drag"), QStringLiteral("slider"), QStringLiteral("combo"), QStringLiteral("radio"), QStringLiteral("list"), QStringLiteral("color"), QStringLiteral("button")};
+            if (!hint.value("widget").isString() || !widgets.contains(hint.value("widget").toString()) ||
+                !hint.value("label").isString() || !keyPattern.match(hint.value("group").toString()).hasMatch() ||
+                !finite(count) || count.toDouble() != std::floor(count.toDouble()) || count.toDouble() < 1 || count.toDouble() > 4 ||
+                !finite(component) || component.toDouble() != std::floor(component.toDouble()) || component.toDouble() < 0 || component.toDouble() >= count.toDouble()) p.remove("presentation");
+            parameters.append(p);
+        }
+        effect.insert("parameters", parameters);
+        if (!effect.contains("error")) effect.insert("error", QJsonValue::Null);
+        result.append(effect.toVariantMap());
+    }
+    return result;
+}
 
 std::filesystem::path findBundledVkBasaltShaderDirectory() {
     if (const char* explicitPath = std::getenv("MAKO_VKBASALT_SHADER_DIR");
@@ -124,8 +189,8 @@ QString ui::launcherCommandForUiDirectory(const QString& directory) {
     return QStringLiteral("~/.local/bin/mako-launch");
 }
 
-Backend::Backend(std::filesystem::path procRoot, QString remotePlayHelper)
-        : m_proc_root(std::move(procRoot)), m_remote_play_helper(std::move(remotePlayHelper)) {
+Backend::Backend(std::filesystem::path procRoot, QString remotePlayHelper, QString shaderHelper)
+        : m_proc_root(std::move(procRoot)), m_remote_play_helper(std::move(remotePlayHelper)), m_shader_helper(std::move(shaderHelper)) {
     // load configuration
     ls::ConfigFile config{};
 
@@ -508,6 +573,136 @@ QVariantList Backend::getCustomShaderEffects() const {
         std::cerr << "MAKO Renderer: unable to read custom shader catalog: " << error.what() << '\n';
     }
     return result;
+}
+
+void Backend::loadShaderParameters() {
+    // Reopening (possibly for another profile) supersedes the previous discovery.
+    if (auto* previous = m_shader_parameter_process) {
+        previous->disconnect(this);
+        if (previous->state() == QProcess::NotRunning) previous->deleteLater();
+        else {
+            connect(previous, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), previous, &QObject::deleteLater);
+            previous->kill();
+        }
+        m_shader_parameter_process = nullptr;
+    }
+    m_shader_parameters_loading = false;
+    m_shader_parameter_effects.clear();
+    m_shader_parameter_error.clear();
+    if (!isValidProfileIndex()) { emit shaderParametersChanged(); return; }
+    if (!savePendingChanges()) {
+        m_shader_parameter_error = QStringLiteral("Unable to save pending profile settings");
+        emit shaderParametersChanged(); return;
+    }
+    const auto path = vkBasaltConfigPath(static_cast<size_t>(m_profile_index));
+    m_shader_parameter_path = path;
+    try { m_shader_parameter_content = ls::readVkBasaltConfiguration(path); }
+    catch (const std::exception& error) { m_shader_parameter_error = QString::fromUtf8(error.what()); emit shaderParametersChanged(); return; }
+    QString program = m_shader_helper.isEmpty() ? QCoreApplication::applicationDirPath() + QStringLiteral("/mako-shader-tool") : m_shader_helper;
+    if (m_shader_helper.isEmpty() && !QFileInfo::exists(program)) program = QDir::homePath() + QStringLiteral("/.local/share/mako-render/bin/mako-shader-tool");
+    if (!QFileInfo::exists(program)) {
+        m_shader_parameter_error = QStringLiteral("Install the updated MAKO Renderer to customize shader parameters.");
+        emit shaderParametersChanged(); return;
+    }
+    auto* process = new QProcess(this);
+    m_shader_parameter_process = process;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("VKBASALT_LOG_LEVEL"), QStringLiteral("none"));
+    environment.insert(QStringLiteral("VKBASALT_LOG_FILE"), QStringLiteral("stderr"));
+    process->setProcessEnvironment(environment);
+    m_shader_parameters_loading = true;
+    emit shaderParametersChanged();
+    auto* timeout = new QTimer(process);
+    timeout->setSingleShot(true);
+    timeout->setInterval(30000);
+    connect(timeout, &QTimer::timeout, process, &QProcess::kill);
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        m_shader_parameter_process = nullptr;
+        m_shader_parameters_loading = false;
+        m_shader_parameter_error = process->errorString();
+        emit shaderParametersChanged();
+        process->deleteLater();
+    });
+    connect(process, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this, [this, process, timeout, path](int code, QProcess::ExitStatus status) {
+        timeout->stop();
+        m_shader_parameter_process = nullptr;
+        m_shader_parameters_loading = false;
+        const auto output = process->readAllStandardOutput();
+        const auto document = QJsonDocument::fromJson(output);
+        if (code != 0 || status != QProcess::NormalExit || output.size() > 4 * 1024 * 1024 || document.object().value(QStringLiteral("schema")).toInt() != 1 || !document.object().value(QStringLiteral("effects")).isArray())
+            m_shader_parameter_error = QStringLiteral("Unable to read shader parameters: ") + QString::fromUtf8(process->readAllStandardError());
+        else if (!isValidProfileIndex() || vkBasaltConfigPath(static_cast<size_t>(m_profile_index)) != path)
+            m_shader_parameter_error = QStringLiteral("Profile changed; reopen the shader editor");
+        else {
+            try {
+                if (ls::readVkBasaltConfiguration(path) != m_shader_parameter_content)
+                    throw std::runtime_error("Shader settings changed; reopen the editor");
+                m_shader_parameter_effects = shaderMetadata(document.object());
+            } catch (const std::exception& error) { m_shader_parameter_error = QString::fromUtf8(error.what()); }
+        }
+        process->deleteLater();
+        emit shaderParametersChanged();
+    });
+    process->start(program, {QString::fromStdString(path.string())});
+    timeout->start();
+}
+
+bool Backend::setShaderParameters(const QVariantMap& changes) {
+    try {
+        if (!isValidProfileIndex() || m_shader_parameters_loading || changes.isEmpty() || changes.size() > 1024 ||
+            vkBasaltConfigPath(static_cast<size_t>(m_profile_index)) != m_shader_parameter_path)
+            throw std::runtime_error("Profile changed; reopen the shader editor");
+        const auto original = ls::readVkBasaltConfiguration(m_shader_parameter_path);
+        if (original != m_shader_parameter_content) throw std::runtime_error("Shader settings changed; reopen the editor");
+        std::map<std::string, std::string> values;
+        QVariantMap allowed;
+        for (const auto& effect : m_shader_parameter_effects)
+            for (const auto& value : effect.toMap().value(QStringLiteral("parameters")).toList()) {
+                const auto parameter = value.toMap();
+                allowed.insert(parameter.value(QStringLiteral("key")).toString(), parameter);
+            }
+        for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
+            if (!allowed.contains(it.key())) throw std::runtime_error("Unknown shader parameter");
+            const auto p = allowed.value(it.key()).toMap();
+            bool ok = false;
+            const bool resetting = it.value().isNull();
+            const auto inputType = it.value().userType();
+            if (!resetting && inputType != QMetaType::Double && inputType != QMetaType::Float && inputType != QMetaType::Int && inputType != QMetaType::UInt && inputType != QMetaType::LongLong && inputType != QMetaType::ULongLong)
+                throw std::runtime_error("Shader values must be numbers");
+            const auto value = (resetting ? p.value(QStringLiteral("default")) : it.value()).toDouble(&ok);
+            const auto type = p.value(QStringLiteral("type")).toString();
+            const auto minimum = p.value(QStringLiteral("min")), maximum = p.value(QStringLiteral("max"));
+            const auto items = p.value(QStringLiteral("items")).toStringList();
+            if (resetting && p.contains("resettable") && !p.value("resettable").toBool()) throw std::runtime_error("This shader parameter does not allow reset");
+            const auto comparison = type == "float" ? static_cast<double>(static_cast<float>(value)) : value;
+            const auto bound = [&](const QVariant& v) { return type == "float" ? static_cast<double>(static_cast<float>(v.toDouble())) : v.toDouble(); };
+            if (!ok || !std::isfinite(value) || !std::isfinite(comparison) ||
+                (type != QStringLiteral("float") && value != std::floor(value)) ||
+                (type == QStringLiteral("bool") && value != 0 && value != 1) ||
+                (type == QStringLiteral("int") && (value < INT32_MIN || value > INT32_MAX)) ||
+                (type == QStringLiteral("uint") && (value < 0 || value > UINT32_MAX)) ||
+                (!resetting && ((!minimum.isNull() && comparison < bound(minimum)) || (!maximum.isNull() && comparison > bound(maximum)) ||
+                (!items.empty() && (value < 0 || value >= items.size())))))
+                throw std::runtime_error("Shader value is outside its declared range");
+            const auto serialized = resetting ? QStringLiteral("default") : type == QStringLiteral("float")
+                ? QString::number(value, 'g', 9)
+                : QString::number(static_cast<qlonglong>(value));
+            values.emplace(it.key().toStdString(), serialized.toStdString());
+        }
+        const auto content = ls::updateVkBasaltShaderParameters(original, values);
+        ls::writeVkBasaltConfiguration(m_shader_parameter_path, content);
+        try { writeSelectedVkBasaltConfig(); }
+        catch (...) { ls::writeVkBasaltConfiguration(m_shader_parameter_path, original); writeSelectedVkBasaltConfig(); throw; }
+        m_shader_parameter_content = content;
+        m_shader_parameter_error.clear();
+        emit shaderParametersChanged();
+        return true;
+    } catch (const std::exception& error) {
+        m_shader_parameter_error = QString::fromUtf8(error.what());
+        emit shaderParametersChanged();
+        return false;
+    }
 }
 
 bool Backend::addCustomShader(const QString& value) {

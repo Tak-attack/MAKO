@@ -4,6 +4,7 @@ Type definitions for MAKO Decky responses.
 
 from typing import Literal, TypedDict, Optional, List
 from .config_schema import ConfigurationData
+from .shader_parameters import ShaderEffectParameters
 
 
 class BaseResponse(TypedDict):
@@ -305,3 +306,7 @@ class RuntimeStatusResponse(ServiceResponse):
 
     phase: RuntimeApplicationPhase
     contexts: List[RuntimeContextState]
+
+
+class ShaderParametersResponse(ServiceResponse):
+    effects: list[ShaderEffectParameters]

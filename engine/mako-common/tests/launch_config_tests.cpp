@@ -48,6 +48,25 @@ namespace {
 }
 
 int main() {
+    const std::string parameterKey = "makoShader_546f6e65_537472656e677468_0";
+    const auto parameters = ls::updateVkBasaltShaderParameters(
+        "effects = Tone:Other\n  " + parameterKey + " = 0.2 # note\n" + parameterKey + " = 0.9\nOther = \"source #2.fx\"\n",
+        {{parameterKey, "0.7"}});
+    expect(parameters == "effects = Tone:Other\n  " + parameterKey + " = 0.7 # note\nOther = \"source #2.fx\"\n",
+        "shader parameter merge lost comments or retained duplicate overrides");
+    bool rejected = false;
+    try { static_cast<void>(ls::updateVkBasaltShaderParameters("", {{parameterKey, "1\neffects = bad"}})); }
+    catch (const std::exception&) { rejected = true; }
+    expect(rejected, "shader parameter assignment accepted config injection");
+    const auto removedParameters = ls::removeVkBasaltCustomShaders(
+        "effects = Tone:Other\nTone = /tone.fx\nOther = /other.fx\n" + parameterKey +
+        " = 0.7\nmakoShader_4f74686572_537472656e677468_0 = 0.4\nStrength = 0.6\n", {"custom/Tone"});
+    expect(removedParameters.find(parameterKey) == std::string::npos &&
+        removedParameters.find("makoShader_4f74686572_537472656e677468_0 = 0.4") != std::string::npos &&
+        removedParameters.find("Strength = 0.6") != std::string::npos &&
+        removedParameters.find("effects = Other") != std::string::npos,
+        "custom shader deletion retained stale parameters or changed another effect");
+
     const ls::LaunchConfigFile defaults;
     expect(defaults.settings().disable_hdr_exposure &&
             defaults.settings().disable_steam_overlay &&
@@ -143,6 +162,16 @@ int main() {
             !ls::isVkBasaltShader("clarity:clarity") &&
             !ls::isVkBasaltShader("none:vibrance"),
         "ordered shader selection validation is inconsistent");
+
+    auto cropSettings = shaderSettings;
+    cropSettings.shader = "crop_stretch:vibrance";
+    const auto cropContent = ls::mergeVkBasaltConfiguration("", cropSettings, shaderDirectory);
+    expect(ls::isVkBasaltShader(cropSettings.shader) &&
+            cropContent.find("effects = fxaa:makoCropStretch:makoVibrance:dls") != std::string::npos &&
+            cropContent.find("makoCropStretch = \"" + (shaderDirectory / "CropStretch.fx").string() + "\"") != std::string::npos &&
+            ls::customVkBasaltShaders(cropContent).empty() &&
+            ls::vkBasaltShaderSelection(cropContent, cropSettings) == cropSettings.shader,
+        "Crop & Stretch must round-trip as an ordered bundled effect, not a custom import");
 
     const std::string customContent =
         "# preserve\neffects = \"Tone_A:makoVibrance:ToneB:cas\" # selected\n"

@@ -234,7 +234,7 @@ class DualArchInstallationTests(unittest.TestCase):
             },
         }).encode("utf-8")
 
-    def _archive(self, include_32bit: bool = True, include_sdr_helper: bool = False) -> Path:
+    def _archive(self, include_32bit: bool = True, include_sdr_helper: bool = False, include_shader_tool: bool = False) -> Path:
         archive_path = self.root / "engine.tar.xz"
         members = {
             "bin/mako-vrr-lease": b"#!/usr/bin/env python3\n",
@@ -312,6 +312,8 @@ class DualArchInstallationTests(unittest.TestCase):
                 ),
             })
 
+        if include_shader_tool:
+            members["bin/mako-shader-tool"] = b"packaged shader helper"
         if include_sdr_helper:
             members['share/mako-render/mako_remote_play/libmako-remote-play-sdr.so'] = b'packaged SDR helper'
         with tarfile.open(archive_path, "w:xz") as archive:
@@ -390,6 +392,21 @@ class DualArchInstallationTests(unittest.TestCase):
         self.assertFalse(self.service._native_payload_exists(
             ACTIVE_RENDERER_OWNER_STANDALONE, False,
         ))
+
+    def test_shader_tool_install_downgrade_and_rollback(self):
+        from py_modules.mako_plugin.managed_files import managed_install_transaction
+        helper = self.service.cli_file.with_name("mako-shader-tool")
+        self.service._extract_and_install_files(self._archive(include_shader_tool=True))
+        self.assertEqual(helper.read_bytes(), b"packaged shader helper")
+        self.assertEqual(helper.stat().st_mode & 0o777, 0o755)
+        with self.assertRaisesRegex(OSError, "late failure"):
+            with managed_install_transaction(self.service._decky_renderer_files(), _Logger()):
+                self.service._extract_and_install_files(self._archive())
+                self.assertFalse(helper.exists())
+                raise OSError("late failure")
+        self.assertEqual(helper.read_bytes(), b"packaged shader helper")
+        self.service._extract_and_install_files(self._archive())
+        self.assertFalse(helper.exists())
 
     def test_sdr_helper_extraction_rollback_and_cleanup(self):
         from py_modules.mako_plugin.managed_files import managed_install_transaction

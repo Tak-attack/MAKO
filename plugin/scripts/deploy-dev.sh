@@ -16,6 +16,9 @@ renderer_path_output="$(
 cli_relative_path="$(
   python3 "$project_dir/scripts/read_flatpak_runtime_contract.py" cli-path
 )"
+shader_tool_relative_path="$(
+  python3 "$project_dir/scripts/read_flatpak_runtime_contract.py" shader-tool-path
+)"
 vkbasalt_path_output="$(
   python3 "$project_dir/scripts/read_flatpak_runtime_contract.py" vkbasalt-paths
 )"
@@ -686,6 +689,11 @@ if [[ -n "$built_layer_64" ]]; then
   copy_file "$built_vkbasalt_library_64" "$installed_vkbasalt_library_64"
   copy_file "$built_vkbasalt_manifest_64" "$installed_vkbasalt_manifest_64"
   copy_file "$built_cli" "$installed_cli"
+  if [[ -x "$vkbasalt_stage_dir/bin/mako-shader-tool" ]]; then
+    copy_file "$vkbasalt_stage_dir/bin/mako-shader-tool" "$HOME/$shader_tool_relative_path"
+  else
+    rm -f -- "$HOME/$shader_tool_relative_path"
+  fi
   copy_file "$built_remote_play_sdr" \
     "$HOME/.local/share/mako-render/mako_remote_play/libmako-remote-play-sdr.so"
   if ! cmp -s "$built_remote_play_sdr" \

@@ -12,6 +12,7 @@ sys.path.insert(0, str(PLUGIN_ROOT))
 from py_modules.mako_plugin.constants import (  # noqa: E402
     CLI_DIR,
     CLI_FILENAME,
+    SHADER_TOOL_FILENAME,
     CONFIG_DIR,
     FLATPAK_RUNTIME_BUNDLES,
     LIB_FILENAME,
@@ -50,6 +51,7 @@ def main() -> None:
             "summary",
             "renderer-paths",
             "cli-path",
+            "shader-tool-path",
             "vkbasalt-paths",
         ),
     )
@@ -67,6 +69,8 @@ def main() -> None:
         print(_summary(versions))
     elif args.field == "cli-path":
         print(f"{CLI_DIR}/{CLI_FILENAME}")
+    elif args.field == "shader-tool-path":
+        print(f"{CLI_DIR}/{SHADER_TOOL_FILENAME}")
     elif args.field == "renderer-paths":
         print(
             LIB_FILENAME,

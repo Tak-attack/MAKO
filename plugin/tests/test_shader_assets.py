@@ -152,7 +152,7 @@ class ShaderAssetTests(unittest.TestCase):
             with self.subTest(shader=filename):
                 self.assertTrue((SHADER_ROOT / filename).is_file())
 
-        for filename in ("BleachBypass.fx", "Noir.fx", "Clarity.fx", "LevelsPlus.fx"):
+        for filename in ("BleachBypass.fx", "Noir.fx", "Clarity.fx", "LevelsPlus.fx", "CropStretch.fx"):
             source = (SHADER_ROOT / filename).read_text(encoding="utf-8")
             self.assertIn("SPDX-License-Identifier: GPL-3.0-or-later", source)
 

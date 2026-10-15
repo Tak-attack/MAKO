@@ -8,6 +8,7 @@ import "panes"
 import "widgets"
 
 ApplicationWindow {
+    id: mainWindow
     property var t: localization.strings
     property string profileErrorText: {
         switch (backend.profile_operation_error) {
@@ -41,6 +42,12 @@ ApplicationWindow {
             verticalAlignment: Text.AlignVCenter
             wrapMode: Text.WordWrap
         }
+    }
+
+    ShaderParametersWindow {
+        id: shaderEditor
+        strings: t
+        owner: mainWindow
     }
 
     RunningGamesDialog {
@@ -737,8 +744,8 @@ ApplicationWindow {
                         ColumnLayout {
                             id: effectStack
                             Layout.fillWidth: true
-                            property var bundledEffectIds: ["none", "hdr_look", "clarity", "levels_plus", "vibrance", "colourfulness", "curves", "deband", "technicolor2", "dpx", "bleach_bypass", "noir", "technicolor", "monochrome", "sepia", "film_grain", "vignette", "cartoon", "nostalgia", "chromatic_aberration"]
-                            property var bundledEffectLabels: [t.off, t.shaderEffectHdrLook, t.shaderEffectClarity, t.shaderEffectLevelsPlus, t.shaderEffectVibrance, t.shaderEffectColourfulness, t.shaderEffectCurves, t.shaderEffectDeband, t.shaderEffectTechnicolor2, t.shaderEffectDpx, t.shaderEffectBleachBypass, t.shaderEffectNoir, t.shaderEffectTechnicolor, t.shaderEffectMonochrome, t.shaderEffectSepia, t.shaderEffectFilmGrain, t.shaderEffectVignette, t.shaderEffectCartoon, t.shaderEffectNostalgia, t.shaderEffectChromaticAberration]
+                            property var bundledEffectIds: ["none", "hdr_look", "clarity", "levels_plus", "vibrance", "colourfulness", "curves", "deband", "technicolor2", "dpx", "bleach_bypass", "noir", "technicolor", "monochrome", "sepia", "film_grain", "vignette", "cartoon", "nostalgia", "chromatic_aberration", "crop_stretch"]
+                            property var bundledEffectLabels: [t.off, t.shaderEffectHdrLook, t.shaderEffectClarity, t.shaderEffectLevelsPlus, t.shaderEffectVibrance, t.shaderEffectColourfulness, t.shaderEffectCurves, t.shaderEffectDeband, t.shaderEffectTechnicolor2, t.shaderEffectDpx, t.shaderEffectBleachBypass, t.shaderEffectNoir, t.shaderEffectTechnicolor, t.shaderEffectMonochrome, t.shaderEffectSepia, t.shaderEffectFilmGrain, t.shaderEffectVignette, t.shaderEffectCartoon, t.shaderEffectNostalgia, t.shaderEffectChromaticAberration, t.shaderEffectCropStretch]
 
                             property var customEffects: backend.custom_shader_effects
                             property var missingIds: backend.vkbasalt_shader.split(":").filter(function(id) {
@@ -842,6 +849,11 @@ ApplicationWindow {
                         visible: backend.enable_vkbasalt
                         spacing: 8
 
+                        ShaderActionButton {
+                            text: t.shaderEditorTitle
+                            enabled: backend.vkbasalt_shader !== "none"
+                            onClicked: { shaderEditor.profileName = backend.shader_profile_name; shaderEditor.openEditor() }
+                        }
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
@@ -857,16 +869,14 @@ ApplicationWindow {
                                 text: t.refreshCustomShaders
                                 onClicked: backend.refreshCustomShaders()
                             }
-                            ShaderActionButton {
-                                Layout.preferredWidth: 1
-                                Layout.fillHeight: true
-                                text: t.deleteSelectedCustomShaders
-                                enabled: backend.vkbasalt_shader.split(":").some(function(id) { return id.indexOf("custom/") === 0; })
-                                opacity: enabled ? 1.0 : 0.45
-                                palette.button: "#64253a"
-                                palette.buttonText: "#fff0f5"
-                                onClicked: backend.deleteSelectedCustomShaders()
-                            }
+                        }
+                        ShaderActionButton {
+                            text: t.deleteSelectedCustomShaders
+                            enabled: backend.vkbasalt_shader.split(":").some(function(id) { return id.indexOf("custom/") === 0; })
+                            opacity: enabled ? 1.0 : 0.45
+                            palette.button: "#64253a"
+                            palette.buttonText: "#fff0f5"
+                            onClicked: backend.deleteSelectedCustomShaders()
                         }
                         Label {
                             Layout.fillWidth: true
