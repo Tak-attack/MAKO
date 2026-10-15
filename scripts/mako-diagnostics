@@ -212,6 +212,9 @@ add_pattern() {
 # preset such as HDR or performance. Retain the former prefix in the filter so
 # reports collected immediately after an upgrade can still include old logs.
 renderer_prefix='(MAKO Renderer:|mako:)'
+# Steam console-linux.txt timestamps every stderr line, including exception
+# continuations and Wayland errors. Match only that known envelope.
+steam_timestamp_prefix='[[][0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9][]][[:space:]]+'
 add_pattern "$renderer_prefix render layer active; identity=VK_LAYER_MAKO_render; build="
 # A presentation or initialization failure explains missing later telemetry in
 # any preset. Its adjacent exception details are folded into the same record.
@@ -220,7 +223,7 @@ add_pattern "$renderer_prefix [^:]*failed:"
 # Keep its exact error shape, including older @ object IDs and destroyed
 # proxies: an EPIPE bridge failure can otherwise hide the server's cause.
 # This does not admit ordinary Wayland request traces or arbitrary game logs.
-add_pattern '^([[:alpha:]_][[:alnum:]_]*[#@][0-9]+|[[]destroyed object[]]): error -?[0-9]+:'
+add_pattern "^($steam_timestamp_prefix)?([[:alpha:]_][[:alnum:]_]*[#@][0-9]+|[[]destroyed object[]]): error -?[0-9]+:"
 # Interleaved Vulkan processes are common on SteamOS. Keep their identity and
 # swapchain metadata in every focused report so policy and slow-operation
 # records can be attributed without expanding the report to unrelated output.
@@ -328,10 +331,12 @@ done
 # Fold only adjacent details into one bounded record before either collection
 # pass, so even --lines 1 preserves the header and its error together.
 normalize_renderer_errors() {
-  awk -v renderer="$renderer_prefix" '
+  awk -v renderer="$renderer_prefix" -v steam_timestamp="$steam_timestamp_prefix" '
     {
-      if (header != "" && $0 ~ /^[[:space:]]*-[[:space:]]/) {
-        if (details < 8) header = header " " $0
+      message = $0
+      sub("^" steam_timestamp, "", message)
+      if (header != "" && message ~ /^[[:space:]]*-[[:space:]]/) {
+        if (details < 8) header = header " " message
         else if (details == 8) header = header " error_details_truncated=1"
         ++details
         next

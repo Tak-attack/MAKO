@@ -186,6 +186,52 @@ class DiagnosticsHelperTests(unittest.TestCase):
             "MAKO Renderer: layer initialization failed: - test initialization error",
         ])
 
+    def test_steam_timestamped_exception_details_survive_every_preset(self):
+        timestamp = "[2026-10-14 20:31:05] "
+        for prefix in ("MAKO Renderer:", "mako:"):
+            header = timestamp + prefix + " swapchain presentation failed:"
+            records = [
+                timestamp + "- unrelated exception before the failure",
+                header,
+                timestamp + "- vkQueuePresentKHR() failed (error -4)",
+                "[2026-10-14 20:31:06] - nested synthetic error",
+                timestamp + "unrelated application output",
+                timestamp + "- unrelated exception after the failure",
+            ]
+            expected = header + " - vkQueuePresentKHR() failed (error -4) - nested synthetic error"
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                path = Path(temporary_directory) / "console-linux.txt"
+                path.write_text("\n".join(records) + "\n", encoding="utf-8")
+                for preset in self._run("--list").stdout.splitlines():
+                    with self.subTest(prefix=prefix, preset=preset):
+                        result = self._run("--log", str(path), "--lines", "1", preset)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout.strip(), expected)
+                        self.assertIn("matched_trace_lines=1", result.stderr)
+
+    def test_steam_timestamped_wayland_errors_survive_every_preset(self):
+        timestamp = "[2026-10-14 20:31:05] "
+        errors = [timestamp + message for message in (
+            "wl_display#1: error 1: synthetic protocol error",
+            "wl_surface@9: error 2: synthetic surface failure",
+            "[destroyed object]: error 7: synthetic import failure",
+        )]
+        unrelated = [
+            timestamp + "application: error 7: unrelated failure",
+            timestamp + "wl_surface#9.attach(wl_buffer#10, 0, 0)",
+            timestamp + "prefix wl_display#1: error 1: quoted error",
+            "[not a timestamp] wl_display#1: error 1: unrelated output",
+        ]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "console-linux.txt"
+            path.write_text("\n".join(unrelated + errors + unrelated) + "\n", encoding="utf-8")
+            for preset in self._run("--list").stdout.splitlines():
+                with self.subTest(preset=preset):
+                    result = self._run("--log", str(path), preset)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.splitlines(), errors)
+                    self.assertIn("matched_trace_lines=3", result.stderr)
+
     def test_renderer_exception_detail_count_is_bounded(self):
         records = ["MAKO Renderer: device creation failed:"]
         records.extend(f"- test cause {index}" for index in range(20))

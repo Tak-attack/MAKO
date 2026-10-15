@@ -48,6 +48,8 @@ The file appears on your Desktop; Konsole normally prints nothing. If no log is 
 
 For a slowdown after a long session, replace `--lines 5000` with `--lines 200000`. Collect before starting another game.
 
+Every preset retains Renderer failure headers with their adjacent exception details and Wayland protocol errors, including Steam's timestamped console format. These records can identify the failed Vulkan operation or compositor rejection. Collection cannot recover details already removed from an older filtered report; run the current helper against the original session log. The separate Gamescope system journal is not collected.
+
 For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution.
 
 ## 4. Restore your settings
