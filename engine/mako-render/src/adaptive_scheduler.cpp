@@ -150,6 +150,7 @@ namespace {
     constexpr double adaptiveStableCadenceMaximumCandidateSpreadRatio = 1.15;
     constexpr auto adaptiveEfficiencyProbeHoldDuration = std::chrono::seconds(5);
     constexpr auto adaptiveEfficiencyProbeEvaluationDuration = std::chrono::milliseconds(250);
+    constexpr auto adaptiveEfficiencyProbeSampleDuration = std::chrono::seconds(1);
     constexpr auto adaptiveEfficiencyProbeSettlingGraceDuration =
         std::chrono::milliseconds(250);
     constexpr auto adaptiveEfficiencyProbeNearTargetRetryDelay =
@@ -362,6 +363,14 @@ void AdaptiveScheduler::reportGeneratedFrameDelivery(
         const GeneratedFrameDelivery delivery) {
     if (this->state.ramp.evaluationAt)
         this->state.ramp.targetDeliveryReports++;
+    auto& efficiency = this->state.efficiencyProbe;
+    if (efficiency.sampling) {
+        efficiency.sampleComplete = efficiency.sampleComplete &&
+            !efficiency.deliveryObserved &&
+            delivery.requested == efficiency.testedLimit &&
+            delivery.acceptedForPresentation == efficiency.testedLimit;
+        efficiency.deliveryObserved = true;
+    }
     auto& rescue = this->state.rescue;
     if (rescue.verificationUntil && rescue.pendingGeneratedFrames > 0) {
         rescue.deliveryHealthy = rescue.deliveryHealthy &&
@@ -1329,7 +1338,8 @@ AdaptiveScheduler::advanceStableCadence(
 }
 
 MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
-        const TimePoint now, const double baseFps) {
+        const TimePoint now, const double baseFps,
+        const double rawIntervalSeconds) {
     auto& probe = this->state.efficiencyProbe;
     const double targetFps = static_cast<double>(this->config.targetFps);
 
@@ -1339,19 +1349,43 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
         return;
 
     if (probe.evaluationAt) {
+        if (probe.sampling) {
+            probe.sampleComplete = probe.sampleComplete && probe.deliveryObserved;
+            probe.deliveryObserved = false;
+            probe.sampleSeconds += rawIntervalSeconds;
+            probe.sampleFrames++;
+        }
         if (now < *probe.evaluationAt)
             return;
 
         const size_t testedLimit = probe.testedLimit;
-        const double projectedOutputFps = baseFps *
+        const double measuredBaseFps = probe.sampling && probe.sampleSeconds > 0.0
+            ? static_cast<double>(probe.sampleFrames) / probe.sampleSeconds : baseFps;
+        const double projectedOutputFps = measuredBaseFps *
             static_cast<double>(testedLimit + 1);
-        const bool deliveryHealthy = probe.delivery.healthy();
+        const bool deliveryHealthy = probe.delivery.healthy() &&
+            (!probe.sampling || (probe.sampleComplete &&
+                probe.sampleSeconds + 1e-9 >= std::chrono::duration<double>(
+                    adaptiveEfficiencyProbeSampleDuration).count()));
         const bool accepted = deliveryHealthy &&
             baseFps >= adaptiveMinimumBaseFps &&
+            measuredBaseFps >= adaptiveMinimumBaseFps &&
+            baseFps * static_cast<double>(testedLimit + 1) >=
+                targetFps * adaptiveEfficiencyProbeMinimumTargetRatio &&
             projectedOutputFps >=
                 targetFps * adaptiveEfficiencyProbeMinimumTargetRatio;
+        if (accepted && !probe.sampling) {
+            // Queue turnover can briefly expose a target-rate source even
+            // when the lower workload cannot sustain it. Keep the proven
+            // rung until a full second of raw intervals and complete output
+            // delivery confirms the cheaper policy, as for upward trials.
+            probe.sampling = true;
+            probe.evaluationAt = now + adaptiveEfficiencyProbeSampleDuration;
+            return;
+        }
         const bool stillSettling = !accepted && deliveryHealthy &&
-            !probe.settlingGraceUsed && probe.baselineBaseFps > 0.0 &&
+            !probe.sampling && !probe.settlingGraceUsed &&
+            probe.baselineBaseFps > 0.0 &&
             baseFps >= probe.baselineBaseFps *
                 adaptiveEfficiencyProbeSettlingMinimumBaseRiseRatio &&
             projectedOutputFps >= targetFps *
@@ -1380,21 +1414,18 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
                 : "adaptive-efficiency-probe-rejected",
             testedLimit,
             probe.baselineBaseFps,
-            baseFps,
+            measuredBaseFps,
             accepted
                 ? "target-preserved"
                 : deliveryHealthy ? "target-deficit" : "delivery-pressure"
         );
 
-        probe.evaluationAt.reset();
-        probe.eligibleSince.reset();
-        probe.delivery.reset();
         if (accepted) {
             // The cheaper constant cadence preserved the requested output, so
             // make it the qualified policy rather than immediately ramping
             // back into the more expensive local optimum.
             this->state.stableCadence.limit = testedLimit;
-            this->state.stableCadence.baselineBaseFps = baseFps;
+            this->state.stableCadence.baselineBaseFps = measuredBaseFps;
             this->state.stableCadence.evaluationAt.reset();
             this->state.stableCadence.convergenceProbe = false;
             this->state.stableCadence.convergedTwoX = false;
@@ -1429,9 +1460,7 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
             }
             probe.retryAt[testedLimit - 1] = now + retryDelay;
         }
-        probe.testedLimit = 0;
-        probe.baselineBaseFps = 0.0;
-        probe.settlingGraceUsed = false;
+        probe.resetEvaluation();
         this->state.outputPlanner.resetTargetClock();
         this->state.ramp.pacingResumeUntil =
             now + adaptivePacedLoadSettlingDuration;
@@ -1987,6 +2016,8 @@ AdaptiveFramePlan AdaptiveScheduler::planFrame(
     if (!cadence.planningReady) {
         lowerLoad.reset();
         this->state.ramp.targetSampleComplete = false;
+        if (this->state.efficiencyProbe.sampling)
+            this->state.efficiencyProbe.sampleComplete = false;
         return cadence.terminalPlan;
     }
     const double baseFps = cadence.baseFps;
@@ -2042,7 +2073,7 @@ AdaptiveFramePlan AdaptiveScheduler::planFrame(
     if (!stableCadence.planningReady)
         return stableCadence.terminalPlan;
 
-    this->advanceEfficiencyProbe(now, baseFps);
+    this->advanceEfficiencyProbe(now, baseFps, cadence.rawIntervalSeconds);
 
     // A VRR-only presentation handoff can let ordered FIFO pace a full
     // validated higher rung. Recheck the scheduler after its frame stages:
@@ -2250,6 +2281,30 @@ size_t AdaptiveScheduler::validatedGenerationLimit() const {
         generationLimit = this->state.ramp.previousLimit;
     }
     return std::min(generationLimit, configuredLimit);
+}
+
+bool AdaptiveScheduler::refreshHigherLoadRetry(const TimePoint now) {
+    auto& ramp = this->state.ramp;
+    const auto retainedLimit = this->validatedGenerationLimit();
+    if (retainedLimit == 0 || ramp.consecutiveFailures == 0 ||
+            ramp.lastFailedLimit <= retainedLimit || ramp.evaluationAt ||
+            ramp.pacedLoad.until || this->state.rearm.required ||
+            this->discontinuityRecoveryActive())
+        return false;
+
+    // Explicit presentation policy changes invalidate failed higher-workload
+    // evidence, not the current qualified load or source/history state. The
+    // ordinary delay and continuous delivered lower-load sample still gate
+    // the next trial, including when this change occurs under Steam UI focus.
+    ramp.lastFailedLimit = 0;
+    ramp.consecutiveFailures = 0;
+    ramp.failedBaselineBaseFps = 0.0;
+    ramp.nextAt = now + adaptiveRecoveryHigherProbeDelay;
+    ramp.lowerLoadSample.reset();
+    ramp.targetDeficitSince.reset();
+    this->diagnostics->recoveryResume(retainedLimit,
+        adaptiveRecoveryHigherProbeDelay, "gamescope-vrr-policy-change");
+    return true;
 }
 
 void AdaptiveScheduler::restoreGenerationLimit(

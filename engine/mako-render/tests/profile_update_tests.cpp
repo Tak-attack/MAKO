@@ -908,6 +908,48 @@ int main() {
             steadyPacing, true, false, 120, acceptedTwoX, 1,
             vrrDisabled, activeVrr),
         "validated Steady 2x reset its FIFO pacing owner under VRR");
+    for (const bool smooth : {false, true}) {
+        auto retryProfile = steadyPacing;
+        retryProfile.adaptive_stable_cadence = smooth;
+        for (const bool enable : {false, true}) {
+            const auto& before = enable ? vrrDisabled : activeVrr;
+            const auto& after = enable ? activeVrr : vrrDisabled;
+            expect(gamescopeHigherLoadRetryChanged(
+                    retryProfile, true, false, 120, before, after),
+                "confirmed VRR preference change did not refresh Adaptive retries");
+            expect(!gamescopeHigherLoadRetryChanged(
+                    retryProfile, false, false, 120, before, after),
+                "non-ordered presentation refreshed Adaptive retries");
+            expect(!gamescopeHigherLoadRetryChanged(
+                    retryProfile, true, true, 120, before, after),
+                "transport recovery discarded rejected-workload history");
+            expect(!gamescopeHigherLoadRetryChanged(
+                    fixedPacing, true, false, 120, before, after),
+                "Fixed mode responded to Adaptive retry policy");
+        }
+        auto overlay = activeVrr;
+        overlay.vrrActive = false;
+        expect(!gamescopeHigherLoadRetryChanged(
+                retryProfile, true, false, 120, activeVrr, overlay),
+            "overlay activity discarded rejected-workload history");
+        overlay = activeVrr;
+        overlay.allowTearing = !overlay.allowTearing.value_or(false);
+        expect(!gamescopeHigherLoadRetryChanged(
+                retryProfile, true, false, 120, activeVrr, overlay),
+            "tearing feedback discarded rejected-workload history");
+        expect(!gamescopeHigherLoadRetryChanged(
+                retryProfile, true, false, 120, {}, activeVrr),
+            "initial feedback was mistaken for a policy change");
+        expect(!gamescopeHigherLoadRetryChanged(
+                retryProfile, true, false, 120, activeVrr, {}),
+            "missing feedback discarded rejected-workload history");
+        auto incapable = activeVrr;
+        incapable.vrrCapable = false;
+        expect(!gamescopeHigherLoadRetryChanged(
+                retryProfile, true, false, 120, vrrDisabled, incapable),
+            "incapable VRR request discarded rejected-workload history");
+    }
+
     auto acceptedThreeX = acceptedTwoX;
     acceptedThreeX.generationLimit = 2;
     acceptedThreeX.validatedGenerationLimit = 2;

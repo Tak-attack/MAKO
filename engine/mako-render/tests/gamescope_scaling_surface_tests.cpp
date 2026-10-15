@@ -56,7 +56,7 @@ extern "C" {
     uint32_t mako_test_surface_server();
     void mako_test_surface_retire();
     void mako_test_surface_timing();
-    void mako_test_surface_ready_timing(uint64_t);
+    void mako_test_surface_ready_timing(uint64_t, uint64_t = 0);
     void mako_test_surface_wire_event(bool);
     int mako_test_surface_delivered_events();
     int mako_test_surface_prepared_reads();
@@ -665,12 +665,13 @@ int main() {
     timing.feedback(UINT32_MAX, origin, origin + 200000);
     timing.request(0, origin + 8000000, origin + 1000000, origin + 1000000);
     timing.feedback(0, origin + 8000000, origin + 8500000);
-    timing.feedback(0, origin + 8000000, origin + 8500000); // Duplicate.
+    timing.feedback(0, origin + 8000000, origin + 8500000, true); // Duplicate.
     expect(!timing.take(origin + 999999999), "diagnostic window must be rate limited");
     const auto window = timing.take(origin + 1000000000);
     expect(window && window->requests == 2 && window->feedbacks == 2 && window->unmatched == 1 &&
         window->requestedInterval.mean() == 8 && window->reportedInterval.mean() == 8.3 &&
-        window->submitLateness.maximum == 0.1 && timing.outstanding() == 0,
+        window->submitLateness.maximum == 0.1 && window->lateLatchFeedbacks == 0 &&
+        timing.outstanding() == 0,
         "timing correlation must preserve 64-bit timestamps and wrapped IDs");
     for (uint32_t id = 1; id <= 129; ++id)
         timing.request(id, origin + id, origin + 1000000001, origin);
@@ -686,18 +687,21 @@ int main() {
     BridgePresentTiming repeated;
     for (uint32_t id = 1; id <= 10; ++id) {
         repeated.request(id, origin + id, origin, origin);
-        repeated.feedback(id, origin + id, origin + 1000 * ((id - 1) / 5 + 1));
+        repeated.feedback(id, origin + id, origin + 1000 * ((id - 1) / 5 + 1),
+            id % 2 == 0);
     }
     const auto grouped = repeated.take(origin + 1000000000);
     expect(grouped && grouped->feedbacks == 10 && grouped->discontinuities == 8 &&
         grouped->repeatedTimestamps == 8 && grouped->nonconsecutiveIds == 0 &&
-        grouped->backwardsTimestamps == 0 && grouped->reportedInterval.count == 1,
+        grouped->backwardsTimestamps == 0 && grouped->reportedInterval.count == 1 &&
+        grouped->lateLatchFeedbacks == 5,
         "reused compositor predictions must be distinct from nonconsecutive IDs");
     repeated.request(12, origin + 12, origin + 1000000001, origin);
     repeated.feedback(12, origin + 12, origin + 1999);
     const auto backwards = repeated.take(origin + 2000000000);
     expect(backwards && backwards->nonconsecutiveIds == 1 &&
-        backwards->backwardsTimestamps == 1 && backwards->discontinuities == 1,
+        backwards->backwardsTimestamps == 1 && backwards->discontinuities == 1 &&
+        backwards->lateLatchFeedbacks == 0,
         "overlapping discontinuity causes must not double-count the interval");
     VkInstanceCreateInfo instanceInfo{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     expect(!requestsGamescopeScalingSurface(instanceInfo), "headless probe must not open a connection");
@@ -1155,7 +1159,8 @@ int main() {
                     ns <= static_cast<uint64_t>(nowNs) + 50000000)),
                 "protocol lost per-output id or monotonic 64-bit future deadline");
             previousTime = ns;
-            mako_test_surface_ready_timing(ns - 1000000);
+            // Same recovered latch with a prediction two milliseconds early.
+            mako_test_surface_ready_timing(ns - 3000000, uint64_t{0} - 2000000);
         }
         std::cerr.rdbuf(previousLog);
         const bool diagnostics = std::getenv("MAKO_PRESENT_DIAGNOSTICS") &&
@@ -1167,8 +1172,43 @@ int main() {
                 timingLog.str().find("lateness_mean_ms=0.1") != std::string::npos &&
                 timingLog.str().find("unmatched=0") != std::string::npos,
                 "protocol timing and refresh events must reach the matching accumulator");
+        if (diagnostics)
+            expect(timingLog.str().find("late_latch_feedbacks=") != std::string::npos &&
+                timingLog.str().find("late_latch_feedbacks=0 ") == std::string::npos,
+                "matched wrapped margins must reach the diagnostic counter");
         expect(mako_test_surface_reads() == timedReads, "timing diagnostics must not read the socket");
         bridge.destroySwapchain(surface, timedSwapchain);
+        // Stock Gamescope subtracts unsigned prediction/latch timestamps.
+        // Under VRR the last prediction may precede the latch, wrapping the
+        // margin. That still carries valid readiness for this owned batch.
+        int readinessPresents = 0;
+        for (const int marginCase : {0, 1, 2, 3, 4, 5}) {
+            expect(bridge.createSwapchain(surface, timedSwapchain, feedbackInfo,
+                    {1920, 1080}, 5, "MAKO Renderer", VK_PRESENT_MODE_FIFO_KHR, 120),
+                "readiness margin bridge creation");
+            expect(bridge.preparePresent(surface, timedSwapchain, 120, 120, 2, true, 1)
+                    == VK_SUCCESS, "readiness margin initial batch");
+            const uint64_t latch = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count()) + 1000000;
+            const uint64_t prediction = marginCase == 0 ? latch
+                : marginCase == 1 ? latch + 2000000 : latch - 2000000;
+            mako_test_surface_ready_timing(
+                marginCase == 3 ? 0 : marginCase == 4 ? UINT64_MAX : prediction,
+                marginCase == 5 ? prediction + 1 : prediction - latch);
+            std::this_thread::sleep_for(std::chrono::milliseconds(55));
+            const auto before = std::chrono::steady_clock::now();
+            expect(bridge.preparePresent(surface, timedSwapchain, 120, 120, 2, true, 2)
+                    == VK_SUCCESS, "readiness margin following batch");
+            const uint64_t beforeNs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    before.time_since_epoch()).count());
+            const auto lead = mako_test_surface_present_time() - beforeNs;
+            readinessPresents += 2;
+            expect(marginCase < 3 ? lead < 20000000 : lead >= 30000000,
+                "valid wrapped margin lost readiness or invalid timestamps changed it");
+            bridge.destroySwapchain(surface, timedSwapchain);
+        }
         expect(bridge.createSwapchain(surface, timedSwapchain, feedbackInfo, {1920, 1080}, 5,
                 "MAKO Renderer", VK_PRESENT_MODE_FIFO_KHR, 120),
             "retained generation-off bridge creation");
@@ -1186,7 +1226,7 @@ int main() {
         bridge.destroySwapchain(surface, timedSwapchain);
         const int associations = mako_test_surface_associations();
         const int presentModes = mako_test_surface_present_modes();
-        expect(associations == 131, "surface creation must not steal existing window content");
+        expect(associations == 131 + readinessPresents, "surface creation must not steal existing window content");
         const int reads = mako_test_surface_reads();
         const int presentGeometryQueries = mako_test_surface_geometry_queries();
         for (int frame = 0; frame < 100; ++frame)

@@ -790,6 +790,13 @@ void Swapchain::updateGamescopePresentationFeedback(
 
     const auto previous = this->gamescopePresentationFeedback;
     this->gamescopePresentationFeedback = feedback;
+    if (this->adaptiveScheduler && gamescopeHigherLoadRetryChanged(
+            this->profile, this->privateOrderedTransport,
+            this->recoveryState.orderedAcquireRecovery.active(),
+            this->gamescopeRefreshHz, previous, feedback)) {
+        static_cast<void>(this->adaptiveScheduler->refreshHigherLoadRetry(
+            DiagnosticsClock::now()));
+    }
     const auto schedulerSnapshot = this->adaptiveScheduler
         ? this->adaptiveScheduler->snapshot()
         : AdaptiveSchedulerSnapshot{};

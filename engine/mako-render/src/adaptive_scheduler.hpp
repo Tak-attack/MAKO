@@ -212,6 +212,9 @@ namespace mako::layer {
             TimePoint now, bool classifyGeneratedLoadFailure = false);
         [[nodiscard]] bool rejectActiveRampForTransportMiss(TimePoint now);
         void resumeAfterExternalInterruption(TimePoint now, bool confirmedReturn);
+        // The presentation owner calls only for a confirmed policy change.
+        // Preserve the qualified rung and remeasure before another trial.
+        [[nodiscard]] bool refreshHigherLoadRetry(TimePoint now);
         void restoreGenerationLimit(TimePoint now, size_t generationLimit,
             std::string_view reason,
             std::optional<size_t> monitoredFallbackLimit = std::nullopt,
@@ -316,7 +319,8 @@ namespace mako::layer {
             TimePoint now, double baseFps,
             double desiredOutputsPerRealFrame,
             size_t maximumGeneratedFrameCount);
-        inline void advanceEfficiencyProbe(TimePoint now, double baseFps);
+        inline void advanceEfficiencyProbe(TimePoint now, double baseFps,
+            double rawIntervalSeconds);
         [[nodiscard]] inline size_t selectGeneratedFrameCount(
             double desiredOutputsPerRealFrame,
             double rawIntervalSeconds,
@@ -756,6 +760,13 @@ namespace mako::layer {
                 size_t testedLimit{0};
                 double baselineBaseFps{0.0};
                 bool settlingGraceUsed{false};
+                // A promising endpoint must survive a continuous delivered
+                // sample before replacing the retained higher workload.
+                bool sampling{false};
+                bool sampleComplete{true};
+                bool deliveryObserved{false};
+                double sampleSeconds{0.0};
+                size_t sampleFrames{0};
 
                 void resetEvaluation() {
                     this->eligibleSince.reset();
@@ -764,6 +775,11 @@ namespace mako::layer {
                     this->testedLimit = 0;
                     this->baselineBaseFps = 0.0;
                     this->settlingGraceUsed = false;
+                    this->sampling = false;
+                    this->sampleComplete = true;
+                    this->deliveryObserved = false;
+                    this->sampleSeconds = 0.0;
+                    this->sampleFrames = 0;
                 }
 
                 void reset() {

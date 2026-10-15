@@ -138,6 +138,7 @@ void logBridgeTiming(const uint64_t bridgeId, const VkSwapchainKHR swapchain,
          << " nonconsecutive_ids=" << window.nonconsecutiveIds
          << " repeated_timestamps=" << window.repeatedTimestamps
          << " backwards_timestamps=" << window.backwardsTimestamps
+         << " late_latch_feedbacks=" << window.lateLatchFeedbacks
          << " requested_interval_samples=" << window.requestedInterval.count
          << " requested_interval_mean_ms=" << window.requestedInterval.mean()
          << " requested_interval_stddev_ms=" << window.requestedInterval.deviation()

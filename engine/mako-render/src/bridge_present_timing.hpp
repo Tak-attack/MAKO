@@ -43,6 +43,8 @@ namespace mako::layer::present_diagnostics {
             size_t nonconsecutiveIds{};
             size_t repeatedTimestamps{};
             size_t backwardsTimestamps{};
+            // Matched feedback with a decodable latch later than its prediction.
+            size_t lateLatchFeedbacks{};
             Samples requestedInterval;
             Samples reportedInterval;
             Samples lateness;
@@ -63,7 +65,8 @@ namespace mako::layer::present_diagnostics {
             window.submitLateness.add(wake > submit ? milliseconds(wake - submit) : 0);
         }
 
-        void feedback(uint32_t id, uint64_t desired, uint64_t actual) {
+        void feedback(uint32_t id, uint64_t desired, uint64_t actual,
+                bool lateLatch = false) {
             auto& entry = pending[id % pending.size()];
             if (!entry.valid || entry.id != id || entry.desired != desired || !actual) {
                 ++window.unmatched;
@@ -71,6 +74,7 @@ namespace mako::layer::present_diagnostics {
             }
             entry.valid = false;
             ++window.feedbacks;
+            window.lateLatchFeedbacks += lateLatch;
             // Gamescope may report a target vblank slightly before the request.
             window.lateness.add(actual >= desired ? milliseconds(actual - desired)
                                                   : -milliseconds(desired - actual));

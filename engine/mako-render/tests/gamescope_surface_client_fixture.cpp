@@ -257,7 +257,7 @@ extern "C" {
         const std::lock_guard fixtureLock(fixtureMutex);
         return presentTime;
     }
-    void mako_test_surface_ready_timing(uint64_t earliest) {
+    void mako_test_surface_ready_timing(uint64_t earliest, uint64_t margin = 0) {
         const std::lock_guard fixtureLock(fixtureMutex);
         auto* proxy = lastTimedProxy;
         if (!proxy || !proxy->listener)
@@ -269,7 +269,8 @@ extern "C" {
         reinterpret_cast<Timing>(proxy->listener[0])(proxy->data, proxy, presentId,
             static_cast<uint32_t>(presentTime >> 32), static_cast<uint32_t>(presentTime),
             static_cast<uint32_t>(actual >> 32), static_cast<uint32_t>(actual),
-            static_cast<uint32_t>(earliest >> 32), static_cast<uint32_t>(earliest), 0, 0);
+            static_cast<uint32_t>(earliest >> 32), static_cast<uint32_t>(earliest),
+            static_cast<uint32_t>(margin >> 32), static_cast<uint32_t>(margin));
         reinterpret_cast<Refresh>(proxy->listener[1])(proxy->data, proxy, 0, 8333333);
     }
     void mako_test_surface_timing() {

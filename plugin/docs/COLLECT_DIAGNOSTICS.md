@@ -49,7 +49,7 @@ For a slowdown after a long session, replace `--lines 5000` with `--lines 200000
 
 Every preset retains Renderer failure headers with their adjacent exception details and Wayland protocol errors, including Steam's timestamped console format. Messages such as `wl_display#1: error ...` or `[destroyed object]: error ...` can explain a later `flush-failed` / broken-pipe presentation failure. Collection cannot recover details already removed from an older filtered report; run the current helper against the original session log. The report cannot recover an error that the client never read or logged, and it does not collect the separate Gamescope system journal.
 
-For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution.
+For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution. For VRR comparisons, record Steam’s VRR setting for each run. Scaling and performance reports retain `late_latch_feedbacks`, which counts matched bridge feedback whose latch follows a stale refresh prediction; this is timing evidence, not a dropped-frame count.
 
 ## 4. Restore your settings
 

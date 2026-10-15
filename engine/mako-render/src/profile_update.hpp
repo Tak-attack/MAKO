@@ -698,6 +698,23 @@ namespace mako::layer {
                     current);
     }
 
+    /// An explicit Steam VRR preference change permits a fresh higher-load
+    /// trial. Active feedback alone can flap under overlays; initial/missing
+    /// feedback and incapable connectors cannot invalidate workload evidence.
+    [[nodiscard]] inline bool gamescopeHigherLoadRetryChanged(
+            const ls::GameConf& profile, const bool privateOrderedTransport,
+            const bool orderedAcquireRecoveryActive,
+            const std::optional<uint32_t> gamescopeRefreshHz,
+            const GamescopePresentationFeedback& previous,
+            const GamescopePresentationFeedback& current) {
+        return profile.adaptive && privateOrderedTransport &&
+            !orderedAcquireRecoveryActive &&
+            effectiveFrameGenerationEnabled(profile, gamescopeRefreshHz) &&
+            previous.vrrEnabled.has_value() && current.vrrEnabled.has_value() &&
+            previous.vrrEnabled != current.vrrEnabled &&
+            previous.vrrCapable != false && current.vrrCapable != false;
+    }
+
     struct GenerationSchedulerPolicy {
         uint32_t targetFps{0};
         size_t maximumMultiplier{0};

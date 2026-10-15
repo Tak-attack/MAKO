@@ -205,8 +205,8 @@ namespace {
         }
 
         void stableCadence(const std::string_view operation,
-                const size_t generatedLimit, double,
-                double, const std::string_view reason) override {
+                const size_t generatedLimit, const double baselineBaseFps,
+                const double currentBaseFps, const std::string_view reason) override {
             this->events.push_back({
                 .operation = std::string(operation),
                 .reason = std::string(reason),
@@ -214,6 +214,8 @@ namespace {
                     "adaptive-efficiency-probe"
                 ) || operation.starts_with("adaptive-paced-load")
                     ? generatedLimit : 0,
+                .previousBaseFps = baselineBaseFps,
+                .currentBaseFps = currentBaseFps,
             });
         }
 
@@ -2497,6 +2499,8 @@ namespace {
             };
 
             rejectProbe();
+            require(!harness.scheduler.refreshHigherLoadRetry(harness.now),
+                "VRR change discarded the rejected native-to-2x safety cooldown");
             const auto ramps = harness.diagnostics.count("ramp");
             harness.now += 500ms;
             harness.scheduler.resumeAfterExternalInterruption(
@@ -4045,6 +4049,126 @@ namespace {
             "accepted efficiency probe did not make 2x the qualified policy");
         require(plan.size() == 1,
             "accepted 2x efficiency probe resumed the previous 3x workload");
+    }
+
+    void testSmoothCadenceDownshiftRequiresSustainedTarget() {
+        const auto check = [](const uint32_t target, const size_t multiplier,
+                const bool automaticCap, const bool preservesTarget) {
+            Harness harness(target, multiplier, true, AdaptiveRecoveryPolicy::OrderedSdr,
+                false, 2s, target, false, automaticCap);
+            harness.start();
+            for (size_t frame = 0; frame < 2400; ++frame) {
+                harness.frameAtFps(static_cast<double>(target) / multiplier);
+                if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                    break;
+            }
+            const auto lowerLimit = multiplier - 2;
+            require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit == lowerLimit,
+                "sustained downshift fixture did not enter its adjacent lower probe");
+
+            // A brief release of queued work can look target-capable. The
+            // marginal workload then falls six percent short, while the
+            // healthy control sustains the target with less generated work.
+            const double lowerTargetFps = static_cast<double>(target) / (multiplier - 1);
+            harness.runAtFps(lowerTargetFps, 300ms);
+            require(!harness.diagnostics.contains("adaptive-efficiency-probe-accepted"),
+                "a brief target-rate burst permanently accepted the lower workload");
+            const auto decisionDeadline = harness.now + 2s;
+            while (harness.now < decisionDeadline &&
+                    harness.scheduler.snapshot().efficiencyProbeGenerationLimit) {
+                harness.frameAtFps(lowerTargetFps * (preservesTarget ? 1.0 : 0.94));
+            }
+            const auto snapshot = harness.scheduler.snapshot();
+            if (!preservesTarget) {
+                require(!harness.diagnostics.contains("adaptive-efficiency-probe-accepted") &&
+                        harness.diagnostics.contains("adaptive-efficiency-probe-rejected") &&
+                        snapshot.validatedGenerationLimit == multiplier - 1 &&
+                        snapshot.stableCadenceLimit == multiplier - 1,
+                    "transient target-rate burst displaced the proven cadence at " +
+                        std::to_string(target) + " FPS / " + std::to_string(multiplier) + "x");
+            } else {
+                const auto* rejected = harness.diagnostics.last("adaptive-efficiency-probe-rejected");
+                require(harness.diagnostics.contains("adaptive-efficiency-probe-accepted") &&
+                        snapshot.validatedGenerationLimit == lowerLimit &&
+                        snapshot.stableCadenceLimit == lowerLimit,
+                    "sustained target-rate downshift did not retain its cheaper workload at " +
+                        std::to_string(target) + " FPS / " + std::to_string(multiplier) +
+                        "x auto=" + std::to_string(automaticCap) + " accepted=" +
+                        std::to_string(harness.diagnostics.contains("adaptive-efficiency-probe-accepted")) +
+                        " rejected=" + (rejected ? rejected->reason + " fps=" +
+                            std::to_string(rejected->currentBaseFps) : "none"));
+            }
+        };
+        constexpr std::array rates{
+            std::pair{90U, 3U}, std::pair{90U, 4U},
+            std::pair{120U, 3U}, std::pair{120U, 4U}, std::pair{120U, 5U},
+            std::pair{144U, 3U}, std::pair{144U, 4U}, std::pair{144U, 5U},
+        };
+        for (const auto [target, multiplier] : rates)
+            for (const bool automaticCap : {false, true})
+                for (const bool preservesTarget : {false, true})
+                    check(target, multiplier, automaticCap, preservesTarget);
+    }
+
+    void testSmoothCadenceDownshiftNeedsCompleteSampleDelivery() {
+        for (const std::string_view interruption :
+                {"missing", "partial", "duplicate", "backoff", "burst", "reset"}) {
+            Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr);
+            harness.start();
+            for (size_t frame = 0; frame < 2400; ++frame) {
+                harness.frameAtFps(40.0);
+                if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                    break;
+            }
+            require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit == 1,
+                "interrupted downshift fixture did not enter its 2x probe");
+            harness.runAtFps(60.0, 500ms);
+            if (interruption == "reset") {
+                harness.scheduler.resetTiming(harness.now);
+            } else if (interruption == "backoff") {
+                harness.frameAtFps(60.0, true);
+            } else if (interruption == "burst") {
+                harness.frameAtFps(500.0);
+            } else {
+                const auto plan = harness.frameAtFps(60.0, false, false);
+                if (interruption != "missing") {
+                    harness.scheduler.reportGeneratedFrameDelivery({
+                        plan.size(), interruption == "partial" ? 0 : plan.size(),
+                    });
+                    if (interruption == "duplicate")
+                        harness.scheduler.reportGeneratedFrameDelivery({plan.size(), plan.size()});
+                }
+            }
+            harness.runAtFps(60.0, 1s);
+            require(!harness.diagnostics.contains("adaptive-efficiency-probe-accepted"),
+                "incomplete downshift evidence accepted after " + std::string(interruption));
+        }
+    }
+
+    void testSmoothCadenceDownshiftCannotUseRecoveredEndpointAlone() {
+        Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr);
+        harness.start();
+        for (size_t frame = 0; frame < 2400; ++frame) {
+            harness.frameAtFps(40.0);
+            if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                break;
+        }
+        require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit == 1,
+            "endpoint downshift fixture did not enter its 2x probe");
+        harness.runAtFps(60.0, 300ms);
+        harness.runAtFps(56.0, 650ms);
+        const auto deadline = harness.now + 1s;
+        while (harness.now < deadline &&
+                harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+            harness.frameAtFps(60.0);
+        const auto snapshot = harness.scheduler.snapshot();
+        const auto* rejected = harness.diagnostics.last("adaptive-efficiency-probe-rejected");
+        require(snapshot.smoothedBaseFps >= 58.8,
+            "endpoint fixture did not recover its final FPS estimate");
+        require(rejected && rejected->reason == "target-deficit" &&
+                rejected->currentBaseFps < 58.8 && snapshot.validatedGenerationLimit == 2 &&
+                !harness.diagnostics.contains("adaptive-efficiency-probe-accepted"),
+            "fast endpoint concealed a below-target measured downshift");
     }
 
     void testSmoothCadenceDownshiftAllowsPromisingRecoveryToSettle() {
@@ -6014,6 +6138,78 @@ namespace {
         }
     }
 
+    void testHigherLoadRetryAfterPacingChange() {
+        for (const bool smooth : {false, true}) {
+            for (const bool menuReturn : {false, true}) {
+                for (const size_t multiplier : {3u, 4u, 5u}) {
+                    Harness harness(120, multiplier, smooth, AdaptiveRecoveryPolicy::OrderedSdr,
+                        false, 2s, 120, false);
+                    harness.start();
+                    const size_t testedLimit = multiplier - 1;
+                    const double lowerFps = 100.0 / static_cast<double>(testedLimit);
+                    harness.scheduler.restoreGenerationLimit(harness.now,
+                        testedLimit - 1, "test-qualified-lower-load");
+                    const auto reachProbe = [&] {
+                        for (size_t frame = 0; frame < 4500; ++frame) {
+                            harness.deliveredFrameAtFps(lowerFps);
+                            const auto snapshot = harness.scheduler.snapshot();
+                            if (snapshot.rampEvaluationActive && snapshot.generationLimit == testedLimit)
+                                return;
+                        }
+                        require(false, "higher-load retry never reached its trial");
+                    };
+                    for (size_t failure = 0; failure < 3; ++failure) {
+                        reachProbe();
+                        require(!harness.scheduler.refreshHigherLoadRetry(harness.now),
+                            "pacing change altered an active workload trial");
+                        while (harness.scheduler.snapshot().rampEvaluationActive)
+                            harness.deliveredFrameAtFps(lowerFps * 0.6);
+                    }
+                    require(harness.diagnostics.last("ramp-backoff")->duration == 30s,
+                        "precondition failed: repeated rejections did not reach 30 seconds");
+                    const auto before = harness.scheduler.snapshot();
+                    const auto warmup = harness.scheduler.historyWarmupRemaining();
+                    const auto ramps = harness.diagnostics.count("ramp");
+                    require(harness.scheduler.refreshHigherLoadRetry(harness.now),
+                        "confirmed pacing change retained the stale higher-load cooldown");
+                    const auto after = harness.scheduler.snapshot();
+                    require(after.generationLimit == before.generationLimit &&
+                            after.validatedGenerationLimit == before.validatedGenerationLimit &&
+                            after.smoothedBaseFps == before.smoothedBaseFps &&
+                            harness.scheduler.historyWarmupRemaining() == warmup &&
+                            harness.diagnostics.count("ramp") == ramps,
+                        "pacing change reset cadence/history or promoted a workload");
+                    require(!harness.scheduler.refreshHigherLoadRetry(harness.now),
+                        "repeated notification restarted the refreshed retry");
+                    if (menuReturn)
+                        harness.scheduler.resumeAfterExternalInterruption(harness.now, true);
+                    const auto changedAt = harness.now;
+                    while (harness.now - changedAt < 5s) {
+                        harness.deliveredFrameAtFps(lowerFps);
+                        require(harness.diagnostics.count("ramp") == ramps,
+                            "pacing change skipped the ordinary higher-probe settling delay");
+                    }
+                    // No delivery cannot qualify a fresh trial, even after the delay.
+                    for (size_t frame = 0; frame < static_cast<size_t>(lowerFps * 3.0); ++frame) {
+                        harness.deliveredFrameAtFps(lowerFps, std::nullopt);
+                        require(harness.diagnostics.count("ramp") == ramps,
+                            "pacing change reused old lower-load delivery evidence");
+                    }
+                    reachProbe();
+                    require(harness.now - changedAt < 12s,
+                        "pacing change kept the old 30-second retry deadline");
+                    while (harness.scheduler.snapshot().rampEvaluationActive)
+                        harness.deliveredFrameAtFps(120.0 / static_cast<double>(multiplier));
+                    require(harness.scheduler.validatedGenerationLimit() == testedLimit,
+                        "fresh beneficial higher trial could not qualify after pacing change");
+                    require(!harness.scheduler.refreshHigherLoadRetry(harness.now),
+                        "pacing change disturbed a qualified workload without a failed retry");
+                }
+            }
+        }
+    }
+
+
     void testDeterministicReplay() {
         Harness first(120, 4, true);
         Harness second(120, 4, true);
@@ -6147,6 +6343,9 @@ int main() {
         {"accepted Fractional cadence checks VRR pacing cost", testAcceptedFractionalCadenceChecksVrrPacingCost},
         {"unreachable integer pacing does not delay higher loads", testUnreachableIntegerPacingDoesNotDelayHigherWorkloads},
         {"Smooth Cadence accepts target-preserving downshift", testSmoothCadenceDownshiftsWhenLowerLoadPreservesTarget},
+        {"Smooth Cadence downshift requires sustained target", testSmoothCadenceDownshiftRequiresSustainedTarget},
+        {"Smooth Cadence downshift requires complete delivery", testSmoothCadenceDownshiftNeedsCompleteSampleDelivery},
+        {"Smooth Cadence downshift rejects endpoint-only recovery", testSmoothCadenceDownshiftCannotUseRecoveredEndpointAlone},
         {"Smooth Cadence lets promising downshift recovery settle", testSmoothCadenceDownshiftAllowsPromisingRecoveryToSettle},
         {"Smooth Cadence rejects insufficient downshift", testSmoothCadenceRejectsInsufficientDownshiftAndBacksOff},
         {"Smooth Cadence downshift backoff survives repeated dips", testSmoothCadenceDownshiftBackoffSurvivesRepeatedDips},
@@ -6202,6 +6401,7 @@ int main() {
         {"ordinary transport recovery keeps 3.3 multiplier semantics", testOrdinaryTransportRecoveryDoesNotRejectMultiplierProbe},
         {"transport probe backoff survives cadence refresh", testTransportProbeBackoffSurvivesCadenceRefresh},
         {"higher-load backoff survives focus returns", testHigherLoadBackoffSurvivesFocusReturns},
+        {"higher-load retry refreshes after pacing change", testHigherLoadRetryAfterPacingChange},
         {"cadence replay is deterministic", testDeterministicReplay},
     };
 

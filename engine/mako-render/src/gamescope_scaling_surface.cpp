@@ -614,18 +614,28 @@ struct GamescopeScalingSurface::Impl {
         };
         const uint64_t earliest = (uint64_t{earliestHi} << 32) | earliestLo;
         const uint64_t margin = (uint64_t{marginHi} << 32) | marginLo;
-        // The refresh prediction includes time between latching and display.
-        // Feeding that extra time into the next deadline can miss a refresh.
-        if (earliest > margin && earliest <= static_cast<uint64_t>(INT64_MAX)) {
+        // Gamescope sends uint64_t(predicted refresh - first latch). VRR can
+        // latch after that prediction, wrapping the wire margin. Recover the
+        // latch with unsigned subtraction before validating clock range; a
+        // wrapped negative margin is not missing GPU-readiness evidence.
+        const uint64_t ready = earliest - margin;
+        const bool validReadiness = earliest > 0 && earliest <= static_cast<uint64_t>(INT64_MAX) &&
+            ready > 0 && ready <= static_cast<uint64_t>(INT64_MAX);
+        if (validReadiness) {
+            // Preserve only positive latch-to-refresh room. Stale predictions
+            // have no allowance and must not move the recovered latch earlier.
+            const uint64_t prediction = std::max(earliest, ready);
             content.presentTimeline.feedback(id, time(desiredHi, desiredLo),
-                time(earliestHi, earliestLo),
+                time(static_cast<uint32_t>(prediction >> 32),
+                    static_cast<uint32_t>(prediction)),
                 std::chrono::duration_cast<OrderedPresentTimeline::Clock::duration>(
-                    std::chrono::nanoseconds(margin)));
+                    std::chrono::nanoseconds(prediction - ready)));
         } else
             content.presentTimeline.feedback(id, time(desiredHi, desiredLo), {});
         if (content.timing)
             content.timing->feedback(id, (uint64_t{desiredHi} << 32) | desiredLo,
-                (uint64_t{actualHi} << 32) | actualLo);
+                (uint64_t{actualHi} << 32) | actualLo,
+                validReadiness && ready > earliest);
     }
     static void refreshCycle(void* data, wl_proxy*, uint32_t hi, uint32_t lo) {
         auto& content = *static_cast<Content*>(data);
