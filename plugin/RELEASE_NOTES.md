@@ -1,18 +1,18 @@
 ## What's new in MAKO Decky v4.6.0
 
-<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/neptune.png" alt="Neptune release artwork: the blue-and-white MAKO shark circles a ruined temple where Neptune raises his trident, surrounded by battling ships and a vast whirlpool beneath golden storm light, in a Renaissance painting with pixel-art textures" width="100%">
+<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/tempest.png" alt="Tempest release artwork: the blue-and-white MAKO shark circles a ruined temple where a sea god raises his trident, surrounded by battling ships and a vast whirlpool beneath golden storm light, in a Renaissance painting with pixel-art textures" width="100%">
 
-### Release codename: Neptune
+### Release codename: Tempest
 
-> _“We held our course by the stars. Only at dawn did we see whose current carried us.”_
+> _“By dawn, the fleet understood: the tempest was a road with teeth.”_
 >
-> **Mira Valen, _Charts of the Last Fleet_**
+> **Mira Valen, _Charts of the Drowned Horizon_**
 
 ---
 
 ### Release highlight: Faster, leaner MAKO
 
-Performance is the focus of MAKO 4.6 Neptune. **Faster Frame Generation, lower GPU memory use, and less CPU overhead for Scaling and Shaders** come with the matching Renderer, bringing the boost to your existing profiles without new settings to tune.
+Performance is the focus of MAKO 4.6 Tempest. **Faster Frame Generation, lower GPU memory use, and less CPU overhead for Scaling and Shaders** come with the matching Renderer, bringing the boost to your existing profiles without new settings to tune.
 
 - **Faster Frame Generation:** The matching Renderer produced **about 3–11% more generated frames per second** in our standard benchmark tests compared with v4.5.0. One test using reduced Flow Scale gained **26.6%**. Both Fixed and Adaptive modes benefit, with FP16 or FP32, without a new setting.
 - **Less GPU memory for Frame Generation:** MAKO used **about 28% less GPU memory** in one Quality-mode test with a high Frame Generation multiplier. Reusing temporary image storage helps keep memory use down at higher multipliers.

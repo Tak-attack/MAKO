@@ -1,18 +1,18 @@
 ## What's new in MAKO Renderer v4.6.0
 
-<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/neptune.png" alt="Neptune release artwork: the blue-and-white MAKO shark circles a ruined temple where Neptune raises his trident, surrounded by battling ships and a vast whirlpool beneath golden storm light, in a Renaissance painting with pixel-art textures" width="100%">
+<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/tempest.png" alt="Tempest release artwork: the blue-and-white MAKO shark circles a ruined temple where a sea god raises his trident, surrounded by battling ships and a vast whirlpool beneath golden storm light, in a Renaissance painting with pixel-art textures" width="100%">
 
-### Release codename: Neptune
+### Release codename: Tempest
 
-> _“At Neptune’s command, the ocean became a road, and the mako its swiftest messenger.”_
+> _“The tempest did not break around the mako. It broke wherever the mako passed.”_
 >
-> **Tavian Rook, _Annals of the Deep Court_**
+> **Tavian Rook, _Annals of the Tempest Court_**
 
 ---
 
 ### Release highlight: Faster, leaner MAKO
 
-Performance is the focus of MAKO 4.6 Neptune: **faster Frame Generation, lower GPU memory use, and less CPU overhead for Scaling and Shaders.** Get more from the MAKO stack with your existing settings.
+Performance is the focus of MAKO 4.6 Tempest: **faster Frame Generation, lower GPU memory use, and less CPU overhead for Scaling and Shaders.** Get more from the MAKO stack with your existing settings.
 
 - **Faster Frame Generation:** MAKO produced **about 3–11% more generated frames per second** in our standard benchmark tests compared with v4.5.0. One test using reduced Flow Scale gained **26.6%**. Both Fixed and Adaptive modes benefit, with FP16 or FP32.
 - **Less GPU memory for Frame Generation:** MAKO used **about 28% less GPU memory** in one Quality-mode test with a high Frame Generation multiplier. Reusing temporary image storage helps keep memory use down at higher multipliers.
