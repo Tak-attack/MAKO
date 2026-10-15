@@ -1,6 +1,6 @@
 ## What's new in MAKO Renderer v4.6.0
 
-<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/neptune.png" alt="Neptune release artwork: the sea god raises his trident above a colossal mako in an epic battle of Renaissance fleets, with golden light breaking through storm clouds and painterly pixel textures" width="100%">
+<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/neptune.png" alt="Neptune release artwork: the blue-and-white MAKO shark circles a ruined temple where Neptune raises his trident, surrounded by battling ships and a vast whirlpool beneath golden storm light, in a Renaissance painting with pixel-art textures" width="100%">
 
 ### Release codename: Neptune
 
