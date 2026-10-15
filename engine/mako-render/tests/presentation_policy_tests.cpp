@@ -592,6 +592,56 @@ void testBridgeCompositorReadiness() {
     }
 }
 
+void testBridgeCompletionReturnDoesNotDrift() {
+    using Timeline = OrderedPresentTimeline;
+    const auto start = Timeline::TimePoint{10s};
+    for (const double refresh : {60., 90., 120., 144., 240.}) {
+        const auto tick = std::chrono::duration_cast<Timeline::Clock::duration>(
+            std::chrono::duration<double>(1.0 / refresh));
+        for (size_t count = 1; count <= 5; ++count) {
+            for (const auto returnDelay : {100us, 300us, 1000us}) {
+                Timeline timeline;
+                auto arrival = start;
+                auto previous = start;
+                uint32_t id = 0;
+                for (uint64_t batch = 1; batch <= 120; ++batch) {
+                    timeline.observeSourceBatch(arrival, batch);
+                    auto submit = arrival;
+                    auto first = Timeline::Slot{};
+                    uint32_t firstId = 0;
+                    for (size_t output = 0; output < count; ++output) {
+                        const auto slot = timeline.schedule(submit, refresh, refresh, count);
+                        expect(slot.has_value(), "completion-paced bridge rejected a valid batch");
+                        submit = slot->submitAt;
+                        timeline.submitted(++id, slot->presentAt, submit);
+                        if (output == 0) {
+                            first = *slot;
+                            firstId = id;
+                        }
+                        if (batch > 1)
+                            expect(slot->presentAt == previous + tick,
+                                "completion-return overhead drifted a ready ordered deadline");
+                        expect(slot->presentAt >= submit + tick / 2,
+                            "retained deadline consumed measured GPU work allowance");
+                        previous = slot->presentAt;
+                    }
+                    // The next CPU turn follows completion slightly late, but
+                    // the observed work still fits before the next output.
+                    timeline.feedback(firstId, first.presentAt, first.submitAt + tick / 2);
+                    timeline.feedback(id, previous, submit + tick / 2);
+                    arrival = previous + returnDelay;
+                }
+                // A real source hitch must rebase, never replay old slots.
+                const auto late = previous + 100ms;
+                timeline.observeSourceBatch(late, 121);
+                const auto resumed = timeline.schedule(late, refresh, refresh, count);
+                expect(resumed->presentAt == late + tick,
+                    "completion-return tolerance retained debt across a source hitch");
+            }
+        }
+    }
+}
+
 void testLongSessionDeadlineBounds() {
     const auto start = RealFramePacer::TimePoint{std::chrono::hours(2400)};
     for (const double fps : {45., 60., 90., 120.}) {
@@ -777,6 +827,7 @@ int main() {
     testSmoothCadenceCapFollowsActivePlan();
     testOrderedPresentationTimeline();
     testBridgeCompositorReadiness();
+    testBridgeCompletionReturnDoesNotDrift();
     testOrderedAcquireUsesExplicitFailureOnly();
     testOrderedAcquireBackoffAndProbeAreFinite();
     testExternalInterruptionDiscardsOldFailure();

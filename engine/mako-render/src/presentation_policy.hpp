@@ -1080,9 +1080,23 @@ namespace mako::layer {
                 : Clock::duration::zero();
             const auto next = this->lastPresentAt
                 ? *this->lastPresentAt + interval : now;
-            const auto presentAt = std::max(now + lead, next);
+            auto presentAt = std::max(now + lead, next);
+            // Completion-paced clients can return just after the previous
+            // deadline. Reapplying a whole refresh of dispatch reserve then
+            // adds that return delay on every batch. Keep the existing slot
+            // when learned work fits and at most one batch is pending. Cold
+            // start, recovery allowance, deeper queues and genuinely late
+            // work retain their full lead and rebase instead of catching up.
+            if (generationEnabled && this->lastBatchSerial &&
+                    this->readinessCount && this->lastPresentAt &&
+                    this->queuedOutputs <= outputBatchSize &&
+                    next > now && next >= now + measuredReadiness)
+                presentAt = next;
             this->lastPresentAt = presentAt;
-            this->scheduledLead = lead;
+            // Readiness feedback must use the allowance actually granted;
+            // otherwise a retained slot would relearn its saved reserve as
+            // additional GPU work and undo the phase correction.
+            this->scheduledLead = std::min(lead, presentAt - now);
             this->scheduledRefreshPeriod = refreshPeriod;
             this->scheduledInterval = interval;
             if (!generationEnabled && this->generationEnabled) {
