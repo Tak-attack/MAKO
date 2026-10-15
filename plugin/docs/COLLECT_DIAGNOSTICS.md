@@ -47,9 +47,9 @@ If the command is missing, select **Install MAKO Renderer** in Decky and retry. 
 
 For a slowdown after a long session, replace `--lines 5000` with `--lines 200000`. Collect before starting another game.
 
-Every preset retains Renderer failure headers with their adjacent exception details and Wayland protocol errors, including Steam's timestamped console format. Messages such as `wl_display#1: error ...` or `[destroyed object]: error ...` can explain a later `flush-failed` / broken-pipe presentation failure. Collection cannot recover details already removed from an older filtered report; run the current helper against the original session log. The report cannot recover an error that the client never read or logged, and it does not collect the separate Gamescope system journal.
+Collect from the original session log, not an older filtered report, which may have omitted error details. The report does not include the separate Gamescope system journal; support may request it if the game log is insufficient.
 
-For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution. For VRR comparisons, record Steam’s VRR setting for each run. Scaling and performance reports retain `late_latch_feedbacks`, which counts matched bridge feedback whose latch follows a stale refresh prediction; this is timing evidence, not a dropped-frame count.
+For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution. For VRR comparisons, record Steam’s VRR setting for each run.
 
 ## 4. Restore your settings
 

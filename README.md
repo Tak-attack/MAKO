@@ -55,7 +55,7 @@ Published Renderer packages currently target x86_64 Linux hosts and include laye
 
 - **Full-quality frame generation:** Lossless Scaling models from your licensed installation, with per-game quality and performance controls.
 - **Reduced ghosting:** Full-quality v2 with Lighter FG Model off can reduce ghosting; supported AMD GPUs gain extra safeguards. Results vary by game.
-- **Spatial scaling:** LS1 Quality, LS1 Performance, or the open MAKO Scaler, used alone or before frame generation.
+- **Spatial scaling:** LS1 Quality, LS1 Performance, or the open MAKO Scaler, used alone or alongside frame generation.
 - **Per-game shaders:** Live sharpening, anti-aliasing, colour, cinematic, and retro effects through bundled vkBasalt.
 - **Adaptive Frame Generation:** Target 30–240 FPS with a selectable 2x–5x generation ceiling.
 - **Display-aware pacing:** Adapts frame delivery to the presentation plan and Gamescope VRR state.
