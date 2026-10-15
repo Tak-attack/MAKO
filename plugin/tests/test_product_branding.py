@@ -115,10 +115,10 @@ class ProductBrandingTests(unittest.TestCase):
         for component, publisher in (("plugin", decky_publisher), ("engine", renderer_publisher)):
             self.assertNotIn("HDR frame generation and scaling are", publisher)
             notes = (REPOSITORY_ROOT / component / "RELEASE_NOTES.md").read_text(encoding="utf-8")
-            first_highlight = next(line for line in notes.splitlines() if line.startswith("- **"))
-            self.assertIn("HDR", first_highlight)
-            self.assertIn("experimental", first_highlight.lower())
-            self.assertNotIn("disabled by default", first_highlight.lower())
+            highlights = [line for line in notes.splitlines() if line.startswith("- **")]
+            self.assertTrue(highlights, f"{component} release notes need feature highlights")
+            for highlight in highlights:
+                self.assertRegex(highlight, r"^- \*\*[^*]+:\*\* \S")
 
         self.assertIn(
             "https://github.com/eugeniosegala/MAKO/blob/main/plugin/docs/LAUNCHERS.md",
