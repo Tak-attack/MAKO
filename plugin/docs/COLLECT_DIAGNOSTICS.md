@@ -27,7 +27,7 @@ MAKO_PRESENT_DIAGNOSTICS=1 MAKO_PRESENT_DIAGNOSTICS_THRESHOLD_MS=25 /home/deck/.
 
 Keep all original emulator arguments and the ROM path. Do not add `%command%` here. Native emulators and AppImages use the Steam method above.
 
-If MAKO Decky's **Wrapper path for this device** uses another home directory, replace `/home/deck` in these commands with that directory.
+If MAKO Decky's **Wrapper path for this device** uses another home directory, replace `/home/deck` in all commands in this guide with that directory.
 
 ## 2. Reproduce the problem
 

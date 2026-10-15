@@ -21,6 +21,12 @@ Performance is the focus of MAKO 4.6 Tempest: **faster Frame Generation, lower G
 
 **About these results:** We tested Frame Generation against v4.5.0 using the native Renderer on an AMD Steam Machine. The speed figures show how quickly MAKO can create extra frames; your in-game FPS improvement will depend on the game, hardware and settings. Memory figures cover only MAKO’s own GPU memory. The Scaling and Shader improvements reduce CPU work.
 
+### Customize shaders per game
+
+Open **Customize shaders** in the MAKO Renderer configuration app to fine-tune selected bundled and compatible custom effects. Adjust shader parameters with sliders, toggles, choices, and colour controls, or use **Reset shader to defaults** to start again with the selected effect.
+
+Your adjustments save with the selected profile and are shared across its AC and battery modes. Changes apply live when Shaders was enabled at game launch; rebuilding an effect may cause a brief hitch. The movable editor stays above the game, and **Hide controls** collapses it for a clearer view while comparing results.
+
 ### Supporting improvements
 
 - **Adaptive stability:** Brief image-availability misses during ordered presentation preserve an established Adaptive workload instead of unnecessarily resetting it. Unsuccessful higher-multiplier trials still back off.
