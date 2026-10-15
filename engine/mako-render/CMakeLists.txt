@@ -346,6 +346,7 @@ if(BUILD_TESTING)
 
         add_library(mako-surface-client-fixture SHARED
             "tests/gamescope_surface_client_fixture.cpp")
+        target_link_libraries(mako-surface-client-fixture PRIVATE Threads::Threads)
         set_target_properties(mako-surface-client-fixture PROPERTIES
             OUTPUT_NAME "wayland-client" SOVERSION 0
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/surface-client-fixture")
@@ -363,7 +364,7 @@ if(BUILD_TESTING)
         target_include_directories(mako-gamescope-scaling-surface-tests
             PRIVATE "src" "../mako-common/include")
         target_link_libraries(mako-gamescope-scaling-surface-tests
-            PRIVATE mako-surface-client-fixture mako-adaptive ${CMAKE_DL_LIBS})
+            PRIVATE mako-surface-client-fixture mako-adaptive Threads::Threads ${CMAKE_DL_LIBS})
         add_test(NAME gamescope-scaling-surface
             COMMAND ${CMAKE_COMMAND} -E env
                 "MAKO_PRESENT_DIAGNOSTICS=1"
@@ -378,6 +379,8 @@ if(BUILD_TESTING)
             mako-gamescope-scaling-surface-tests gamescope-scaling-surface-diagnostics-off)
         mako_register_portable_policy_test(
             mako-gamescope-scaling-surface-tests gamescope-scaling-surface)
+        set_tests_properties(gamescope-scaling-surface gamescope-scaling-surface-diagnostics-off
+            PROPERTIES TIMEOUT 30)
     endif()
 
     add_executable(mako-adaptive-tests

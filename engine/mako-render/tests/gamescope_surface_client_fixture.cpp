@@ -7,8 +7,11 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 #include <unordered_map>
 #include <sys/socket.h>
@@ -37,6 +40,8 @@ struct wl_proxy {
 };
 
 namespace {
+    std::recursive_mutex fixtureMutex;
+    std::thread::id applicationThread;
     std::vector<wl_proxy*> objects;
     int mode{};
     int associations{};
@@ -70,6 +75,22 @@ namespace {
     std::unordered_map<uint64_t, Override> overrides;
     bool ownershipModel{};
     bool delayedEvents{};
+    struct WireEvent { wl_proxy* proxy; uint32_t id; uint64_t time; bool retired; };
+    std::deque<WireEvent> unreadEvents;
+    std::deque<WireEvent> readEvents;
+    int deliveredEvents{};
+    int preparedReads{};
+    int readerFlushes{};
+    int readError{};
+
+    void enqueueEvent(bool retired) {
+        if (!lastTimedProxy)
+            std::abort();
+        unreadEvents.push_back({lastTimedProxy, presentId, presentTime, retired});
+        const char byte = 1;
+        if (write(sockets[1], &byte, 1) != 1)
+            std::abort();
+    }
 
     uint64_t windowKey(uint32_t server, uint32_t window) {
         return (uint64_t{server} << 32) | window;
@@ -90,6 +111,10 @@ namespace {
         return proxy;
     }
     void drop(wl_proxy* proxy) {
+        std::erase_if(unreadEvents, [proxy](const auto& event) { return event.proxy == proxy;
+    });
+        std::erase_if(readEvents, [proxy](const auto& event) { return event.proxy == proxy;
+    });
         // Gamescope clears the override attached to the resource's wl_surface,
         // including when an older protocol resource shares a replacement's
         // surface. A later present must reassert the surviving association.
@@ -107,6 +132,7 @@ namespace {
 extern "C" {
     // Keep peer identity deterministic in PID-isolated test sandboxes too.
     int getsockopt(int, int level, int option, void* value, socklen_t* size) noexcept {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (mode == 16 || level != SOL_SOCKET || option != SO_PEERCRED || *size < sizeof(ucred))
             return -1;
         const ucred peer{mode == 18 ? 0 : getpid(), getuid(), getgid()};
@@ -119,11 +145,50 @@ extern "C" {
     extern const wl_interface wl_surface_interface{"wl_surface", 1, 0, nullptr, 0, nullptr};
     extern const wl_interface wl_callback_interface{"wl_callback", 1, 0, nullptr, 0, nullptr};
 
-    void mako_test_surface_mode(int value) { mode = value; }
-    void mako_test_surface_ownership(bool value) { ownershipModel = value; }
-    void mako_test_surface_delay_events(bool value) { delayedEvents = value; }
-    int mako_test_surface_overrides() { return static_cast<int>(overrides.size()); }
+    void mako_test_surface_mode(int value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        mode = value;
+    }
+    void mako_test_surface_wire_event(bool retired) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        enqueueEvent(retired);
+    }
+    int mako_test_surface_delivered_events() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return deliveredEvents;
+    }
+    int mako_test_surface_prepared_reads() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return preparedReads;
+    }
+    int mako_test_surface_reader_flushes() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return readerFlushes;
+    }
+    void mako_test_surface_break_connection(bool hangup) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        if (hangup) {
+            close(sockets[1]);
+            sockets[1] = -1;
+        } else {
+            readError = EIO;
+            enqueueEvent(false);
+        }
+    }
+    void mako_test_surface_ownership(bool value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        ownershipModel = value;
+    }
+    void mako_test_surface_delay_events(bool value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        delayedEvents = value;
+    }
+    int mako_test_surface_overrides() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return static_cast<int>(overrides.size());
+    }
     void mako_test_surface_competing_override(uint32_t server, uint32_t window) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         const auto found = overrides.find(windowKey(server, window));
         if (found != overrides.end()) {
             if (found->second.content)
@@ -131,23 +196,69 @@ extern "C" {
             overrides.erase(found);
         }
     }
-    int mako_test_surface_objects() { return static_cast<int>(objects.size()) + queues; }
-    int mako_test_surface_associations() { return associations; }
-    int mako_test_surface_feedbacks() { return feedbacks; }
-    void mako_test_surface_hdr_output(uint32_t value) { hdrOutput = value; }
-    void mako_test_surface_hdr_output_present(bool value) { hdrOutputPresent = value; }
-    void mako_test_surface_hdr_property_fault(int value) { hdrPropertyFault = value; }
-    void mako_test_surface_server_id(uint32_t value) { serverId = value; }
-    void mako_test_surface_external_output(bool value) { externalOutput = value; }
-    int mako_test_surface_hdr_queries() { return hdrQueries; }
-    uint32_t mako_test_surface_feedback_color() { return feedbackColorSpace; }
-    int mako_test_surface_hdr_metadata_calls() { return hdrMetadataCalls; }
-    uint32_t mako_test_surface_hdr_metadata(unsigned index) { return hdrMetadata[index]; }
+    int mako_test_surface_objects() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return static_cast<int>(objects.size()) + queues;
+    }
+    int mako_test_surface_associations() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return associations;
+    }
+    int mako_test_surface_feedbacks() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return feedbacks;
+    }
+    void mako_test_surface_hdr_output(uint32_t value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        hdrOutput = value;
+    }
+    void mako_test_surface_hdr_output_present(bool value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        hdrOutputPresent = value;
+    }
+    void mako_test_surface_hdr_property_fault(int value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        hdrPropertyFault = value;
+    }
+    void mako_test_surface_server_id(uint32_t value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        serverId = value;
+    }
+    void mako_test_surface_external_output(bool value) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        externalOutput = value;
+    }
+    int mako_test_surface_hdr_queries() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return hdrQueries;
+    }
+    uint32_t mako_test_surface_feedback_color() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return feedbackColorSpace;
+    }
+    int mako_test_surface_hdr_metadata_calls() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return hdrMetadataCalls;
+    }
+    uint32_t mako_test_surface_hdr_metadata(unsigned index) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return hdrMetadata[index];
+    }
 
-    int mako_test_surface_present_times() { return presentTimes; }
-    uint32_t mako_test_surface_present_id() { return presentId; }
-    uint64_t mako_test_surface_present_time() { return presentTime; }
+    int mako_test_surface_present_times() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return presentTimes;
+    }
+    uint32_t mako_test_surface_present_id() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return presentId;
+    }
+    uint64_t mako_test_surface_present_time() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return presentTime;
+    }
     void mako_test_surface_ready_timing(uint64_t earliest) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         auto* proxy = lastTimedProxy;
         if (!proxy || !proxy->listener)
             std::abort();
@@ -161,20 +272,49 @@ extern "C" {
             static_cast<uint32_t>(earliest >> 32), static_cast<uint32_t>(earliest), 0, 0);
         reinterpret_cast<Refresh>(proxy->listener[1])(proxy->data, proxy, 0, 8333333);
     }
-    void mako_test_surface_timing() { mako_test_surface_ready_timing(0); }
-    int mako_test_surface_present_modes() { return presentModes; }
-    uint32_t mako_test_surface_present_mode() { return presentMode; }
-    uint32_t mako_test_surface_feedback_image_count() { return feedbackImageCount; }
-    const char* mako_test_surface_feedback_engine() { return feedbackEngine.c_str(); }
-    int mako_test_surface_reads() { return reads; }
-    int mako_test_surface_geometry_queries() { return geometryQueries; }
+    void mako_test_surface_timing() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        mako_test_surface_ready_timing(0);
+    }
+    int mako_test_surface_present_modes() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return presentModes;
+    }
+    uint32_t mako_test_surface_present_mode() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return presentMode;
+    }
+    uint32_t mako_test_surface_feedback_image_count() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return feedbackImageCount;
+    }
+    const char* mako_test_surface_feedback_engine() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return feedbackEngine.c_str();
+    }
+    int mako_test_surface_reads() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return reads;
+    }
+    int mako_test_surface_geometry_queries() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return geometryQueries;
+    }
     void mako_test_surface_resize(uint16_t width, uint16_t height) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         windowWidth = width;
         windowHeight = height;
     }
-    uint32_t mako_test_surface_window() { return associatedWindow; }
-    uint32_t mako_test_surface_server() { return associatedServer; }
+    uint32_t mako_test_surface_window() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return associatedWindow;
+    }
+    uint32_t mako_test_surface_server() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return associatedServer;
+    }
     void mako_test_surface_retire() {
+        const std::lock_guard fixtureLock(fixtureMutex);
         for (auto* proxy : objects) {
             if (proxy->kind == "gamescope_swapchain") {
                 proxy->pending = true;
@@ -184,6 +324,9 @@ extern "C" {
     }
 
     wl_display* wl_display_connect(const char*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        applicationThread = std::this_thread::get_id();
+        readError = 0;
         if (mode == 1)
             return nullptr;
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) != 0)
@@ -191,32 +334,84 @@ extern "C" {
         return reinterpret_cast<wl_display*>(make("wl_display"));
     }
     void wl_display_disconnect(wl_display* display) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        if (preparedReads != 0)
+            std::abort();
         drop(reinterpret_cast<wl_proxy*>(display));
         close(sockets[0]);
         close(sockets[1]);
     }
     // Match the public opaque pointer signatures even though the fixture uses
     // proxies/counters as storage. dlopen callers retain the real API types.
-    int wl_display_get_fd(wl_display*) { return sockets[0]; }
+    int wl_display_get_fd(wl_display*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return sockets[0];
+    }
     int wl_display_flush(wl_display*) {
-        if (mode == 12 || mode == 13) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        const bool applicationCall = std::this_thread::get_id() == applicationThread;
+        if (!applicationCall)
+            ++readerFlushes;
+        // Legacy one-call fault injection is scoped to its caller. A real
+        // reader failure is injected separately through the socket below.
+        if (applicationCall && (mode == 12 || mode == 13)) {
             errno = mode == 12 ? EAGAIN : EPIPE;
             return -1;
         }
         return 0;
     }
-    int wl_display_get_error(wl_display*) { return mode == 5 ? 32 : 0; }
+    int wl_display_get_error(wl_display*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return mode == 5 && std::this_thread::get_id() == applicationThread ? 32 : 0;
+    }
     wl_event_queue* wl_display_create_queue(wl_display*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         ++queues;
         return reinterpret_cast<wl_event_queue*>(&queues);
     }
-    void wl_event_queue_destroy(wl_event_queue*) { --queues; }
-    int wl_display_prepare_read_queue(wl_display*, wl_event_queue*) { ++reads; return 0; }
-    int wl_display_read_events(wl_display*) { return 0; }
-    void wl_display_cancel_read(wl_display*) {}
-    void wl_proxy_set_queue(wl_proxy*, wl_event_queue*) {}
-    void wl_proxy_destroy(wl_proxy* proxy) { drop(proxy); }
+    void wl_event_queue_destroy(wl_event_queue*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        --queues;
+    }
+    int wl_display_prepare_read_queue(wl_display*, wl_event_queue*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        if (std::this_thread::get_id() == applicationThread)
+            ++reads;
+        if (!readEvents.empty()) {
+            errno = EAGAIN;
+            return -1;
+        }
+        ++preparedReads;
+        return 0;
+    }
+    int wl_display_read_events(wl_display*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        if (--preparedReads < 0)
+            std::abort();
+        if (readError) {
+            errno = readError;
+            return -1;
+        }
+        char bytes[4096];
+        if (recv(sockets[0], bytes, sizeof(bytes), MSG_DONTWAIT) < 0 && errno != EAGAIN)
+            return -1;
+        readEvents.insert(readEvents.end(), unreadEvents.begin(), unreadEvents.end());
+        unreadEvents.clear();
+        return 0;
+    }
+    void wl_display_cancel_read(wl_display*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        if (--preparedReads < 0)
+            std::abort();
+    }
+    void wl_proxy_set_queue(wl_proxy*, wl_event_queue*) {
+        const std::lock_guard fixtureLock(fixtureMutex);}
+    void wl_proxy_destroy(wl_proxy* proxy) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        drop(proxy);
+    }
     int wl_proxy_add_listener(wl_proxy* proxy, void (**listener)(void), void* data) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (mode == 8 && proxy->kind == "gamescope_swapchain")
             return -1;
         proxy->listener = listener;
@@ -225,6 +420,7 @@ extern "C" {
     }
     wl_proxy* wl_proxy_marshal_array_flags(wl_proxy* proxy, uint32_t opcode,
             const wl_interface* interface, uint32_t, uint32_t flags, wl_argument* args) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (flags & 1) {
             drop(proxy);
             return nullptr;
@@ -270,12 +466,29 @@ extern "C" {
         return created;
     }
     int wl_display_dispatch_queue_pending(wl_display*, wl_event_queue*) {
-        if (mode == 14) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        if (mode == 14 && std::this_thread::get_id() == applicationThread) {
             errno = EPROTO;
             return -1;
         }
         if (mode == 3)
             return 0; // A silent peer must hit the bounded discovery deadline.
+        while (!readEvents.empty()) {
+            const auto event = readEvents.front();
+            readEvents.pop_front();
+            auto* proxy = event.proxy;
+            if (event.retired) {
+                reinterpret_cast<void (*)(void*, wl_proxy*)>(proxy->listener[2])(proxy->data, proxy);
+            } else {
+                using Timing = void (*)(void*, wl_proxy*, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+                reinterpret_cast<Timing>(proxy->listener[0])(proxy->data, proxy, event.id,
+                    static_cast<uint32_t>(event.time >> 32), static_cast<uint32_t>(event.time),
+                    static_cast<uint32_t>(event.time >> 32), static_cast<uint32_t>(event.time),
+                    0, 0, 0, 0);
+            }
+            ++deliveredEvents;
+        }
         const auto pending = objects;
         for (auto* proxy : pending) {
             if (!proxy->pending || !proxy->listener)
@@ -300,19 +513,23 @@ extern "C" {
     wl_proxy* wl_proxy_marshal_array_constructor_versioned(wl_proxy* proxy,
             uint32_t opcode, wl_argument* args, const wl_interface* interface,
             uint32_t version) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         return wl_proxy_marshal_array_flags(proxy, opcode, interface, version, 0, args);
     }
     void wl_proxy_marshal_array(wl_proxy* proxy, uint32_t opcode, wl_argument* args) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (opcode == 0)
             return; // Destructor request; the following proxy destroy owns cleanup.
         wl_proxy_marshal_array_flags(proxy, opcode, nullptr, 1, 0, args);
     }
 
     xcb_get_geometry_cookie_t xcb_get_geometry(xcb_connection_t*, xcb_drawable_t) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         ++geometryQueries;
         return {1};
     }
     xcb_get_geometry_reply_t* xcb_get_geometry_reply(xcb_connection_t*, xcb_get_geometry_cookie_t, xcb_generic_error_t**) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (mode == 4)
             return nullptr;
         auto* reply = static_cast<xcb_get_geometry_reply_t*>(std::calloc(1, sizeof(xcb_get_geometry_reply_t)));
@@ -322,6 +539,7 @@ extern "C" {
         return reply;
     }
     xcb_intern_atom_cookie_t xcb_intern_atom(xcb_connection_t*, uint8_t, uint16_t size, const char* name) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (std::string_view(name, size) == "GAMESCOPE_HDR_OUTPUT_FEEDBACK") {
             ++hdrQueries;
             return {102};
@@ -331,6 +549,7 @@ extern "C" {
         return {std::string_view(name, size) == "GAMESCOPE_PID" ? 100u : 101u};
     }
     xcb_intern_atom_reply_t* xcb_intern_atom_reply(xcb_connection_t*, xcb_intern_atom_cookie_t cookie, xcb_generic_error_t**) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (cookie.sequence == 102 && hdrPropertyFault == 6)
             return nullptr;
         auto* reply = static_cast<xcb_intern_atom_reply_t*>(std::calloc(1, sizeof(xcb_intern_atom_reply_t)));
@@ -338,8 +557,12 @@ extern "C" {
             ? XCB_ATOM_NONE : cookie.sequence;
         return reply;
     }
-    xcb_get_property_cookie_t xcb_get_property(xcb_connection_t*, uint8_t, xcb_window_t, xcb_atom_t atom, xcb_atom_t, uint32_t, uint32_t) { return {atom}; }
+    xcb_get_property_cookie_t xcb_get_property(xcb_connection_t*, uint8_t, xcb_window_t, xcb_atom_t atom, xcb_atom_t, uint32_t, uint32_t) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return {atom};
+    }
     xcb_get_property_reply_t* xcb_get_property_reply(xcb_connection_t*, xcb_get_property_cookie_t cookie, xcb_generic_error_t**) {
+        const std::lock_guard fixtureLock(fixtureMutex);
         if (cookie.sequence == 102 && hdrPropertyFault == 5)
             return nullptr;
         auto* reply = static_cast<xcb_get_property_reply_t*>(std::calloc(1, sizeof(xcb_get_property_reply_t) + 4));
@@ -360,6 +583,12 @@ extern "C" {
         std::memcpy(reply + 1, &value, 4);
         return reply;
     }
-    void* xcb_get_property_value(const xcb_get_property_reply_t* reply) { return const_cast<xcb_get_property_reply_t*>(reply) + 1; }
-    xcb_connection_t* XGetXCBConnection(Display*) { return reinterpret_cast<xcb_connection_t*>(1); }
+    void* xcb_get_property_value(const xcb_get_property_reply_t* reply) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return const_cast<xcb_get_property_reply_t*>(reply) + 1;
+    }
+    xcb_connection_t* XGetXCBConnection(Display*) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return reinterpret_cast<xcb_connection_t*>(1);
+    }
 }

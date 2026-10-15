@@ -57,6 +57,7 @@ import { MakoInfo } from "../MakoInfo";
 import {
   MakoFocusable,
   MakoInlineTip,
+  MakoRestartLabel,
   makoDialogButtonStyle,
 } from "../MakoUi";
 import type { ConfigurationControlProps } from "./types";
@@ -281,7 +282,14 @@ export function ShadersConfigurationGroup({
     <>
       <PanelSectionRow>
         <ToggleField
-          label={t("CONFIG_ENABLE_VKBASALT", "Enable Shaders (Restart)")}
+          label={
+            <MakoRestartLabel
+              label={t(
+                "CONFIG_ENABLE_VKBASALT",
+                "Enable Shaders (Restart)",
+              )}
+            />
+          }
           description={t(
             "CONFIG_ENABLE_VKBASALT_DESC",
             "Enable before launch for bundled sharpening, anti-aliasing, and shaders. No separate install. If effects are invisible, try Windowed or Borderless Fullscreen mode.",

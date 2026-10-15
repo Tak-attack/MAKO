@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <type_traits>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -56,6 +57,11 @@ extern "C" {
     void mako_test_surface_retire();
     void mako_test_surface_timing();
     void mako_test_surface_ready_timing(uint64_t);
+    void mako_test_surface_wire_event(bool);
+    int mako_test_surface_delivered_events();
+    int mako_test_surface_prepared_reads();
+    int mako_test_surface_reader_flushes();
+    void mako_test_surface_break_connection(bool);
 }
 
 using namespace mako::layer;
@@ -394,6 +400,76 @@ namespace {
             .presentMode = VK_PRESENT_MODE_FIFO_KHR,
             .clipped = VK_TRUE,
         };
+    }
+
+    template<typename Predicate>
+    void awaitEvent(Predicate predicate, const char* message) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!predicate() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        expect(predicate(), message);
+    }
+
+    void testUnreadFeedback() {
+        // No Mesa reader and no acquire/present calls while feedback arrives.
+        // pending-only dispatch cannot see these socket events at all.
+        for (const bool hangup : {false, true}) {
+            GamescopeScalingSurface bridge;
+            expect(bridge.connect(), "wire feedback connection");
+            VkSurfaceKHR surface{};
+            const VkXcbSurfaceCreateInfoKHR info{
+                .sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
+                .connection = reinterpret_cast<xcb_connection_t*>(1), .window = 71,
+            };
+            expect(bridge.create({}, next, info, nullptr, &surface) == VK_SUCCESS,
+                "wire feedback surface");
+            const auto swapchain = fakeHandle<VkSwapchainKHR>(8001);
+            expect(bridge.createSwapchain(surface, swapchain, swapchainInfo(surface),
+                {1920, 1080}, 4, "wire-test", VK_PRESENT_MODE_FIFO_KHR, 120),
+                "wire feedback swapchain");
+            expect(bridge.preparePresent(surface, swapchain) == VK_SUCCESS,
+                "wire feedback first present");
+            const int delivered = mako_test_surface_delivered_events();
+            for (int batch = 1; batch <= 100; ++batch) {
+                for (int event = 0; event < 50; ++event)
+                    mako_test_surface_wire_event(false);
+                awaitEvent([&] { return mako_test_surface_delivered_events() == delivered + batch * 50; },
+                    "unread timing feedback must drain without Mesa or application presentation");
+            }
+            mako_test_surface_wire_event(true);
+            awaitEvent([&] { return mako_test_surface_delivered_events() == delivered + 5001; },
+                "retirement must drain while the application is idle");
+            expect(bridge.acquisitionResult(surface, swapchain) == VK_ERROR_OUT_OF_DATE_KHR,
+                "socket retirement must invalidate the owning swapchain");
+            awaitEvent([] { return mako_test_surface_prepared_reads() == 1; },
+                "idle reader must sleep with a prepared read");
+            const auto flushes = mako_test_surface_reader_flushes();
+            // Exercise a pending write without relying on another present.
+            mako_test_surface_mode(12);
+            // Destruction flushes protocol requests even for an SDR swapchain.
+            bridge.destroySwapchain(surface, swapchain);
+            mako_test_surface_mode(0);
+            awaitEvent([&] { return mako_test_surface_reader_flushes() > flushes; },
+                "EAGAIN must wake the reader to retry outgoing requests while idle");
+            expect(bridge.createSwapchain(surface, swapchain, swapchainInfo(surface),
+                {1920, 1080}, 4, "wire-test", VK_PRESENT_MODE_FIFO_KHR, 120) &&
+                bridge.preparePresent(surface, swapchain) == VK_SUCCESS,
+                "replacement after socket retirement");
+            mako_test_surface_break_connection(hangup);
+            awaitEvent([&] { return bridge.acquisitionResult(surface, swapchain) == VK_ERROR_SURFACE_LOST_KHR; },
+                "reader failure or peer hangup must reach application acquisition");
+            expect(bridge.preparePresent(surface, swapchain) == VK_ERROR_SURFACE_LOST_KHR,
+                "reader failure must also stop presentation");
+            bridge.destroy(surface);
+        }
+        for (int iteration = 0; iteration < 20; ++iteration) {
+            GamescopeScalingSurface bridge;
+            expect(bridge.connect(), "idle reader connection");
+            awaitEvent([] { return mako_test_surface_prepared_reads() == 1; },
+                "idle reader must enter its socket wait before shutdown");
+        }
+        expect(mako_test_surface_prepared_reads() == 0 && mako_test_surface_objects() == 0,
+            "idle shutdown must cancel its read before releasing the connection");
     }
 
     void checkApplicationExtent(GamescopeScalingSurface& bridge,
@@ -1391,5 +1467,6 @@ int main() {
         VkExtent2D{3840, 2160}, true);
     expect(decision.extents && sameExtent(decision.extents->source, {1920, 1080}) &&
         sameExtent(decision.extents->presentation, {3840, 2160}), "RE4 explicit render extent must scale through proven variable surface");
+    testUnreadFeedback();
     std::cout << "Gamescope scaling surface tests passed\n";
 }

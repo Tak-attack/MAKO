@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const shaderPicker = vi.hoisted(() => vi.fn());
+const restartLabel = vi.hoisted(() => vi.fn());
 vi.mock("@decky/api", () => ({
   openFilePicker: shaderPicker,
   FileSelectionType: { FILE: 0 },
@@ -178,7 +179,10 @@ vi.mock("../../src/components/MakoUi", () => ({
       <span data-mako-experimental-badge="true">{badgeLabel}</span>
     </span>
   ),
-  MakoRestartLabel: ({ label }: { label: string }) => label,
+  MakoRestartLabel: ({ label }: { label: string }) => {
+    restartLabel(label);
+    return label;
+  },
   MakoInlineTip: ({
     children,
     tone,
@@ -394,6 +398,7 @@ describe("Configuration controls", () => {
     );
 
     expect(screen.getByText("Enable Shaders (Restart)")).toBeTruthy();
+    expect(restartLabel).toHaveBeenCalledWith("Enable Shaders (Restart)");
     expect(
       screen.getByText(
         /Enable before launch for bundled sharpening, anti-aliasing, and shaders/,

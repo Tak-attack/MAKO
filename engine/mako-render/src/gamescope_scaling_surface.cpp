@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -16,8 +17,10 @@
 #include <iostream>
 #include <mutex>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
@@ -120,6 +123,10 @@ struct GamescopeScalingSurface::Impl {
     bool allowHdr{};
     HdrOutputQuery rootHdrOutput;
     pid_t peerPid{};
+    std::thread eventReader;
+    std::atomic<bool> stopReader{};
+    std::atomic<int> readerError{};
+    int readerWake{-1};
 
     wl_display* (*displayConnect)(const char*){};
     void (*displayDisconnect)(wl_display*){};
@@ -249,13 +256,100 @@ struct GamescopeScalingSurface::Impl {
             VkSwapchainKHR swapchain, const char* boundary) {
         const auto dispatched = dispatchPending(display, queue);
         const auto systemError = dispatched < 0 ? errno : 0;
-        if (dispatched < 0 || displayGetError(display) != 0)
+        const int readError = readerError.load();
+        if (readError || dispatched < 0 || displayGetError(display) != 0)
             return failure(state, content, surface, swapchain, VK_ERROR_SURFACE_LOST_KHR,
-                "connection-lost", boundary, systemError);
+                "connection-lost", boundary, readError ? readError : systemError);
         if (content && content->retired)
             return failure(state, content, surface, swapchain, VK_ERROR_OUT_OF_DATE_KHR,
                 "association-retired", boundary);
         return VK_SUCCESS;
+    }
+
+    void wakeReader() const {
+        if (readerWake < 0)
+            return;
+        const uint64_t wake = 1;
+        while (write(readerWake, &wake, sizeof(wake)) < 0 && errno == EINTR) {}
+    }
+
+    int flush() {
+        const int result = displayFlush(display);
+        const int error = errno;
+        // A queued write must still progress if the application stops presenting.
+        if (result < 0 && error == EAGAIN)
+            wakeReader();
+        errno = error;
+        return result;
+    }
+
+    void readFeedback() {
+        while (!stopReader.load()) {
+            {
+                const std::lock_guard lock(mutex);
+                const int dispatched = dispatchPending(display, queue);
+                const int dispatchError = dispatched < 0 ? errno : 0;
+                const int connectionError = displayGetError(display);
+                if (dispatched < 0 || connectionError) {
+                    readerError.store(connectionError ? connectionError : (dispatchError ? dispatchError : EIO));
+                    return;
+                }
+                // Mesa can read into this queue between dispatch and prepare.
+                if (prepareRead(display, queue) != 0)
+                    continue;
+            }
+            // Never hold the surface lock across poll/read_events: Wayland's
+            // shared-reader handshake can wait for a concurrent driver reader.
+            const int flushed = displayFlush(display);
+            const bool writeBlocked = flushed < 0 && errno == EAGAIN;
+            if (flushed < 0 && !writeBlocked) {
+                readerError.store(errno ? errno : EIO);
+                cancelRead(display);
+                return;
+            }
+            pollfd fds[]{
+                {displayGetFd(display), static_cast<short>(POLLIN | (writeBlocked ? POLLOUT : 0)), 0},
+                {readerWake, POLLIN, 0},
+            };
+            const int result = poll(fds, 2, -1);
+            const int error = errno;
+            if (result < 0 || stopReader.load() ||
+                    (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL))) {
+                cancelRead(display);
+                if (stopReader.load())
+                    return;
+                if (result < 0 && error == EINTR)
+                    continue;
+                readerError.store(result < 0 ? error : EPIPE);
+                return;
+            }
+            if (fds[1].revents & POLLIN) {
+                uint64_t wake{};
+                while (read(readerWake, &wake, sizeof(wake)) < 0 && errno == EINTR) {}
+            }
+            if (fds[0].revents & POLLIN) {
+                if (readEvents(display) < 0) {
+                    readerError.store(errno ? errno : EIO);
+                    return;
+                }
+            } else {
+                cancelRead(display);
+            }
+        }
+    }
+
+    bool startReader() {
+        readerWake = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+        if (readerWake < 0)
+            return false;
+        try {
+            eventReader = std::thread([this] { readFeedback(); });
+        } catch (const std::system_error&) {
+            close(readerWake);
+            readerWake = -1;
+            return false;
+        }
+        return true;
     }
 
     std::optional<VkExtent2D> windowExtent(const Surface& state) const {
@@ -322,6 +416,16 @@ struct GamescopeScalingSurface::Impl {
     }
 
     ~Impl() {
+        // Driver surfaces/swapchains have already retired. Wake and join before
+        // freeing callback data, queues, the display or dynamically loaded code.
+        stopReader.store(true);
+        wakeReader();
+        if (eventReader.joinable())
+            eventReader.join();
+        if (readerWake >= 0) {
+            close(readerWake);
+            readerWake = -1;
+        }
         for (auto& [handle, surface] : surfaces) {
             static_cast<void>(handle);
             release(*surface);
@@ -610,7 +714,7 @@ struct GamescopeScalingSurface::Impl {
             *output = VK_NULL_HANDLE;
             throw;
         }
-        displayFlush(display);
+        flush();
         std::cerr << "MAKO Renderer: spatial scaling surface bridge: "
                   << "surface=" << *output << "; xwayland_server=" << *server
                   << "; window=" << window
@@ -683,7 +787,7 @@ bool GamescopeScalingSurface::connect() {
     // case; a failed credential lookup is not evidence of namespace isolation.
     impl->peerPid = peer.pid;
     impl->queue = impl->createQueue(impl->display);
-    impl->ready = impl->queue && impl->discover();
+    impl->ready = impl->queue && impl->discover() && impl->startReader();
     return impl->ready;
 }
 
@@ -721,7 +825,7 @@ void GamescopeScalingSurface::destroy(const VkSurfaceKHR surface) {
         return;
     impl->release(*found->second);
     impl->surfaces.erase(found);
-    impl->displayFlush(impl->display);
+    impl->flush();
 }
 
 bool GamescopeScalingSurface::owns(const VkSurfaceKHR surface) const {
@@ -813,7 +917,7 @@ bool GamescopeScalingSurface::createSwapchain(
     };
     impl->marshal(content->proxy, 2, nullptr, 1, 0, feedback);
     state.contents.emplace(swapchain, std::move(content));
-    if (impl->displayFlush(impl->display) < 0 && errno != EAGAIN) {
+    if (impl->flush() < 0 && errno != EAGAIN) {
         const auto inserted = state.contents.find(swapchain);
         impl->release(inserted->second->proxy);
         state.contents.erase(inserted);
@@ -852,7 +956,7 @@ void GamescopeScalingSurface::destroySwapchain(
         return;
     impl->release(content->second->proxy);
     found->second->contents.erase(content);
-    impl->displayFlush(impl->display);
+    impl->flush();
 }
 
 VkResult GamescopeScalingSurface::acquisitionResult(
@@ -1185,7 +1289,7 @@ bool GamescopeScalingSurface::setHdrMetadata(const VkSurfaceKHR surface,
         args[index].u = values[index];
     impl->marshal(content->second->proxy, 4, nullptr, 1, 0, args.data());
     content->second->hdrMetadata = values;
-    impl->displayFlush(impl->display);
+    impl->flush();
     return true;
 }
 
@@ -1199,10 +1303,9 @@ VkResult GamescopeScalingSurface::preparePresent(
     auto found = impl->surfaces.find(surface);
     if (found == impl->surfaces.end())
         return VK_SUCCESS;
-    // Mesa's WSI dispatches the shared socket for its own event queue. Drain
-    // only already-read association events here: no socket poll, roundtrip,
-    // allocation or additional worker on the present path. Opt-in diagnostics
-    // aggregate timing feedback in bounded storage allocated at creation.
+    // The connection reader keeps feedback flowing even when Mesa uses explicit
+    // synchronization or the game pauses. Only drain already-read events here;
+    // socket waits and reads never run while holding the presentation lock.
     auto content = found->second->contents.find(swapchain);
     if (content == found->second->contents.end())
         return impl->failure(*found->second, nullptr, surface, swapchain,
@@ -1278,7 +1381,7 @@ VkResult GamescopeScalingSurface::preparePresent(
                     swapchain, *window, diagnostics.outstanding(), content->second->refreshCycleNs);
         }
     }
-    if (impl->displayFlush(impl->display) < 0 && errno != EAGAIN)
+    if (impl->flush() < 0 && errno != EAGAIN)
         return impl->failure(*found->second, content->second.get(), surface, swapchain,
             VK_ERROR_SURFACE_LOST_KHR, "flush-failed", "present", errno);
     if (scheduledDeadline)
