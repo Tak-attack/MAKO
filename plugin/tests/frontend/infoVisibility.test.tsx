@@ -377,7 +377,7 @@ test("normal navigation scrolls only the latest focus and cancels work on unmoun
   expect(second.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
     block: "center",
     inline: "nearest",
-    behavior: "auto",
+    behavior: "instant",
   });
   expect(vi.mocked(second.scrollIntoView).mock.contexts).toEqual([second]);
   screen.getByRole("button", { name: "First option" }).focus();
@@ -408,7 +408,7 @@ test("effects navigation keeps rows visible without recentering the whole panel"
     expect(effect.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
       block: "nearest",
       inline: "nearest",
-      behavior: "auto",
+      behavior: "instant",
     });
     expect(vi.mocked(effect.scrollIntoView).mock.contexts).toEqual([effect]);
   }
@@ -419,7 +419,7 @@ test("effects navigation keeps rows visible without recentering the whole panel"
   expect(next.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
     block: "center",
     inline: "nearest",
-    behavior: "auto",
+    behavior: "instant",
   });
 });
 
@@ -505,6 +505,7 @@ test.each([
       if (collapseFirst) act(() => vi.advanceTimersByTime(0));
       flushAnimationFrames();
       if (!collapseFirst) act(() => vi.advanceTimersByTime(0));
+      flushAnimationFrames();
       act(() => vi.advanceTimersByTime(100));
 
       expect(screen.queryByTestId("mako-effects-list")).toBeNull();
@@ -576,6 +577,115 @@ test("effects collapse follows virtual focus and cancels pending work on reentry
   }
 });
 
+test.each(["Customize shaders", "Add custom shader", "Refresh"])(
+  "leaving Clear all reveals %s after collapse cancels an unfinished scroll",
+  (nextLabel) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      render(
+        <div
+          data-testid="scroller"
+          style={{ overflowY: "auto", scrollBehavior: "smooth" }}
+        >
+          <InfoVisibility>
+            <EffectsChecklist
+              options={[{ data: "clarity", label: "Clarity" }]}
+              initialSelection={["clarity"]}
+              onChange={vi.fn(async () => undefined)}
+            />
+            <button>{nextLabel}</button>
+            <button>Following setting</button>
+          </InfoVisibility>
+        </div>,
+      );
+      const scroller = screen.getByTestId("scroller");
+      Object.defineProperties(scroller, {
+        clientHeight: { value: 240 },
+        offsetHeight: { value: 240 },
+        scrollHeight: {
+          get: () => (screen.queryByTestId("mako-effects-list") ? 2000 : 1700),
+        },
+      });
+      scroller.getBoundingClientRect = () => new DOMRect(0, 0, 300, 240);
+      fireEvent.click(screen.getByRole("button", { name: /^Choose effects/ }));
+      const clear = screen.getByRole("button", { name: "Clear all" });
+      const next = screen.getByRole("button", { name: nextLabel });
+      const following = screen.getByRole("button", {
+        name: "Following setting",
+      });
+      let pendingScroll: ReturnType<typeof setTimeout> | undefined;
+      scroller.scrollTo = vi.fn((options: ScrollToOptions | number) => {
+        if (typeof options === "object") {
+          clearTimeout(pendingScroll);
+          scroller.scrollTop = options.top ?? scroller.scrollTop;
+        }
+      }) as typeof scroller.scrollTo;
+      for (const [control, offset] of [
+        [clear, 1280],
+        [next, 1450],
+        [following, 1650],
+      ] as const) {
+        control.getBoundingClientRect = () =>
+          new DOMRect(
+            0,
+            offset -
+              (screen.queryByTestId("mako-effects-list") ? 0 : 300) -
+              scroller.scrollTop,
+            280,
+            40,
+          );
+        control.scrollIntoView = vi.fn(
+          (options?: boolean | ScrollIntoViewOptions) => {
+            const destination =
+              scroller.scrollTop + control.getBoundingClientRect().top - 100;
+            const reveal = () => {
+              scroller.scrollTop = destination;
+            };
+            // Native `auto` can inherit a smooth scroll. A subsequent scrollTo
+            // during collapse cancels it before the button has reached view.
+            if (typeof options === "object" && options.behavior === "instant")
+              reveal();
+            else pendingScroll = setTimeout(reveal, 50);
+          },
+        );
+      }
+      fireEvent(clear, new CustomEvent("vgp_onfocus", { bubbles: true }));
+      flushAnimationFrames();
+      act(() => vi.advanceTimersByTime(50));
+      const move = (from: HTMLElement, to: HTMLElement) => {
+        const detail = {
+          blurredNode: { Element: from },
+          focusedNode: { Element: to },
+        };
+        act(() => panelNavigation.scroll?.({ Element: to }));
+        fireEvent(
+          from,
+          new CustomEvent("vgp_onblur", { bubbles: true, detail }),
+        );
+        fireEvent(
+          to,
+          new CustomEvent("vgp_onfocus", { bubbles: true, detail }),
+        );
+      };
+      move(clear, next);
+      flushAnimationFrames();
+      act(() => vi.advanceTimersByTime(0));
+      flushAnimationFrames();
+      act(() => vi.advanceTimersByTime(100));
+      expect(screen.queryByTestId("mako-effects-list")).toBeNull();
+      expect(next.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+      expect(next.getBoundingClientRect().bottom).toBeLessThanOrEqual(240);
+      move(next, following);
+      flushAnimationFrames();
+      act(() => vi.advanceTimersByTime(100));
+      expect(following.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+      expect(following.getBoundingClientRect().bottom).toBeLessThanOrEqual(240);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
 test.each([240, 480])(
   "tab grid positions only on entry from above in a %i-pixel viewport",
   (viewportHeight) => {
@@ -615,7 +725,7 @@ test.each([240, 480])(
     expect(first.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
       block: "nearest",
       inline: "nearest",
-      behavior: "auto",
+      behavior: "instant",
     });
     vi.mocked(first.scrollIntoView).mockClear();
     before.focus();
@@ -634,7 +744,7 @@ test.each([240, 480])(
     expect(first.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
       block: "nearest",
       inline: "nearest",
-      behavior: "auto",
+      behavior: "instant",
     });
     expect(vi.mocked(first.scrollIntoView).mock.contexts).toEqual([first]);
     expect(scroller.scrollTop).toBe(entryScrollTop);
@@ -650,7 +760,7 @@ test.each([240, 480])(
     expect(second.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
       block: "nearest",
       inline: "nearest",
-      behavior: "auto",
+      behavior: "instant",
     });
     expect(scroller.scrollTop).toBe(entryScrollTop);
 
@@ -660,7 +770,7 @@ test.each([240, 480])(
     expect(after.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
       block: "nearest",
       inline: "nearest",
-      behavior: "auto",
+      behavior: "instant",
     });
     // Returning from below must retain a still-visible grid's current position,
     // even if controller focus moves again before the animation frame.
@@ -673,7 +783,7 @@ test.each([240, 480])(
     expect(first.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
       block: "nearest",
       inline: "nearest",
-      behavior: "auto",
+      behavior: "instant",
     });
 
     vi.mocked(before.scrollIntoView).mockClear();
@@ -682,7 +792,7 @@ test.each([240, 480])(
     expect(before.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
       block: "nearest",
       inline: "nearest",
-      behavior: "auto",
+      behavior: "instant",
     });
     first.focus();
     flushAnimationFrames();
@@ -708,7 +818,7 @@ test("leaving a tab grid before its scroll runs cancels entry positioning", () =
   expect(other.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
     block: "nearest",
     inline: "nearest",
-    behavior: "auto",
+    behavior: "instant",
   });
   expect(vi.mocked(other.scrollIntoView).mock.contexts).toEqual([other]);
 });
@@ -807,7 +917,7 @@ test("controller focus scrolls without browser focus and keeps rapid moves stabl
   expect(after.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
     block: "nearest",
     inline: "nearest",
-    behavior: "auto",
+    behavior: "instant",
   });
   vi.mocked(first.scrollIntoView).mockClear();
   scroller.scrollTop = entryScrollTop + 20;
@@ -817,7 +927,7 @@ test("controller focus scrolls without browser focus and keeps rapid moves stabl
   expect(first.scrollIntoView).toHaveBeenCalledExactlyOnceWith({
     block: "nearest",
     inline: "nearest",
-    behavior: "auto",
+    behavior: "instant",
   });
   expect(scroller.scrollTop).toBe(entryScrollTop + 20);
 

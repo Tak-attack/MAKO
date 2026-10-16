@@ -12,7 +12,9 @@ import { MakoFocusable } from "../../MakoUi";
 import {
   shaderColorPreview,
   shaderControlSections,
+  shaderNumericValue,
   shaderSliderRange,
+  shaderSliderValue,
   type ShaderControlGroup,
 } from "./shaderControls";
 
@@ -111,13 +113,14 @@ function NumericParameter({
   onCommit: (value: number) => void;
   showLabel?: boolean;
 }) {
-  const [draft, setDraft] = useState(String(parameter.value));
-  useEffect(() => setDraft(String(parameter.value)), [parameter.value]);
+  const displayedValue = shaderNumericValue(parameter.value, parameter.type);
+  const [draft, setDraft] = useState(String(displayedValue));
+  useEffect(() => setDraft(String(displayedValue)), [displayedValue]);
   const commit = () => {
     const value = Number(draft);
-    if (draft.trim() && Number.isFinite(value) && value !== parameter.value)
+    if (draft.trim() && Number.isFinite(value) && value !== displayedValue)
       onCommit(value);
-    else setDraft(String(parameter.value));
+    else setDraft(String(displayedValue));
   };
   return (
     <TextField
@@ -177,10 +180,12 @@ function ParameterControl({
     <>
       {range && (
         <SliderField
-          label={`${p.label}: ${p.type === "float" ? Number(p.value.toPrecision(6)) : p.value}`}
+          label={`${p.label}: ${shaderNumericValue(p.value, p.type)}`}
           value={Math.max(range.min, Math.min(range.max, p.value))}
           {...range}
-          onChange={set}
+          validValues="steps"
+          minimumDpadGranularity={range.step}
+          onChange={(value) => set(shaderSliderValue(value, range))}
         />
       )}
       <NumericParameter parameter={p} onCommit={set} showLabel={!range} />

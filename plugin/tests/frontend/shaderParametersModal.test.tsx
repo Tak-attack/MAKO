@@ -129,6 +129,8 @@ vi.mock("@decky/ui", () => ({
     min,
     max,
     step,
+    validValues,
+    minimumDpadGranularity,
     onChange,
   }: {
     label: string;
@@ -136,6 +138,8 @@ vi.mock("@decky/ui", () => ({
     min: number;
     max: number;
     step: number;
+    validValues: string;
+    minimumDpadGranularity: number;
     onChange: (v: number) => void;
   }) => (
     <input
@@ -145,6 +149,8 @@ vi.mock("@decky/ui", () => ({
       min={min}
       max={max}
       step={step}
+      data-valid-values={validValues}
+      data-dpad-step={minimumDpadGranularity}
       onChange={(e) => onChange(Number(e.target.value))}
     />
   ),
@@ -277,7 +283,7 @@ test("small shader values stay readable instead of displaying as zero", async ()
     screen.getByRole("slider", { name: "Strength: 0.000001" }),
   ).toBeTruthy();
 });
-test("slider summaries hide float noise without rounding the editable value or saving on blur", async () => {
+test("all numeric displays hide FP32 noise without saving on blur", async () => {
   api.get.mockResolvedValue({
     success: true,
     effects: [
@@ -290,12 +296,82 @@ test("slider summaries hide float noise without rounding the editable value or s
   await open();
   expect(screen.getByRole("slider", { name: "Strength: 3.4" })).toBeTruthy();
   const input = screen.getByRole("textbox", { name: "Strength" });
-  expect((input as HTMLInputElement).value).toBe("3.4000001");
+  expect((input as HTMLInputElement).value).toBe("3.4");
   fireEvent.blur(input);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(350);
   });
   expect(api.set).not.toHaveBeenCalled();
+});
+
+test("Gamma uses hundredths for sliders while exact fields keep finer edits", async () => {
+  api.get.mockResolvedValue({
+    success: true,
+    effects: [
+      {
+        ...effect,
+        parameters: [
+          {
+            ...effect.parameters[0],
+            label: "Gamma",
+            min: 0.5,
+            max: 2,
+            step: null,
+            value: 1.05499995,
+          },
+        ],
+      },
+    ],
+  });
+  await open();
+  const slider = screen.getByRole("slider", { name: "Gamma: 1.055" });
+  expect(slider.getAttribute("step")).toBe("0.01");
+  expect(slider.getAttribute("data-dpad-step")).toBe("0.01");
+  expect(slider.getAttribute("data-valid-values")).toBe("steps");
+  const input = screen.getByRole("textbox", { name: "Gamma" });
+  expect((input as HTMLInputElement).value).toBe("1.055");
+  fireEvent.blur(input);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(350);
+  });
+  expect(api.set).not.toHaveBeenCalled();
+  fireEvent.change(slider, { target: { value: "1.0499999999999998" } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(350);
+  });
+  expect(api.set).toHaveBeenLastCalledWith("Game A", { strength: 1.05 });
+  expect((input as HTMLInputElement).value).toBe("1.05");
+  fireEvent.change(input, { target: { value: "1.05789" } });
+  fireEvent.blur(input);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(350);
+  });
+  expect(api.set).toHaveBeenLastCalledWith("Game A", { strength: 1.05789 });
+  expect((input as HTMLInputElement).value).toBe("1.05789");
+});
+
+test("unbounded numeric fields also shorten readback noise without a save", async () => {
+  api.get.mockResolvedValue({
+    success: true,
+    effects: [
+      {
+        ...effect,
+        parameters: [
+          { ...effect.parameters[0], min: null, max: null, value: 1.04999995 },
+        ],
+      },
+    ],
+  });
+  const close = await open();
+  expect(screen.queryByRole("slider")).toBeNull();
+  const input = screen.getByRole("textbox", { name: "Strength" });
+  expect((input as HTMLInputElement).value).toBe("1.05");
+  input.focus();
+  await act(async () => {
+    fireEvent.click(screen.getByText("Close"));
+  });
+  expect(api.set).not.toHaveBeenCalled();
+  expect(close).toHaveBeenCalledOnce();
 });
 test("reset uses compiler defaults, and closing drains pending writes", async () => {
   const close = await open();

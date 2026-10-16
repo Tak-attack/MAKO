@@ -5,6 +5,7 @@ import {
   type GamepadEvent,
 } from "@decky/ui";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -13,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { usePersistentCollapseState } from "../hooks/usePersistentCollapseState";
+import { PanelFocusScrollContext } from "../hooks/usePanelFocusScroll";
 import t from "../i18n/i18n";
 import { findFocusScrollContainer } from "../utils/focusScrollUtils";
 import {
@@ -30,7 +32,11 @@ const focusGroupSelector = '[data-mako-focus-scroll="group"]';
 function scrollFocusGroup(group: HTMLElement) {
   const scroller = findFocusScrollContainer(group);
   if (!scroller) {
-    group.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
+    group.scrollIntoView({
+      block: "start",
+      inline: "nearest",
+      behavior: "instant",
+    });
     return;
   }
 
@@ -123,12 +129,12 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
     ? t("CONTENT_SHOW_INFO", "Show info")
     : t("CONTENT_HIDE_INFO", "Hide info");
 
-  const cancelScroll = () => {
+  const cancelScroll = useCallback(() => {
     if (scrollFrame.current !== undefined) {
       cancelAnimationFrame(scrollFrame.current);
       scrollFrame.current = undefined;
     }
-  };
+  }, []);
 
   useEffect(() => cancelScroll, []);
 
@@ -148,71 +154,82 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
     focusAnchor.current = undefined;
   }, [hidden]);
 
-  const queueFocusScroll = (
-    panel: HTMLElement,
-    target: HTMLElement,
-    previous: Element | null,
-    gamepad: boolean,
-  ) => {
-    if (!panel.contains(target)) return;
-    // Steam may emit both controller and browser focus for one move. Keep the
-    // original request, including its entry direction, when that happens.
-    if (activeFocusedControl.current === target) return;
-    cancelScroll();
-    lastFocusedControl.current = target;
-    activeFocusedControl.current = target;
-    if (focusAnchor.current || target.closest(ribbonSelector)) {
-      pendingFocusGroup.current = null;
-      return;
-    }
-
-    const group = target.closest<HTMLElement>(focusGroupSelector);
-    const previousGroup = previous?.closest(focusGroupSelector);
-    if (!group || !group.contains(previous)) {
-      // Panel DOM order follows vertical navigation. Only an entry from a
-      // control above the grid should reposition it; unknown origins stay put.
-      pendingFocusGroup.current =
-        group &&
-        previous &&
-        panel.contains(previous) &&
-        !previous.contains(group) &&
-        (group.compareDocumentPosition(previous) &
-          Node.DOCUMENT_POSITION_PRECEDING)
-          ? group
-          : null;
-    }
-
-    // Carry entry placement through rapid moves within the grid. Leaving it
-    // only reveals the next control, without recentering the panel.
-    scrollFrame.current = requestAnimationFrame(() => {
-      scrollFrame.current = undefined;
-      if (
-        target.isConnected &&
-        activeFocusedControl.current === target &&
-        (gamepad || target.ownerDocument.activeElement === target)
-      ) {
-        // Steam wraps scrollTo to cancel its pending scroll animation. Native
-        // scrollIntoView alone can leave an older destination moving the panel.
-        const scroller = findFocusScrollContainer(target);
-        scroller?.scrollTo({ top: scroller.scrollTop, behavior: "instant" });
-        if (group && pendingFocusGroup.current === group) {
-          scrollFocusGroup(group);
-        } else {
-          target.scrollIntoView({
-            block:
-              group ||
-              previousGroup ||
-              target.closest('[data-mako-focus-scroll="nearest"]')
-                ? "nearest"
-                : "center",
-            inline: "nearest",
-            behavior: "auto",
-          });
-        }
+  const queueFocusScroll = useCallback(
+    (
+      panel: HTMLElement,
+      target: HTMLElement,
+      previous: Element | null,
+      gamepad: boolean,
+      refresh = false,
+    ) => {
+      if (!panel.contains(target)) return;
+      // Steam may emit both controller and browser focus for one move. Keep the
+      // original request, including its entry direction, when that happens.
+      if (activeFocusedControl.current === target && !refresh) return;
+      cancelScroll();
+      lastFocusedControl.current = target;
+      activeFocusedControl.current = target;
+      if (focusAnchor.current || target.closest(ribbonSelector)) {
         pendingFocusGroup.current = null;
+        return;
       }
-    });
-  };
+
+      const group = target.closest<HTMLElement>(focusGroupSelector);
+      const previousGroup = previous?.closest(focusGroupSelector);
+      if (!group || !group.contains(previous)) {
+        // Panel DOM order follows vertical navigation. Only an entry from a
+        // control above the grid should reposition it; unknown origins stay put.
+        pendingFocusGroup.current =
+          group &&
+          previous &&
+          panel.contains(previous) &&
+          !previous.contains(group) &&
+          group.compareDocumentPosition(previous) &
+            Node.DOCUMENT_POSITION_PRECEDING
+            ? group
+            : null;
+      }
+
+      // Carry entry placement through rapid moves within the grid. Leaving it
+      // only reveals the next control, without recentering the panel.
+      scrollFrame.current = requestAnimationFrame(() => {
+        scrollFrame.current = undefined;
+        if (
+          target.isConnected &&
+          activeFocusedControl.current === target &&
+          (gamepad || target.ownerDocument.activeElement === target)
+        ) {
+          // Steam wraps scrollTo to cancel its pending scroll animation. Native
+          // scrollIntoView alone can leave an older destination moving the panel.
+          const scroller = findFocusScrollContainer(target);
+          scroller?.scrollTo({ top: scroller.scrollTop, behavior: "instant" });
+          if (group && pendingFocusGroup.current === group) {
+            scrollFocusGroup(group);
+          } else {
+            target.scrollIntoView({
+              block:
+                group ||
+                previousGroup ||
+                target.closest('[data-mako-focus-scroll="nearest"]')
+                  ? "nearest"
+                  : "center",
+              inline: "nearest",
+              behavior: "instant",
+            });
+          }
+          pendingFocusGroup.current = null;
+        }
+      });
+    },
+    [cancelScroll],
+  );
+
+  const refreshFocusScroll = useCallback(() => {
+    const target = activeFocusedControl.current;
+    const panel = ribbon.current?.closest<HTMLElement>(".Mako_InfoVisibility");
+    if (target?.isConnected && panel)
+      queueFocusScroll(panel, target, lastFocusedControl.current, true, true);
+  }, [queueFocusScroll]);
 
   const onFocusCapture: FocusEventHandler<HTMLDivElement> = (event) => {
     // Steam portals can belong to another window: instanceof Element checks
@@ -339,7 +356,9 @@ export function InfoVisibility({ children }: { children: ReactNode }) {
         }
       `}</style>
       <InfoHiddenContext.Provider value={hidden}>
-        {children}
+        <PanelFocusScrollContext.Provider value={refreshFocusScroll}>
+          {children}
+        </PanelFocusScrollContext.Provider>
       </InfoHiddenContext.Provider>
       <div
         ref={ribbon}

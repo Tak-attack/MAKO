@@ -3,7 +3,7 @@ import { GamepadButton, type GamepadEvent } from "@decky/ui";
 import { RiArrowDownSFill, RiArrowUpSFill } from "react-icons/ri";
 import { VKBASALT_SHADER_NONE } from "../../../config/configSchema";
 import t from "../../../i18n/i18n";
-import { findFocusScrollContainer } from "../../../utils/focusScrollUtils";
+import { usePanelFocusScroll } from "../../../hooks/usePanelFocusScroll";
 import { MakoFocusable } from "../../MakoUi";
 
 interface EffectOption {
@@ -41,11 +41,7 @@ export function EffectsChecklist({
   );
   const checklistRef = useRef<HTMLDivElement>(null);
   const pendingClose = useRef<number>();
-  const focusAnchor = useRef<{
-    target: HTMLElement;
-    top: number;
-    scroller: HTMLElement | null;
-  }>();
+  const refreshFocusScroll = usePanelFocusScroll();
   const pendingPageFocusRow = useRef<number>();
   const pendingSave = useRef(Promise.resolve());
   const selectionValue = initialSelection.join(":");
@@ -70,26 +66,11 @@ export function EffectsChecklist({
   }, [selectionValue]);
 
   useLayoutEffect(() => {
-    if (expanded) return;
-    const anchor = focusAnchor.current;
-    if (!anchor) return;
-    if (anchor.target.isConnected && anchor.scroller) {
-      const scroller = anchor.scroller;
-      const scale = scroller.offsetHeight
-        ? scroller.getBoundingClientRect().height / scroller.offsetHeight
-        : 1;
-      // Preserve the real navigation target without refocusing an unrelated
-      // DOM activeElement, and cancel Steam's previous scroll destination.
-      if (scale > 0)
-        scroller.scrollTo({
-          top:
-            scroller.scrollTop +
-            (anchor.target.getBoundingClientRect().top - anchor.top) / scale,
-          behavior: "instant",
-        });
-    }
-    focusAnchor.current = undefined;
-  }, [expanded]);
+    // The next button may still be below the viewport when the list closes.
+    // Reapply the panel's focus scrolling after layout, instead of preserving
+    // that offscreen position or cancelling a scroll before it reaches view.
+    if (!expanded) refreshFocusScroll();
+  }, [expanded, refreshFocusScroll]);
 
   useLayoutEffect(() => {
     const requestedRow = pendingPageFocusRow.current;
@@ -130,13 +111,6 @@ export function EffectsChecklist({
         checklist &&
         !checklist.querySelector(".mako-effects-focus-within")
       ) {
-        if (target && target !== checklist.ownerDocument.body) {
-          focusAnchor.current = {
-            target,
-            top: target.getBoundingClientRect().top,
-            scroller: findFocusScrollContainer(target),
-          };
-        }
         setExpanded(false);
         setFocusedEffect(null);
         setFocusedAction(null);

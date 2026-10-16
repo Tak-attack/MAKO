@@ -90,10 +90,33 @@ export function shaderControlSections(
   return sections;
 }
 
+// The helper emits FP32 values with nine significant digits. Shorten only
+// those readbacks (or exact FP32 numbers), preserving the shader's bits and
+// independently typed decimals. This is presentation, never a profile migration.
+export function shaderNumericValue(
+  value: number,
+  type: ShaderParameter["type"],
+) {
+  if (type !== "float" || !Number.isFinite(value) || value === 0) return value;
+  const stored = Math.fround(value);
+  if (
+    !Number.isFinite(stored) ||
+    (value !== stored && value !== Number(stored.toPrecision(9)))
+  )
+    return value;
+  for (let digits = 1; digits <= 9; digits++) {
+    const candidate = Number(value.toPrecision(digits));
+    if (Math.fround(candidate) === stored) return candidate;
+  }
+  return value;
+}
+
 export function shaderSliderRange(p: ShaderParameter, color = false) {
   if (p.presentation?.widget === "input") return null;
-  const min = p.min ?? (color ? 0 : null);
-  const max = p.max ?? (color ? 1 : null);
+  const min =
+    p.min == null ? (color ? 0 : null) : shaderNumericValue(p.min, p.type);
+  const max =
+    p.max == null ? (color ? 1 : null) : shaderNumericValue(p.max, p.type);
   if (
     min === null ||
     max === null ||
@@ -102,7 +125,15 @@ export function shaderSliderRange(p: ShaderParameter, color = false) {
     max <= min
   )
     return null;
-  const step = p.step ?? (p.type === "float" ? (max - min) / 100 : 1);
+  // At least 100 intervals, with decimal steps instead of fractions such as
+  // 0.015 for Gamma's 0.5–2 range. Authored steps remain authoritative.
+  const step =
+    p.step == null
+      ? p.type === "float"
+        ? 10 **
+          Math.floor(Math.log10(Number(((max - min) / 100).toPrecision(15))))
+        : 1
+      : shaderNumericValue(p.step, p.type);
   if (
     !Number.isFinite(step) ||
     step <= 0 ||
@@ -113,6 +144,22 @@ export function shaderSliderRange(p: ShaderParameter, color = false) {
   )
     return null;
   return { min, max, step };
+}
+
+export function shaderSliderValue(
+  value: number,
+  range: { min: number; max: number; step: number },
+) {
+  if (!Number.isFinite(value)) return value;
+  if (value <= range.min) return range.min;
+  if (value >= range.max) return range.max;
+  const snapped =
+    range.min + Math.round((value - range.min) / range.step) * range.step;
+  // Remove JS arithmetic tails, not shader precision. Exact fields bypass this.
+  return Math.max(
+    range.min,
+    Math.min(range.max, Number(snapped.toPrecision(15))),
+  );
 }
 
 export function shaderColorPreview(parameters: ShaderParameter[]): string {

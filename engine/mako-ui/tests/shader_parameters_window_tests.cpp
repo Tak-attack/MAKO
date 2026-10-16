@@ -28,6 +28,7 @@ public:
         if (noParameters) return {};
         auto result = QJsonDocument::fromJson(R"JSON([{"id":"Tone","name":"Tone","error":null,"parameters":[
         {"key":"strength","label":"Strength","description":"Effect intensity","category":"Colour","type":"float","min":0,"max":1,"step":0.01,"value":0.5,"default":0.25,"items":[]},
+        {"key":"gamma","label":"Gamma","description":"Midtones","category":"Colour","type":"float","min":0.5,"max":2,"step":null,"value":1.05499995,"default":1,"items":[]},
         {"key":"mode","label":"Mode","description":"","category":"","type":"int","min":null,"max":null,"step":null,"value":0,"default":0,"items":["Soft","Strong"]},
         {"key":"dither","label":"Dithering","description":"Reduce colour banding","category":"","type":"bool","min":null,"max":null,"step":null,"value":1,"default":1,"items":[]}
         ]}])JSON").array().toVariantList();
@@ -97,6 +98,26 @@ ApplicationWindow {
             return nullptr;
         };
         const auto findInput = [&](auto&&, QQuickItem* item) { return findNamed(findNamed, item, QStringLiteral("shader-parameter-strength")); };
+        auto* gamma = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-parameter-gamma"));
+        auto* gammaSlider = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-slider-gamma"));
+        require(gamma && gammaSlider && gamma->property("text").toString() == "1.055", "Gamma exposes FP32 readback noise");
+        require(gammaSlider->property("stepSize").toDouble() == .01 && gammaSlider->property("snapMode").toInt() == 1, "Gamma slider does not snap to hundredths");
+        require(QMetaObject::invokeMethod(gamma, "commitValue"), "cannot commit unchanged Gamma");
+        require(editor->property("pending").toMap().empty(), "normalized display saved an untouched value");
+        gammaSlider->setProperty("value", 1.0499999999999998);
+        require(QMetaObject::invokeMethod(gammaSlider, "moved"), "cannot adjust Gamma slider");
+        require(editor->property("pending").toMap().value("gamma").toDouble() == 1.05, "Gamma slider saved an arithmetic tail");
+        gamma->setProperty("text", QStringLiteral("1.05789"));
+        QMetaObject::invokeMethod(gamma, "commitValue");
+        require(editor->property("pending").toMap().value("gamma").toDouble() == 1.05789, "exact Gamma input snapped to the slider step");
+        editor->close();
+        const auto savesAfterGamma = backend.saves;
+        QMetaObject::invokeMethod(editor,"openEditor");
+        gamma = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-parameter-gamma"));
+        gamma->forceActiveFocus();
+        editor->close();
+        require(backend.saves == savesAfterGamma, "closing an untouched normalized field saved a change");
+        QMetaObject::invokeMethod(editor,"openEditor");
         auto* red = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-parameter-makoShader_41_436f6c6f7572_0"));
         auto* blue = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-parameter-makoShader_41_436f6c6f7572_2"));
         auto* swatch = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-color-preview-makoShader_41_436f6c6f7572_0"));

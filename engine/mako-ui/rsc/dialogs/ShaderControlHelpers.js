@@ -33,12 +33,33 @@ function sections(parameters) {
     return result;
 }
 
+// Shorten nine-digit/exact FP32 readbacks without changing shader bits or
+// independently typed decimals. Keep this aligned with Decky's binding.
+function numericValue(value, type) {
+    if (type !== "float" || !Number.isFinite(value) || value === 0) return value;
+    var stored = Math.fround(value);
+    if (!Number.isFinite(stored) || (value !== stored && value !== Number(stored.toPrecision(9)))) return value;
+    for (var digits = 1; digits <= 9; digits++) {
+        var candidate = Number(value.toPrecision(digits));
+        if (Math.fround(candidate) === stored) return candidate;
+    }
+    return value;
+}
+
 function sliderRange(p, color) {
     if (p.presentation && p.presentation.widget === "input") return null;
-    var min = p.min == null ? (color ? 0 : null) : p.min;
-    var max = p.max == null ? (color ? 1 : null) : p.max;
+    var min = p.min == null ? (color ? 0 : null) : numericValue(p.min, p.type);
+    var max = p.max == null ? (color ? 1 : null) : numericValue(p.max, p.type);
     if (min === null || max === null || !Number.isFinite(min) || !Number.isFinite(max) || max <= min) return null;
-    var step = p.step == null ? (p.type === "float" ? (max - min) / 100 : 1) : p.step;
+    var step = p.step == null ? (p.type === "float" ? Math.pow(10, Math.floor(Math.log10(Number(((max - min) / 100).toPrecision(15))))) : 1) : numericValue(p.step, p.type);
     if (!Number.isFinite(step) || step <= 0 || (p.type !== "float" && (!Number.isInteger(min) || !Number.isInteger(max) || !Number.isInteger(step)))) return null;
     return {min: min, max: max, step: step};
+}
+
+function sliderValue(value, range) {
+    if (!Number.isFinite(value)) return value;
+    if (value <= range.min) return range.min;
+    if (value >= range.max) return range.max;
+    var snapped = range.min + Math.round((value - range.min) / range.step) * range.step;
+    return Math.max(range.min, Math.min(range.max, Number(snapped.toPrecision(15))));
 }

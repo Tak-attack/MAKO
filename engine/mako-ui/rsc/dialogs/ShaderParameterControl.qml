@@ -18,28 +18,31 @@ ColumnLayout {
     CheckBox { visible: control.parameter.type === "bool"; Accessible.name: control.label; checked: control.ownerEditor.valueFor(control.parameter) !== 0; onToggled: control.ownerEditor.change(control.parameter, checked ? 1 : 0) }
     ComboBox { visible: control.parameter.type !== "bool" && control.choices; Accessible.name: control.label; model: control.parameter.items.map(function(label, index) { return label || String(index); }); currentIndex: control.ownerEditor.valueFor(control.parameter); onActivated: control.ownerEditor.change(control.parameter, currentIndex); Layout.fillWidth: true }
     Slider {
+        objectName: "shader-slider-" + control.parameter.key
         visible: control.parameter.type !== "bool" && !control.choices && control.range !== null
         Accessible.name: control.label
         Layout.fillWidth: true
         from: control.range ? control.range.min : 0
         to: control.range ? control.range.max : 1
         stepSize: control.range ? control.range.step : 0.01
+        snapMode: Slider.SnapAlways
         value: Math.max(from, Math.min(to, control.ownerEditor.valueFor(control.parameter)))
-        onMoved: control.ownerEditor.change(control.parameter, value)
+        onMoved: if (control.range) control.ownerEditor.change(control.parameter, Controls.sliderValue(value, control.range))
     }
     TextField {
         id: numberInput
         property real savedValue: control.ownerEditor.valueFor(control.parameter)
+        readonly property real displayedValue: Controls.numericValue(savedValue, control.parameter.type)
         objectName: "shader-parameter-" + control.parameter.key
         Accessible.name: control.label
         visible: control.parameter.type !== "bool" && !control.choices
         Layout.fillWidth: true
-        text: Number(savedValue).toString()
+        text: String(displayedValue)
         inputMethodHints: Qt.ImhFormattedNumbersOnly
         function commitValue() {
             var number = Number(text)
-            if (text.trim().length && isFinite(number)) control.ownerEditor.change(control.parameter, number)
-            text = Qt.binding(function() { return Number(numberInput.savedValue).toString() })
+            if (text.trim().length && isFinite(number) && number !== displayedValue) control.ownerEditor.change(control.parameter, number)
+            text = Qt.binding(function() { return String(numberInput.displayedValue) })
         }
         onEditingFinished: commitValue()
     }
