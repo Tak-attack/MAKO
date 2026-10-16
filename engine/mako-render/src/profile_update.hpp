@@ -530,8 +530,7 @@ namespace mako::layer {
             const std::optional<uint32_t> gamescopeRefreshHz,
             const AdaptiveSchedulerSnapshot& scheduler,
             const GamescopePresentationFeedback& presentationFeedback = {},
-            const std::optional<size_t> activeGenerationLimit = std::nullopt,
-            const bool handoffSettling = false) {
+            const std::optional<size_t> activeGenerationLimit = std::nullopt) {
         const size_t generationLimit = scheduler.stableCadenceLimit.value_or(
             scheduler.validatedGenerationLimit
         );
@@ -568,13 +567,12 @@ namespace mako::layer {
             projectedOutputFps >= targetFps * 0.98 &&
             projectedOutputFps <= targetFps *
                 (generationLimit == 1 ? 1.02 : 1.25);
-        // FIFO can move the immediate source estimator without changing its
-        // long-term output rate. Retain the same VRR rung, or a fixed-refresh
-        // rung during its bounded activation settling. Scheduler and transport
-        // guards remain authoritative, including during that interval.
+        // Entry needs a close target match. Once accepted, the scheduler's
+        // sustained cadence/delivery qualification owns retention; applying
+        // entry thresholds again would turn one noisy estimate into a failed
+        // handoff and a minute-long cooldown. All eligibility guards still apply.
         const bool retainActiveHandoff =
-            activeGenerationLimit == generationLimit &&
-            (presentationFeedback.variableRefreshRequested() || handoffSettling);
+            activeGenerationLimit == generationLimit;
         const bool eligible = profile.adaptive &&
             profile.adaptive_stable_cadence &&
             effectiveFrameGenerationEnabled(profile, gamescopeRefreshHz) &&

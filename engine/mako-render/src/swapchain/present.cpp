@@ -169,8 +169,7 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
             this->gamescopeRefreshHz,
             schedulerSnapshot,
             this->gamescopePresentationFeedback,
-            this->smoothCadencePacerHandoff.activeGenerationLimit(),
-            this->smoothCadencePacerHandoff.settling(limiterArrival)
+            this->smoothCadencePacerHandoff.activeGenerationLimit()
         );
     }
     const auto cadenceBaseCap = this->smoothCadenceBaseCap.update(

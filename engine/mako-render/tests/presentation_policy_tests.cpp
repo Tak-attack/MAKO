@@ -1562,20 +1562,12 @@ int main() {
         "a rejected lower-load probe failed to restore its retained integer cap");
 
     SmoothCadencePacerHandoff pacerHandoff;
-    expect(!pacerHandoff.settling(pacingStart),
-        "inactive handoff reported a settling interval");
     auto handoff = pacerHandoff.update(pacingStart, 1);
     expect(handoff.active && handoff.changed && handoff.generationLimit == 1,
         "qualified Smooth Cadence did not hand pacing to ordered FIFO");
-    expect(!pacerHandoff.settling(pacingStart - 1ns) &&
-            pacerHandoff.settling(pacingStart + 249ms) &&
-            !pacerHandoff.settling(pacingStart + 250ms),
-        "handoff settling was unbounded or accepted a backwards clock");
     handoff = pacerHandoff.update(pacingStart + 1s, 1);
     expect(handoff.active && !handoff.changed,
         "retained ordered-FIFO handoff reported a false transition");
-    expect(!pacerHandoff.settling(pacingStart + 1s),
-        "retaining a handoff renewed its settling interval");
     handoff = pacerHandoff.update(pacingStart + 2s, std::nullopt);
     expect(!handoff.active && handoff.changed,
         "lost Smooth Cadence qualification did not restore the base cap");

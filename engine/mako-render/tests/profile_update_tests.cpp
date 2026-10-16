@@ -872,15 +872,15 @@ int main() {
             activeVrr, std::nullopt),
         "VRR FIFO handoff entered outside its qualified cadence window");
     const GamescopePresentationFeedback fixedRefresh{};
-    expect(!smoothCadencePacerHandoffGenerationLimit(
+    expect(smoothCadencePacerHandoffGenerationLimit(
             steadyPacing, true, false, 120, acceptedTwoX,
-            fixedRefresh, 1),
-        "fixed-refresh handoff changed its existing retention guard");
+            fixedRefresh, 1) == 1,
+        "fixed-refresh handoff ignored its retained scheduler qualification");
     {
         using namespace std::chrono_literals;
-        // Replay the fixed-refresh 60 -> 68.59 -> 60 FPS transition observed
-        // immediately after releasing the cap in FF7. Entry still needs the
-        // narrow cadence window; only the accepted handoff can settle.
+        // Replay both initial turnover and later estimator jitter. Entry
+        // remains strict; accepted cadence belongs to the scheduler's
+        // sustained exit policy, not a second instantaneous threshold.
         SmoothCadencePacerHandoff handoff;
         const auto start = SmoothCadencePacerHandoff::TimePoint{10s};
         auto snapshot = acceptedTwoX;
@@ -889,24 +889,32 @@ int main() {
             const auto now = start + elapsed;
             return handoff.update(now, smoothCadencePacerHandoffGenerationLimit(
                 steadyPacing, true, pressure, 120, snapshot, fixedRefresh,
-                handoff.activeGenerationLimit(), handoff.settling(now)));
+                handoff.activeGenerationLimit()));
         };
         expect(!step(0ms, 68.5929).active,
-            "settling admitted an unqualified initial cadence");
+            "handoff retention admitted an unqualified initial cadence");
         expect(step(1ms, 60).active && step(17ms, 68.5929).active &&
                 step(100ms, 62.36).active && step(251ms, 60).active &&
                 step(1001ms, 60).active,
             "handoff queue turnover caused a spurious minute-long cooldown");
-        expect(!step(1100ms, 68.5929).active && !step(2100ms, 60).active,
-            "settling suppressed a sustained post-transition cadence failure");
+        expect(step(1100ms, 58.3101).active && step(2100ms, 60).active,
+            "post-settling jitter invented a failed FIFO lifetime");
+        snapshot.phase = AdaptiveSchedulerPhase::Active;
+        snapshot.stableCadenceLimit.reset();
+        expect(!step(2200ms, 54).active,
+            "lost scheduler qualification did not release fixed-refresh FIFO");
+        snapshot.phase = AdaptiveSchedulerPhase::StableCadence;
+        snapshot.stableCadenceLimit = 1;
+        expect(!step(2300ms, 60).active,
+            "a genuine failed handoff bypassed its retry delay");
         handoff.reset();
         expect(step(0ms, 60).active && !step(10ms, 60, true).active,
-            "settling delayed the acquire-recovery safety exit");
+            "cadence retention delayed the acquire-recovery safety exit");
         handoff.reset();
         expect(step(0ms, 60).active, "handoff did not restart after reset");
         snapshot.stableCadenceEvaluationActive = true;
         expect(!step(10ms, 60).active,
-            "settling bypassed an active scheduler probe");
+            "cadence retention bypassed an active scheduler probe");
     }
     acceptedTwoX.smoothedBaseFps = 60.0;
     auto fractionalVrr = steadyPacing;

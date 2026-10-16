@@ -3992,6 +3992,159 @@ namespace {
         }
     }
 
+    void testFixedRefreshHandoffUsesSustainedSchedulerExit() {
+        for (const uint32_t target : {60U, 90U, 120U}) {
+            Harness harness(target, 3, true, AdaptiveRecoveryPolicy::OrderedSdr,
+                false, 2s, target, false, true);
+            harness.start();
+            harness.runAtFps(target / 2.0, 12s);
+            require(harness.scheduler.snapshot().stableCadenceLimit == 1,
+                "fixed-refresh retention fixture never qualified 2x");
+            ls::GameConf profile;
+            profile.active_in = {"game"};
+            profile.frame_generation_enabled = true;
+            profile.adaptive = true;
+            profile.adaptive_auto_base_fps_cap = true;
+            profile.adaptive_stable_cadence = true;
+            profile.adaptive_max_multiplier = 3;
+            profile.target_fps = target;
+            SmoothCadencePacerHandoff handoff;
+            const auto step = [&](const double fps) {
+                harness.now += std::chrono::duration_cast<TimePoint::duration>(
+                    std::chrono::duration<double>{1.0 / fps});
+                const auto decision = handoff.update(harness.now,
+                    smoothCadencePacerHandoffGenerationLimit(profile,
+                        true, false, target, harness.scheduler.snapshot(), {},
+                        handoff.activeGenerationLimit()));
+                const auto plan = harness.scheduler.planFrame(harness.now,
+                    false, decision.generationLimit);
+                harness.scheduler.reportGeneratedFrameDelivery({plan.size(), plan.size()});
+                return decision.active;
+            };
+            require(step(target / 2.0), "qualified FIFO handoff did not enter");
+            // Jitter both after initial turnover and much later must not
+            // restart a minute-long cooldown while useful cadence is retained.
+            for (size_t cycle = 0; cycle < 5; ++cycle) {
+                for (size_t frame = 0; frame < 12; ++frame)
+                    require(step(target * 0.485), "small cadence dip released FIFO");
+                for (size_t frame = 0; frame < target; ++frame)
+                    require(step(target / 2.0), "recovered cadence released FIFO");
+            }
+            bool released = false;
+            for (size_t frame = 0; frame < target; ++frame) {
+                if (!step(target * 0.42)) {
+                    released = true;
+                    break;
+                }
+            }
+            require(released && !harness.scheduler.snapshot().stableCadenceLimit,
+                "sustained cadence loss retained a fixed-refresh handoff");
+            require(harness.diagnostics.contains("adaptive-stable-cadence-disabled"),
+                "FIFO exit bypassed the scheduler's sustained cadence owner");
+        }
+    }
+
+    void testPlannedPacingReturnKeepsValidatedLifetime() {
+        for (const bool fifo : {false, true}) {
+            for (const size_t multiplier : {3U, 4U, 5U}) {
+                for (const auto delay : {100ms, 300ms, 1000ms, 3000ms}) {
+                    Harness harness(120, multiplier, true,
+                        AdaptiveRecoveryPolicy::OrderedSdr, false, 2s,
+                        120, false, true, true);
+                    promoteForPacedLoadTest(harness, multiplier, 100.0);
+                    const double unpacedFps = 144.0 / multiplier;
+                    const double pacedFps = 120.0 / multiplier;
+                    const double lowerFps = 108.0 / (multiplier - 1);
+                    harness.runAtFps(unpacedFps, 16s);
+                    for (size_t frame = 0; frame < 150; ++frame) {
+                        pacedLoadFrame(harness, pacedFps, multiplier - 1, fifo);
+                        if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                            break;
+                    }
+                    require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit ==
+                            multiplier - 2, "return fixture never started its lower probe");
+                    for (size_t frame = 0; frame < 150; ++frame) {
+                        if (fifo)
+                            harness.frameAtFps(lowerFps);
+                        else
+                            pacedLoadFrame(harness, lowerFps, multiplier - 2, false);
+                        if (!harness.scheduler.snapshot().pacedLoadValidationPending)
+                            break;
+                    }
+                    require(harness.diagnostics.count("adaptive-paced-load-accepted") == 1,
+                        "return fixture failed to accept its useful higher workload");
+                    // The estimator may delay FIFO re-entry, and the automatic
+                    // cap may still be qualifying its retained higher rung.
+                    const auto resumeAt = harness.now + delay;
+                    while (harness.now < resumeAt) {
+                        if (fifo)
+                            harness.frameAtFps(unpacedFps);
+                        else
+                            pacedLoadFrame(harness, unpacedFps, multiplier - 2, false);
+                    }
+                    for (size_t frame = 0; frame < 150; ++frame)
+                        pacedLoadFrame(harness, pacedFps, multiplier - 1, fifo);
+                    require(harness.diagnostics.count("adaptive-paced-load-baseline-probe") == 1 &&
+                            !harness.scheduler.snapshot().pacedLoadValidationPending,
+                        "delayed planned return restarted its accepted comparison: FIFO=" +
+                            std::to_string(fifo) + ", multiplier=" +
+                            std::to_string(multiplier) + ", delay=" +
+                            std::to_string(delay.count()));
+                }
+            }
+        }
+    }
+
+    void testPlannedPacingReturnInvalidatesOnRealChanges() {
+        for (size_t interruption = 0; interruption < 5; ++interruption) {
+            Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr,
+                false, 2s, 120, false, true, true);
+            promoteForPacedLoadTest(harness, 3, 100.0);
+            harness.runAtFps(48.0, 16s);
+            for (size_t frame = 0; frame < 100; ++frame) {
+                pacedLoadFrame(harness, 40.0, 2, true);
+                if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                    break;
+            }
+            for (size_t frame = 0; frame < 150; ++frame) {
+                harness.frameAtFps(54.0);
+                if (!harness.scheduler.snapshot().pacedLoadValidationPending)
+                    break;
+            }
+            require(harness.diagnostics.count("adaptive-paced-load-accepted") == 1,
+                "invalidation fixture did not accept the higher workload");
+            switch (interruption) {
+            case 0:
+                harness.scheduler.resetTiming(harness.now);
+                break;
+            case 1:
+                harness.scheduler.restoreGenerationLimit(harness.now, 1, "changed-workload");
+                harness.scheduler.restoreGenerationLimit(harness.now, 2, "restored-workload");
+                break;
+            case 2:
+                // Once the planned return finishes, a later unrelated release
+                // must not inherit that comparison's exemption.
+                pacedLoadFrame(harness, 40.0, 2, true);
+                break;
+            case 3:
+                pacedLoadFrame(harness, 48.0, 1, false);
+                break;
+            case 4:
+                harness.frameAtFps(48.0, true);
+                break;
+            }
+            harness.runAtFps(48.0, 1s);
+            for (size_t frame = 0; frame < 100; ++frame) {
+                pacedLoadFrame(harness, 40.0, 2, true);
+                if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                    break;
+            }
+            require(harness.diagnostics.count("adaptive-paced-load-baseline-probe") == 2,
+                "real pacing change retained an obsolete comparison: " +
+                    std::to_string(interruption));
+        }
+    }
+
     void testFreshPacingProbeDiscardsInterruptedLowerEvidence() {
         for (const bool fifo : {false, true}) {
             for (size_t interruption = 0; interruption < 4; ++interruption) {
@@ -6597,6 +6750,9 @@ int main() {
         {"integer pacing prefers delivered target at 3x through 5x", testIntegerPacingPrefersDeliveredTargetAcrossMultipliers},
         {"paced load needs fresh continuous evidence", testPacedLoadRequiresFreshContinuousEvidence},
         {"delayed integer pacing refreshes its adjacent baseline", testDelayedIntegerPacingRefreshesAdjacentBaseline},
+        {"fixed-refresh handoff uses sustained scheduler exit", testFixedRefreshHandoffUsesSustainedSchedulerExit},
+        {"planned pacing return preserves accepted lifetime", testPlannedPacingReturnKeepsValidatedLifetime},
+        {"planned pacing return invalidates on real changes", testPlannedPacingReturnInvalidatesOnRealChanges},
         {"fresh pacing probes discard interrupted lower evidence", testFreshPacingProbeDiscardsInterruptedLowerEvidence},
         {"handoff at baseline expiry starts fresh comparison", testHandoffAtBaselineExpiryStartsFreshComparison},
         {"delayed cap return starts another fresh comparison", testDelayedCapReturnStartsAnotherFreshComparison},

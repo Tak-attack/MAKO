@@ -1581,7 +1581,6 @@ namespace mako::layer {
                     this->retryAt[*this->activeLimit - 1] = now + retryDelay();
                 }
                 this->activeLimit.reset();
-                this->activatedAt.reset();
             }
             if (!this->activeLimit && eligibleGenerationLimit &&
                     *eligibleGenerationLimit >= 1 &&
@@ -1589,7 +1588,6 @@ namespace mako::layer {
                 auto& retry = this->retryAt[*eligibleGenerationLimit - 1];
                 if (!retry || now >= *retry) {
                     this->activeLimit = eligibleGenerationLimit;
-                    this->activatedAt = now;
                     retry.reset();
                 }
             }
@@ -1605,12 +1603,10 @@ namespace mako::layer {
             // Losing focus is not a failed FIFO pacing experiment. Preserve
             // any genuine earlier failure's backoff without creating one.
             this->activeLimit.reset();
-            this->activatedAt.reset();
         }
 
         void reset() {
             this->activeLimit.reset();
-            this->activatedAt.reset();
             this->retryAt.fill(std::nullopt);
         }
 
@@ -1622,22 +1618,12 @@ namespace mako::layer {
             return this->activeLimit;
         }
 
-        /// Releasing the source cap briefly drains queued work and perturbs
-        /// the instantaneous estimator. Only cadence retention may use this
-        /// bounded interval; eligibility's transport/probe guards still apply.
-        [[nodiscard]] bool settling(const TimePoint now) const {
-            return this->activeLimit && this->activatedAt &&
-                now >= *this->activatedAt &&
-                now - *this->activatedAt < std::chrono::milliseconds{250};
-        }
-
         [[nodiscard]] static constexpr std::chrono::seconds retryDelay() {
             return std::chrono::seconds{60};
         }
 
     private:
         std::optional<size_t> activeLimit;
-        std::optional<TimePoint> activatedAt;
         std::array<std::optional<TimePoint>, 4> retryAt{};
     };
 

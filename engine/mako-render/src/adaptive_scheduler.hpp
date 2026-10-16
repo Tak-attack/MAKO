@@ -681,7 +681,13 @@ namespace mako::layer {
                 } pacedLoad;
                 std::optional<size_t> observedPacingLimit;
                 bool observedPacingFifo{false};
-                std::optional<TimePoint> pacingResumeUntil;
+                // A planned probe return belongs to the observed pacing
+                // lifetime until its workload/owner changes, not a timeout.
+                bool pacingResumePending{false};
+                void resetPacingObservation() {
+                    this->observedPacingLimit.reset();
+                    this->pacingResumePending = false;
+                }
                 std::optional<size_t> pacedLoadRollbackLimit;
                 // Higher promotions and stale-baseline replacement require
                 // a continuous, delivered sample of the current lower load.
