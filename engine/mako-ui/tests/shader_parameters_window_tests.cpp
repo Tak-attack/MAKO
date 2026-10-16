@@ -19,6 +19,7 @@ class ShaderBackendFixture : public QObject {
 public:
     bool fail = false;
     bool noParameters = false;
+    bool palette = false;
     int saves = 0;
     QVariantMap last;
     bool loading() const { return false; }
@@ -35,6 +36,12 @@ public:
         for (int component = 0; component < 4; ++component) {
             const QString base = QStringLiteral("makoShader_41_436f6c6f7572_");
             parameters.append(QVariantMap{{"key", base + QString::number(component)}, {"label", QStringLiteral("Border colour [%1]").arg(component + 1)}, {"description", "Authored colour help"}, {"category", "Colour"}, {"type", "float"}, {"value", component == 2 ? 1.5 : .123456789}, {"default", 0.0}, {"resettable", component != 3}, {"min", QVariant()}, {"max", QVariant()}, {"step", QVariant()}, {"items", QVariantList()}, {"presentation", QVariantMap{{"widget", "color"}, {"group", base + "0"}, {"label", "Border colour"}, {"count", 4}, {"component", component}}}});
+        }
+        if (palette) for (int color = 0; color < 16; ++color) {
+            const auto name = QStringLiteral("Color %1").arg(color);
+            const auto base = QStringLiteral("makoShader_41_") + QString::fromLatin1(name.toUtf8().toHex()) + "_";
+            for (int component = 0; component < 3; ++component)
+                parameters.append(QVariantMap{{"key", base + QString::number(component)}, {"label", name + QStringLiteral(" [%1]").arg(component + 1)}, {"description", ""}, {"category", "Custom palette"}, {"type", "float"}, {"value", component == 2 ? 1.5 : .123456789}, {"default", 0.0}, {"resettable", color != 15 || component != 2}, {"min", QVariant()}, {"max", QVariant()}, {"step", QVariant()}, {"items", QVariantList()}, {"presentation", QVariantMap{{"widget", "color"}, {"group", base + "0"}, {"label", name}, {"count", 3}, {"component", component}}}});
         }
         effect["parameters"] = parameters;
         result[0] = effect;
@@ -183,8 +190,59 @@ ApplicationWindow {
             scrollBar->setProperty("position", 0);
         }
         editor->close();
+        backend.palette = true;
+        QMetaObject::invokeMethod(editor, "openEditor");
+        QCoreApplication::processEvents();
+        const auto paletteKey = [](int color, int component) {
+            return QStringLiteral("makoShader_41_") + QString::fromLatin1(QStringLiteral("Color %1").arg(color).toUtf8().toHex()) + "_" + QString::number(component);
+        };
+        const auto paletteInput = [&](int color, int component) {
+            return findNamed(findNamed, editor->contentItem(), "shader-parameter-" + paletteKey(color, component));
+        };
+        const auto paletteButton = [&](int color) {
+            return findNamed(findNamed, editor->contentItem(), "shader-color-swatch-" + paletteKey(color, 0));
+        };
+        for (int color = 0; color < 16; ++color)
+            require(paletteButton(color), "palette is missing a colour swatch");
+        require(paletteInput(0, 0) && !paletteInput(15, 0), "palette did not limit controls to the selected colour");
+        auto* lastSwatch = paletteButton(15);
+        const auto savesBeforePalette = backend.saves;
+        lastSwatch->forceActiveFocus();
+        require(paletteInput(0, 0) && !paletteInput(15, 0) && backend.saves == savesBeforePalette, "focusing a swatch selected or saved a colour");
+        auto* paletteRed = paletteInput(0, 0);
+        paletteRed->forceActiveFocus();
+        paletteRed->setProperty("text", QStringLiteral("0.345678912"));
+        require(QMetaObject::invokeMethod(lastSwatch, "clicked"), "cannot select a palette colour");
+        QCoreApplication::processEvents();
+        require(!paletteInput(0, 0) && paletteInput(15, 0), "palette selection did not replace channel controls");
+        require(lastSwatch->property("checked").toBool() && !paletteButton(0)->property("checked").toBool(), "palette selection marker is stale");
+        require(editor->property("pending").toMap().value(paletteKey(0, 0)).toDouble() == .345678912, "switching palette colours lost the focused exact draft");
+        require(paletteInput(15, 2)->property("text").toString() == "1.5", "palette clamped an out-of-range colour value");
+        QMetaObject::invokeMethod(paletteButton(0), "clicked");
+        QCoreApplication::processEvents();
+        require(paletteInput(0, 0)->property("text").toString() == "0.345678912", "returning to a palette colour lost its exact value");
+        QMetaObject::invokeMethod(editor, "flush");
+        require(backend.saves == savesBeforePalette + 1 && backend.last.size() == 1, "selecting palette colours changed unrelated values");
+        QMetaObject::invokeMethod(editor, "resetEffect");
+        const auto paletteReset = editor->property("pending").toMap();
+        require(paletteReset.contains(paletteKey(14, 2)) && paletteReset.value(paletteKey(14, 2)).isNull() && !paletteReset.contains(paletteKey(15, 2)), "palette reset missed hidden colours or changed a protected channel");
+        for (const auto size : {QSize(280, 360), QSize(360, 650)}) {
+            editor->resize(size);
+            QCoreApplication::processEvents();
+            QCoreApplication::processEvents();
+            for (int color = 0; color < 16; ++color) {
+                auto* button = paletteButton(color);
+                const auto origin = button->mapToItem(controls, QPointF());
+                require(button->width() > 24 && origin.x() >= 0 && origin.x() + button->width() <= controls->width() + .5, "palette swatches overflow the narrow controls frame");
+            }
+        }
+        editor->close();
         if (argc > 1) {
             QMetaObject::invokeMethod(editor,"openEditor");
+            QTimer::singleShot(150, &application, [&] {
+                const auto paletteTop = paletteButton(0)->mapToItem(controls, QPointF()).y();
+                scrollBar->setProperty("position", paletteTop / controls->height());
+            });
             QTimer::singleShot(250, &application, [&] { editor->grabWindow().save(QString::fromLocal8Bit(argv[1])); application.quit(); });
             return application.exec();
         }

@@ -72,6 +72,24 @@ export function shaderControlGroups(
   return groups;
 }
 
+// Keep palette boundaries aligned with Qt's independent presentation binding.
+export function shaderControlSections(
+  parameters: ShaderParameter[],
+): ShaderControlGroup[][] {
+  const sections: ShaderControlGroup[][] = [];
+  for (const group of shaderControlGroups(parameters)) {
+    const previous = sections[sections.length - 1];
+    if (
+      group.color &&
+      previous?.[0].color &&
+      previous[0].category === group.category
+    )
+      previous.push(group);
+    else sections.push([group]);
+  }
+  return sections;
+}
+
 export function shaderSliderRange(p: ShaderParameter, color = false) {
   if (p.presentation?.widget === "input") return null;
   const min = p.min ?? (color ? 0 : null);

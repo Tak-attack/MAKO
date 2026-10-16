@@ -26,7 +26,7 @@ Window {
     }
     property int effectIndex: 0
     property var effect: effects.length > effectIndex ? effects[effectIndex] : null
-    readonly property var controlGroups: Controls.groups(effect ? effect.parameters : [])
+    readonly property var controlSections: Controls.sections(effect ? effect.parameters : [])
     title: strings.shaderEditorTitle
     flags: Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
     transientParent: null
@@ -164,15 +164,73 @@ Window {
                     text: strings.shaderEditorEmpty
                 }
                 Repeater {
-                    model: editor.controlGroups
+                    model: editor.controlSections
                     delegate: ColumnLayout {
                         id: group
                         spacing: 16
                         required property var modelData
                         required property int index
-                        property var g: modelData
+                        property int selectedColor: 0
+                        property var g: modelData[selectedColor] || modelData[0]
+                        function selectColor(index) {
+                            editor.commitFocusedValue()
+                            selectedColor = index
+                        }
                         Layout.fillWidth: true
-                        Label { textFormat: Text.PlainText; visible: group.g.category.length > 0 && (group.index === 0 || editor.controlGroups[group.index - 1].category !== group.g.category); text: group.g.category; font.bold: true; color: "#bac8d6"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { textFormat: Text.PlainText; visible: group.g.category.length > 0 && (group.index === 0 || editor.controlSections[group.index - 1][0].category !== group.g.category); text: group.g.category; font.bold: true; color: "#bac8d6"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        GridLayout {
+                            visible: group.modelData.length > 1
+                            columns: 4
+                            columnSpacing: 8
+                            rowSpacing: 8
+                            Layout.fillWidth: true
+                            Repeater {
+                                model: group.modelData.length > 1 ? group.modelData : []
+                                delegate: Button {
+                                    id: swatch
+                                    required property var modelData
+                                    required property int index
+                                    objectName: "shader-color-swatch-" + modelData.key
+                                    Accessible.name: modelData.label
+                                    checkable: true
+                                    autoExclusive: true
+                                    checked: group.selectedColor === index
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    implicitWidth: 40
+                                    padding: 4
+                                    onClicked: group.selectColor(index)
+                                    background: Rectangle {
+                                        color: "#18212b"
+                                        radius: 4
+                                        border.width: 2
+                                        border.color: swatch.activeFocus ? "#edf8fb" : swatch.checked ? "#83bff0" : "#444c56"
+                                    }
+                                    contentItem: ColumnLayout {
+                                        spacing: 4
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 26
+                                            color: "#596674"
+                                            function channel(index) { return Math.max(0, Math.min(1, editor.valueFor(swatch.modelData.parameters[index]))) }
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                color: Qt.rgba(parent.channel(0), parent.channel(1), parent.channel(2), swatch.modelData.parameters.length === 4 ? parent.channel(3) : 1)
+                                            }
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            textFormat: Text.PlainText
+                                            text: swatch.modelData.label
+                                            color: "#edf8fb"
+                                            font.pixelSize: 11
+                                            wrapMode: Text.Wrap
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         Label { textFormat: Text.PlainText; visible: group.g.parameters.length > 1; text: group.g.label; font.bold: true; color: "white"; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                         Label { textFormat: Text.PlainText; visible: group.g.description.length > 0; text: group.g.description; color: "#bac8d6"; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                         Rectangle {

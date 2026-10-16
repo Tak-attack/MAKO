@@ -124,7 +124,15 @@ function ShaderActionButton({
         disabled
         aria-disabled="true"
         className={`DialogButton _DialogLayout Secondary Disabled ${className || ""}`}
-        style={{ ...style, pointerEvents: "none" }}
+        style={{
+          ...style,
+          background: "#30363d",
+          color: "#8b949e",
+          border: "1px solid #444c56",
+          boxShadow: "none",
+          outline: "none",
+          pointerEvents: "none",
+        }}
       >
         {children}
       </button>
@@ -381,9 +389,9 @@ export function ShadersConfigurationGroup({
             </SteamEffectsField>
           </PanelSectionRow>
           <PanelSectionRow>
-            <MakoFocusable
-              flow-children="column"
-              noFocusRing
+            {/* Keep the action rows in the panel's navigation order. A parent
+                focus group would remember Add while Customize is disabled. */}
+            <div
               style={{ width: "100%", minWidth: 0, paddingBottom: "6px" }}
             >
               <div
@@ -506,7 +514,7 @@ export function ShadersConfigurationGroup({
                   {shaderError}
                 </MakoInlineTip>
               )}
-            </MakoFocusable>
+            </div>
           </PanelSectionRow>
 
           <PanelSectionRow>

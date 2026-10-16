@@ -270,8 +270,10 @@ export function ShaderParametersModal({
               )}
             {effect && (
               <ShaderParameterControls
+                key={effect.id}
                 parameters={effect.parameters}
                 onChange={change}
+                onBeforeSelectColor={commitFocusedValue}
               />
             )}
             {!!effect?.parameters.some((p) => p.resettable !== false) && (

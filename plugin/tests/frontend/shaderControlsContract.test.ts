@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import type { ShaderParameter } from "../../src/api/makoApi";
 import {
   shaderControlGroups,
+  shaderControlSections,
   shaderColorPreview,
   shaderSliderRange,
 } from "../../src/components/settings/shaders/shaderControls";
@@ -16,7 +17,7 @@ const qt = vm.runInNewContext(
       "../../../engine/mako-ui/rsc/dialogs/ShaderControlHelpers.js",
     ),
     "utf8",
-  ).replace(".pragma library", "") + "\n({groups,sliderRange})",
+  ).replace(".pragma library", "") + "\n({groups,sections,sliderRange})",
 );
 const both = (parameters: ShaderParameter[]) => {
   const actual = shaderControlGroups(parameters);
@@ -53,6 +54,26 @@ test("explicit colour vectors share a control without changing exact values", ()
   expect(groups[0].color).toBe(true);
   expect(shaderColorPreview(parameters)).toBe("rgba(31, 31, 31, 0.42)");
   expect(parameters).toEqual(before);
+});
+test("Decky and Qt compact only consecutive declared colours in the same category", () => {
+  const colour = (name: string, category = "Colour") => vector().map((p, component) => {
+    const group = `makoShader_41_${Buffer.from(name).toString("hex")}_0`;
+    return { ...p, category, key: group.slice(0, -1) + component,
+      label: `${name} [${component + 1}]`,
+      presentation: { ...p.presentation!, group, label: name } };
+  });
+  const parameters = [
+    ...colour("First"), ...colour("Second"),
+    ...vector(2, "drag"),
+    ...colour("Third"), ...colour("Fourth", "Other"),
+    ...colour("Legacy").map(({ presentation: _, ...p }) => p),
+  ];
+  const sections = shaderControlSections(parameters);
+  expect(JSON.parse(JSON.stringify(qt.sections(parameters)))).toEqual(sections);
+  expect(sections.map((section) => section.map((group) => group.label))).toEqual([
+    ["First", "Second"], ["Tint"], ["Third"], ["Fourth"],
+    ["Legacy [1]"], ["Legacy [2]"], ["Legacy [3]"],
+  ]);
 });
 test("names and vector length cannot turn generic controls into colours", () => {
   for (const parameters of [

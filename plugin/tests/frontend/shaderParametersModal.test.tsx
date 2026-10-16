@@ -25,27 +25,48 @@ vi.mock("../../src/components/MakoUi", () => ({
   MakoFocusable: ({
     children,
     onCancel,
+    onActivate,
     onGamepadFocus,
+    onGamepadBlur,
+    noFocusRing: _noFocusRing,
     fnScrollIntoViewHandler,
     scrollIntoViewWhenChildFocused,
     "flow-children": _flow,
     ...props
   }: React.HTMLAttributes<HTMLDivElement> & {
     onCancel?: (event: CustomEvent) => void;
+    onActivate?: () => void;
     onGamepadFocus?: (event: { target: EventTarget }) => void;
+    onGamepadBlur?: () => void;
+    noFocusRing?: boolean;
     fnScrollIntoViewHandler?: (node: {
       Element?: HTMLElement | null;
     }) => boolean;
     scrollIntoViewWhenChildFocused?: boolean | "force";
     "flow-children"?: string;
   }) => {
+    const ref = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+      const element = ref.current!;
+      const activate = () => onActivate?.();
+      const focus = () => onGamepadFocus?.({ target: element });
+      const blur = () => onGamepadBlur?.();
+      element.addEventListener("vgp_onactivate", activate);
+      element.addEventListener("vgp_onfocus", focus);
+      element.addEventListener("vgp_onblur", blur);
+      return () => {
+        element.removeEventListener("vgp_onactivate", activate);
+        element.removeEventListener("vgp_onfocus", focus);
+        element.removeEventListener("vgp_onblur", blur);
+      };
+    }, [onActivate, onGamepadFocus, onGamepadBlur]);
     if (props.className === "mako-shader-editor-content") {
       navigation.cancel = onCancel;
       navigation.focus = onGamepadFocus;
       navigation.scroll = fnScrollIntoViewHandler;
       navigation.scrollOwner = scrollIntoViewWhenChildFocused;
     }
-    return <div {...props}>{children}</div>;
+    return <div ref={ref} {...props}>{children}</div>;
   },
 }));
 vi.mock("@decky/ui", () => ({
@@ -706,6 +727,119 @@ function colorEffect() {
     })),
   };
 }
+
+function paletteEffect() {
+  return {
+    ...effect,
+    name: "Nostalgia",
+    parameters: Array.from({ length: 16 }, (_, index) => {
+      const group = `makoShader_41_${Buffer.from(`Palette${index}`).toString("hex")}_0`;
+      return colorEffect().parameters.slice(0, 3).map((p, component) => ({
+        ...p,
+        key: group.slice(0, -1) + component,
+        label: `Color ${index} [${component + 1}]`,
+        category: "Custom palette",
+        description: "",
+        min: null,
+        max: null,
+        step: null,
+        presentation: {
+          ...p.presentation,
+          group,
+          label: `Color ${index}`,
+          count: 3,
+        },
+      }));
+    }).flat(),
+  };
+}
+
+test("a sixteen-colour palette shows swatches and edits one colour without losing focused drafts", async () => {
+  const palette = paletteEffect();
+  api.get.mockResolvedValue({ success: true, effects: [palette] });
+  api.set.mockResolvedValue({ success: true });
+  await open();
+  expect(screen.getAllByRole("button", { name: /^Color \d+$/ })).toHaveLength(16);
+  expect(screen.getAllByRole("textbox")).toHaveLength(3);
+  expect(screen.getAllByRole("slider")).toHaveLength(3);
+  expect(screen.getAllByText("Custom palette")).toHaveLength(1);
+  const first = screen.getByRole("button", { name: "Color 0" });
+  const next = screen.getByRole("button", { name: "Color 5" });
+  expect(first.getAttribute("aria-pressed")).toBe("true");
+
+  // Controller focus can move without blurring the browser's active input.
+  const red = screen.getByRole("textbox", { name: "Red" });
+  red.focus();
+  fireEvent.change(red, { target: { value: "0.345678912" } });
+  fireEvent(next, new CustomEvent("vgp_onfocus"));
+  expect(next.style.outline).toBe("2px solid #edf8fb");
+  expect(next.getAttribute("aria-pressed")).toBe("false");
+  expect(api.set).not.toHaveBeenCalled();
+  fireEvent(next, new CustomEvent("vgp_onactivate"));
+  expect(next.getAttribute("aria-pressed")).toBe("true");
+  expect(first.getAttribute("aria-pressed")).toBe("false");
+  expect((screen.getByRole("textbox", { name: "Red" }) as HTMLInputElement).value)
+    .toBe("0.123456789");
+  await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+  expect(api.set).toHaveBeenCalledExactlyOnceWith("Game A", {
+    [palette.parameters[0].key]: 0.345678912,
+  });
+
+  fireEvent.keyDown(first, { key: "Enter" });
+  expect((screen.getByRole("textbox", { name: "Red" }) as HTMLInputElement).value)
+    .toBe("0.345678912");
+  expect((screen.getByRole("textbox", { name: "Blue" }) as HTMLInputElement).value)
+    .toBe("1.5");
+  expect(first.querySelector('[aria-hidden="true"] > div')?.getAttribute("style"))
+    .toContain("rgb(88, 51, 255)");
+  fireEvent.keyDown(next, { key: " " });
+  expect(next.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(first);
+  expect(first.getAttribute("aria-pressed")).toBe("true");
+  await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+  expect(api.set).toHaveBeenCalledTimes(1);
+});
+
+test("palette resets include hidden colours and preserve protected channels", async () => {
+  const palette = paletteEffect();
+  const protectedKey = palette.parameters[4].key;
+  const parameters = palette.parameters.map((p) => ({
+    ...p,
+    resettable: p.key !== protectedKey,
+  }));
+  api.get.mockResolvedValue({ success: true, effects: [{ ...palette, parameters }] });
+  api.set.mockResolvedValue({ success: true });
+  await open();
+  fireEvent.click(screen.getByRole("button", { name: "Color 15" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reset shader to defaults" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+  expect(api.set).toHaveBeenCalledExactlyOnceWith("Game A", Object.fromEntries(
+    parameters.filter((p) => p.resettable).map((p) => [p.key, null]),
+  ));
+  expect(screen.getByRole("button", { name: "Color 15" }).getAttribute("aria-pressed"))
+    .toBe("true");
+});
+
+test("palette grouping respects category boundaries, intervening controls and missing metadata", async () => {
+  const palette = paletteEffect();
+  api.get.mockResolvedValue({ success: true, effects: [{
+    ...palette,
+    parameters: [
+      ...palette.parameters.slice(0, 6),
+      effect.parameters[1],
+      ...palette.parameters.slice(6, 9),
+      ...palette.parameters.slice(9, 12).map((p) => ({ ...p, category: "Other" })),
+      ...palette.parameters.slice(12, 15).map(({ presentation: _, ...p }) => p),
+    ],
+  }] });
+  await open();
+  expect(screen.getAllByRole("button", { name: /^Color \d+$/ })).toHaveLength(2);
+  expect(screen.getAllByRole("img", { name: "Colour preview" })).toHaveLength(3);
+  expect(screen.getByRole("textbox", { name: "Amount" })).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: "Color 4 [1]" })).toBeTruthy();
+  expect(api.set).not.toHaveBeenCalled();
+});
+
 test("declared colours use named channels and preview without quantizing or clamping saved values", async () => {
   const colour = colorEffect();
   api.get.mockResolvedValue({ success: true, effects: [colour] });

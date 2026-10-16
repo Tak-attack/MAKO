@@ -172,8 +172,10 @@ vi.mock("@decky/ui", () => ({
   ),
   showModal: vi.fn(),
 }));
-vi.mock("../../src/components/MakoUi", () => ({
-  makoDialogButtonStyle: () => ({}),
+vi.mock("../../src/components/MakoUi", async (importOriginal) => ({
+  makoDialogButtonStyle: (
+    await importOriginal<typeof import("../../src/components/MakoUi")>()
+  ).makoDialogButtonStyle,
   MakoExperimentalSettingLabel: ({
     label,
     badgeLabel,
@@ -246,7 +248,12 @@ vi.mock("../../src/components/MakoUi", () => ({
     }, [onButtonDown, onCancel, onGamepadFocus, onGamepadBlur]);
     return (
       // Steam uses onActivate as the mouse handler when onClick is absent.
-      <div ref={ref} {...props} onClick={props.onClick ?? onActivate}>
+      <div
+        ref={ref}
+        {...props}
+        data-steam-flow={_flowChildren ?? "none"}
+        onClick={props.onClick ?? onActivate}
+      >
         {children}
       </div>
     );
@@ -735,7 +742,15 @@ describe("Configuration controls", () => {
       // native focus restoration must not select them either.
       expect(button.dataset.steamButton).toBe(available ? "true" : undefined);
       expect(button.style.pointerEvents).toBe(available ? "" : "none");
+      if (available && name === "Delete selected custom shaders") {
+        expect(button.style.background).toContain("linear-gradient");
+        expect(button.style.color).toBe("rgb(255, 240, 245)");
+      }
       if (!available) {
+        expect(button.style.background).toBe("rgb(48, 54, 61)");
+        expect(button.style.color).toBe("rgb(139, 148, 158)");
+        expect(button.style.boxShadow).toBe("none");
+        expect(button.style.outline).toBe("none");
         expect(button.hasAttribute("tabindex")).toBe(false);
         button.focus();
         expect(document.activeElement).not.toBe(button);
@@ -784,6 +799,134 @@ describe("Configuration controls", () => {
     );
     expectAvailable("Customize shaders", false);
     expectAvailable("Delete selected custom shaders", true);
+
+    rerender(
+      <ShadersConfigurationGroup
+        {...props}
+        config={{ ...props.config, vkbasalt_shader: "vibrance:clarity" }}
+      />,
+    );
+    expectAvailable("Customize shaders", true);
+    expectAvailable("Delete selected custom shaders", false);
+  });
+
+  test("visits newly enabled Customize after leaving Effects, even when Add was previously focused", async () => {
+    function ShaderSettings() {
+      const [config, setConfig] = React.useState({
+        ...getDefaults(),
+        external_vulkan_layer: EXTERNAL_VULKAN_LAYER_VKBASALT,
+        vkbasalt_shader: "none",
+      });
+      return (
+        <ShadersConfigurationGroup
+          config={config}
+          isDefaultProfile={false}
+          profileName="game"
+          vkBasaltConfigPath="/tmp/game.conf"
+          onConfigChange={async (key, value) => {
+            setConfig((current) => ({ ...current, [key]: value }));
+          }}
+          onCustomizeShaders={async () => undefined}
+          onAddShader={async () => undefined}
+          onRefreshShaders={async () => undefined}
+          onDeleteShaders={async () => undefined}
+        />
+      );
+    }
+    const { container } = render(<ShaderSettings />);
+    // Model Steam's column traversal and remembered child on group entry.
+    // Focus stays virtual: moving the DOM activeElement would hide this bug.
+    const nodeSelector = "[data-steam-flow], [data-steam-button]";
+    const parent = (node: HTMLElement): HTMLElement =>
+      node.parentElement!.closest<HTMLElement>("[data-steam-flow]") ?? container;
+    const children = (group: HTMLElement) =>
+      Array.from(group.querySelectorAll<HTMLElement>(nodeSelector)).filter(
+        (node) => parent(node) === group,
+      );
+    const remembered = new WeakMap<HTMLElement, HTMLElement>();
+    let focused: HTMLElement;
+    const focus = (node: HTMLElement) => {
+      focused = node;
+      while (node !== container) {
+        const group = parent(node);
+        remembered.set(group, node);
+        node = group;
+      }
+    };
+    const enter = (node: HTMLElement): HTMLElement | undefined => {
+      if (node.tabIndex >= 0) return node;
+      const previous = remembered.get(node);
+      if (previous?.isConnected) return enter(previous);
+      for (const child of children(node)) {
+        const target = enter(child);
+        if (target) return target;
+      }
+      return undefined;
+    };
+    const move = (step: -1 | 1) => {
+      let node = focused;
+      while (node !== container) {
+        const group = parent(node);
+        if (group.dataset.steamFlow !== "row") {
+          const siblings = children(group);
+          for (
+            let index = siblings.indexOf(node) + step;
+            index >= 0 && index < siblings.length;
+            index += step
+          ) {
+            const target = enter(siblings[index]);
+            if (target) {
+              focus(target);
+              return target;
+            }
+          }
+        }
+        node = group;
+      }
+      return undefined;
+    };
+
+    const summary = screen.getByRole("button", {
+      name: "Choose effects (0 selected)",
+    });
+    const add = screen.getByRole("button", { name: "Add custom shader" });
+    focus(summary);
+    expect(move(1)).toBe(add);
+    focus(summary);
+    fireEvent.click(summary);
+    fireEvent.click(screen.getByRole("checkbox", { name: "HDR Look (SDR)" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Clarity" }));
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Customize shaders",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false),
+    );
+    expect(focused!).toBe(summary);
+    fireEvent.click(screen.getByText("Done"));
+    const customize = screen.getByRole("button", { name: "Customize shaders" });
+    expect(move(1)).toBe(customize);
+    expect(move(1)).toBe(add);
+    expect(move(-1)).toBe(customize);
+    expect(document.activeElement).toBe(document.body);
+
+    focus(summary);
+    fireEvent.click(summary);
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Customize shaders",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(true),
+    );
+    fireEvent.click(screen.getByText("Done"));
+    expect(move(1)).toBe(add);
   });
 
   test("deletes only selected custom shaders, locks selection while busy, and refreshes", async () => {

@@ -90,6 +90,8 @@ Turn on **Enable shaders (Restart)** to use bundled vkBasalt; no separate instal
 
 Select **Customize shaders** to adjust selected bundled and compatible custom effects with sliders, exact-value fields, toggles, choices, and colour controls. **Reset shader to defaults** resets only the selected effect, preserving values its author marked as non-resettable. The popup edits parameters; choose enabled effects in **Effects**.
 
+Palettes such as Nostalgia's **Custom palette** appear as colour swatches. Select a swatch to edit its RGB channels with sliders or exact values. Only the selected colour's controls are expanded; reset still applies to the whole effect. Colour controls require metadata from the matching Renderer helper; older helpers show numeric fields instead.
+
 Adjustments save with the selected profile and are shared across AC and battery modes. Copies retain them; deleting the profile removes them. Unchecking a custom shader retains its values, while deleting its registration removes them. Changes apply live when Shaders was enabled at game launch. Rebuilding an effect may briefly hitch, and higher quality or iteration settings can increase GPU cost.
 
 The popup sits on the left and closes the Quick Access side menus. **Hide controls** collapses it for a clearer view of the game. Closing waits for pending saves; a failed save offers retry or discarding only the unsaved edits.

@@ -22,6 +22,17 @@ function groups(parameters) {
     return result;
 }
 
+function sections(parameters) {
+    var result = [];
+    groups(parameters).forEach(function(group) {
+        var previous = result[result.length - 1];
+        if (group.color && previous && previous[0].color && previous[0].category === group.category)
+            previous.push(group);
+        else result.push([group]);
+    });
+    return result;
+}
+
 function sliderRange(p, color) {
     if (p.presentation && p.presentation.widget === "input") return null;
     var min = p.min == null ? (color ? 0 : null) : p.min;
