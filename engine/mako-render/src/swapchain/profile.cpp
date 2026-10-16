@@ -55,6 +55,7 @@ bool Swapchain::resetGenerationScheduler(
                 this->profile.adaptive_auto_base_fps_cap,
             .nearTargetNativePreference =
                 policy->nearTargetNativePreference,
+            .qualifyTargetNativeCadence = policy->qualifyTargetNativeCadence,
             .validateIntegerPacing = this->profile.adaptive &&
                 policy->stableCadence && adaptiveTargetMatchesRefresh(
                     policy->targetFps, this->gamescopeRefreshHz) &&

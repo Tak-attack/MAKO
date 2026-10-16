@@ -9,6 +9,8 @@ import t from "../../../i18n/i18n";
 import { MakoFocusable } from "../../MakoUi";
 import { ShaderParameterControls } from "./ShaderParameterControls";
 
+const CONTROL_INSET = 12;
+
 export function ShaderParametersModal({
   profileName: requestedProfile,
   closeModal,
@@ -148,7 +150,7 @@ export function ShaderParametersModal({
     if (!scale || !scroller.clientHeight) return;
     const top = (focused.top - bounds.top) / scale - scroller.clientTop;
     const bottom = (focused.bottom - bounds.top) / scale - scroller.clientTop;
-    const inset = 4;
+    const inset = scroller === editorFields.current ? CONTROL_INSET : 4;
     let next = scroller.scrollTop;
     if (top < inset || bottom - top > scroller.clientHeight - inset * 2)
       next += top - inset;
@@ -180,7 +182,7 @@ export function ShaderParametersModal({
       .FullModalOverlay:has(.mako-shader-editor) [class*="ModalOverlayBackground"] { background: transparent !important; backdrop-filter: none !important; }
       /* Keep Steam's top/bottom safe area; viewport-fixed children are clipped by it. */
       .mako-shader-editor-overlay { background: transparent !important; backdrop-filter: none !important; display: flex !important; flex-direction: row !important; justify-content: flex-start !important; align-items: stretch !important; padding: 12px !important; box-sizing: border-box !important; overflow: clip !important; }
-      .mako-shader-editor { position: relative !important; inset: auto !important; transform: none !important; margin: 0 !important; width: min(360px, 100%) !important; max-width: 100% !important; min-width: 0 !important; height: 100% !important; max-height: 100% !important; min-height: 0 !important; padding: 16px !important; background: rgba(15, 23, 32, .94) !important; box-sizing: border-box !important; display: flex !important; flex-direction: column !important; overflow: clip !important; }
+      .mako-shader-editor { position: relative !important; inset: auto !important; transform: none !important; margin: 0 !important; width: min(360px, 100%) !important; max-width: 100% !important; min-width: 0 !important; height: 100% !important; max-height: 100% !important; min-height: 0 !important; padding: 16px !important; background: rgba(15, 23, 32, .97) !important; box-sizing: border-box !important; display: flex !important; flex-direction: column !important; overflow: clip !important; }
       /* ModalRoot inserts this wrapper between the panel and our content. */
       /* clip keeps fixed chrome from becoming a focus-scroll container. */
       .mako-shader-editor > .DialogContent_InnerWidth, .mako-shader-editor-content { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; width: 100%; overflow: clip !important; }
@@ -191,7 +193,7 @@ export function ShaderParametersModal({
       .mako-shader-editor button.DialogButton { box-sizing: border-box !important; min-width: 0 !important; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
       .mako-shader-editor-actions { display: flex; gap: 8px; min-width: 0; padding: 4px; }
       .mako-shader-editor-actions > button.DialogButton { flex: 1 1 0; width: 0; margin: 0; padding: 10px 8px; }
-      .mako-shader-editor-controls { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; margin-top: 12px; padding: 4px; scroll-padding-block: 4px; overscroll-behavior: contain; }
+      .mako-shader-editor-controls { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; margin-top: 12px; padding: ${CONTROL_INSET}px; border: 1px solid rgba(153, 180, 207, .4); border-radius: 6px; background: rgba(9, 15, 22, .25); box-sizing: border-box; scrollbar-gutter: stable both-edges; scroll-padding-block: ${CONTROL_INSET}px; overscroll-behavior: contain; }
       .mako-shader-editor-feedback { flex-shrink: 0; max-height: 30vh; overflow-y: auto; overscroll-behavior: contain; }
     `}</style>
       <MakoFocusable

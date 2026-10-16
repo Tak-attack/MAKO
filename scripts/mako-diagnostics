@@ -8,7 +8,7 @@ default_steam_logs=(
   "${HOME}/.var/app/com.valvesoftware.Steam/.steam/steam/logs/console-linux.txt"
 )
 log_path="${MAKO_PRESENT_DIAGNOSTICS_LOG:-}"
-retained_session_count=5
+retained_session_count=10
 session=latest
 line_count=800
 presets=()
@@ -51,7 +51,7 @@ Examples:
   mako-diagnostics --lines 2000 all > mako-report.txt
   mako-diagnostics --session previous --lines 2000 all > previous-report.txt
   mako-diagnostics --session previous-two --lines 2000 all > earlier-report.txt
-  mako-diagnostics --session all --lines 2000 all > five-session-report.txt
+  mako-diagnostics --session all --lines 2000 all > ten-session-report.txt
 EOF
 }
 

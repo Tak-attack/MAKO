@@ -58,6 +58,8 @@ Turn on **Enable Frame-gen (Restart)** before launching. **Real FPS** counts gam
 
 The refresh-rate threshold reads display Hz, not the game's real FPS. A 50 Hz threshold allows generation on a 60 Hz display throughout both 30 FPS cutscenes and 60 FPS gameplay. Fractional Adaptive separately prefers native presentation near its output target.
 
+With **Fractional Adaptive** and **Automatic** Real Frame Priority, sustained native FPS can exceed **Target FPS** without generation when **Base FPS Cap** is off or at least the target. For example, a 60 FPS target on a 90 Hz display allows native 75 FPS gameplay with the cap off or set to 90; the manual cap still limits faster sources. Smooth Cadence can be on or off; below-target caps, explicit priorities and Steady keep their selected pacing.
+
 For games switching between 30 FPS cutscenes and 60 FPS gameplay on a 60 Hz display, try **Fractional Adaptive**, a **2x** ceiling, and a **60 FPS** target (or **Match Display Refresh Rate** with confirmed 60 Hz feedback). Enable **Dynamic Cadence Recovery** under **Tweaks** to check for a recovered native rate that generated presentation may hide. Enabling recovery clears base caps and selects **Automatic** Real Frame Priority; keep those settings to let gameplay reach its native rate. Start with the default two-second probe interval. Recovery checks can briefly lower output FPS or hitch; this setup follows the Adaptive target and does not provide a configurable 50 FPS cutoff.
 
 ## Spatial Scaling

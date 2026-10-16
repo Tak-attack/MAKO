@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useState,
   type ComponentProps,
   type ComponentType,
@@ -106,6 +107,36 @@ const compactCustomShaderButtonStyle: CSSProperties = {
   fontSize: "11px",
 };
 
+function ShaderActionButton({
+  disabled,
+  children,
+  className,
+  style,
+  ...props
+}: ComponentProps<typeof DialogButton>) {
+  // Steam's DialogButton forces the underlying button to stay enabled. Use
+  // a native disabled button so unavailable actions have no Steam focus node
+  // and cannot receive browser focus when the panel restores its selection.
+  if (disabled) {
+    return (
+      <button
+        type="button"
+        disabled
+        aria-disabled="true"
+        className={`DialogButton _DialogLayout Secondary Disabled ${className || ""}`}
+        style={{ ...style, pointerEvents: "none" }}
+      >
+        {children}
+      </button>
+    );
+  }
+  return (
+    <DialogButton {...props} className={className} style={style}>
+      {children}
+    </DialogButton>
+  );
+}
+
 export function ShadersConfigurationGroup({
   config,
   isDefaultProfile,
@@ -145,6 +176,11 @@ export function ShadersConfigurationGroup({
     config.vkbasalt_shader === VKBASALT_SHADER_NONE
       ? []
       : config.vkbasalt_shader.split(":");
+  const deleteDisabled =
+    busy || !selectedEffects.some((id) => id.startsWith("custom/"));
+  useEffect(() => {
+    if (deleteDisabled) setFocusedAction(null);
+  }, [deleteDisabled]);
   const sharpeningOptions = [
     {
       data: VKBASALT_SHARPENING_NONE,
@@ -357,8 +393,10 @@ export function ShadersConfigurationGroup({
                   padding: "12px 4px 8px",
                 }}
               >
-                <DialogButton
-                  disabled={busy || !selectedEffects.length}
+                <ShaderActionButton
+                  disabled={
+                    busy || !selectedEffects.length || !onCustomizeShaders
+                  }
                   style={{ ...customShaderButtonStyle, width: "100%" }}
                   onClick={() => {
                     if (onCustomizeShaders)
@@ -366,7 +404,7 @@ export function ShadersConfigurationGroup({
                   }}
                 >
                   {t("SHADER_EDITOR_TITLE", "Customize shaders")}
-                </DialogButton>
+                </ShaderActionButton>
               </div>
               {(onAddShader || onRefreshShaders) && (
                 <MakoFocusable
@@ -383,7 +421,7 @@ export function ShadersConfigurationGroup({
                   }}
                 >
                   {onAddShader && (
-                    <DialogButton
+                    <ShaderActionButton
                       style={compactCustomShaderButtonStyle}
                       disabled={busy}
                       onClick={() =>
@@ -404,16 +442,16 @@ export function ShadersConfigurationGroup({
                       }
                     >
                       {t("CONFIG_VKBASALT_CUSTOM_ADD", "Add custom shader")}
-                    </DialogButton>
+                    </ShaderActionButton>
                   )}
                   {onRefreshShaders && (
-                    <DialogButton
+                    <ShaderActionButton
                       style={compactCustomShaderButtonStyle}
                       disabled={busy}
                       onClick={() => runShaderAction(onRefreshShaders)}
                     >
                       {t("CONFIG_VKBASALT_CUSTOM_REFRESH", "Refresh")}
-                    </DialogButton>
+                    </ShaderActionButton>
                   )}
                 </MakoFocusable>
               )}
@@ -433,22 +471,19 @@ export function ShadersConfigurationGroup({
                     padding: "4px 4px 8px",
                   }}
                 >
-                  <DialogButton
+                  <ShaderActionButton
                     className="Mako_DialogButton Mako_DialogButton--danger"
                     style={{
                       ...customShaderButtonStyle,
                       width: "100%",
                       ...makoDialogButtonStyle(
-                        focusedAction === "delete",
+                        focusedAction === "delete" && !deleteDisabled,
                         "danger",
                       ),
                     }}
                     onGamepadFocus={() => setFocusedAction("delete")}
                     onGamepadBlur={() => setFocusedAction(null)}
-                    disabled={
-                      busy ||
-                      !selectedEffects.some((id) => id.startsWith("custom/"))
-                    }
+                    disabled={deleteDisabled}
                     onClick={() =>
                       runShaderAction(() =>
                         onDeleteShaders(
@@ -463,7 +498,7 @@ export function ShadersConfigurationGroup({
                       "CONFIG_VKBASALT_CUSTOM_DELETE",
                       "Delete selected custom shaders",
                     )}
-                  </DialogButton>
+                  </ShaderActionButton>
                 </div>
               )}
               {shaderError && (

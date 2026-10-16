@@ -71,7 +71,7 @@ Known launchers and helpers stay inactive while their child games can match. The
 | `frame_generation_enabled` | `true` | Live execution state. `false` is the UI's `0x` position. |
 | `multiplier` | `2` | Fixed total output multiplier, from 2–5. |
 | `adaptive` | `false` | Enables Adaptive instead of Fixed generation. |
-| `target_fps` | `120` | Adaptive output target, or saved fallback when refresh matching is on. MAKO Decky uses a 90 FPS product default. |
+| `target_fps` | `120` | Adaptive generation target, or saved fallback when refresh matching is on. Fractional Automatic permits sustained native FPS above this target when the manual base cap is off or at least the target; the cap remains enforced. MAKO Decky uses a 90 FPS product default. |
 | `adaptive_target_refresh_rate` | `false` | Matches Adaptive's output target to confirmed Gamescope display refresh, clamped to the Renderer’s 10–1000 FPS range. Applies live; unavailable or zero refresh uses the saved `target_fps`. Fixed ignores this choice. |
 | `adaptive_max_multiplier` | `3` | Adaptive multiplier ceiling, from 2–5. |
 | `adaptive_auto_base_fps_cap` | `false` | Enables Steady Base Cap behavior. MAKO Decky defaults this to `true`. |

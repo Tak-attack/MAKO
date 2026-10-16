@@ -39,10 +39,13 @@ VkResult Swapchain::queuePresentWithRetirementFence(
         const vk::Vulkan& vk, const VkQueue queue,
         const VkPresentInfoKHR& incomingPresentInfo) {
     VkPresentInfoKHR presentInfo = incomingPresentInfo;
-    // Use the effective policy, not this frame's batch size: Fractional and
-    // temporary native relief still belong to the active generated timeline.
-    const bool generationEnabled = effectiveFrameGenerationEnabled(
-        this->profile, this->gamescopeRefreshHz);
+    // Use qualified scheduler state, not this frame's batch size: occasional
+    // real-only turns must not release Fractional output timing.
+    const auto outputPolicy = gamescopeBridgeOutputPolicy(
+        this->profile, this->gamescopeRefreshHz,
+        this->adaptiveScheduler && !this->steamMenuSuspended &&
+                fractionalNativePresentationEligible(this->profile)
+            ? this->adaptiveScheduler->snapshot() : AdaptiveSchedulerSnapshot{});
     VkPresentTimeGOOGLE presentTime{};
     VkPresentTimesInfoGOOGLE presentTimes{
         .sType = VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE,
@@ -57,9 +60,9 @@ VkResult Swapchain::queuePresentWithRetirementFence(
             this->gamescopeRefreshHz.value_or(0) > 0) {
         const auto slot = this->wsiPresentTimeline.schedule(
             DiagnosticsClock::now(),
-            gamescopeBridgeOutputFps(this->profile, *this->gamescopeRefreshHz),
+            outputPolicy.outputFps,
             *this->gamescopeRefreshHz, this->bridgeOutputBatchSize,
-            generationEnabled);
+            outputPolicy.generatedTimeline);
         if (slot) {
             this->orderedPresentationDeadline = slot->presentAt;
             // Google timing creates feedback even when diagnostics are off.
@@ -94,10 +97,9 @@ VkResult Swapchain::queuePresentWithRetirementFence(
         for (uint32_t i = 0; i < presentInfo.swapchainCount; ++i) {
             const auto prepared = this->info.gamescopeScalingSurface->preparePresent(
                     this->info.surface, presentInfo.pSwapchains[i],
-                    gamescopeBridgeOutputFps(this->profile,
-                        this->gamescopeRefreshHz.value_or(0)),
+                    outputPolicy.outputFps,
                     this->gamescopeRefreshHz.value_or(0),
-                    this->bridgeOutputBatchSize, generationEnabled,
+                    this->bridgeOutputBatchSize, outputPolicy.generatedTimeline,
                     this->frameState.realFrameIndex,
                     &this->orderedPresentationDeadline);
             if (prepared != VK_SUCCESS)

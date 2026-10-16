@@ -1790,7 +1790,7 @@ class WrapperEnvironmentTests(unittest.TestCase):
             log_contents,
         )
 
-    def test_enabled_diagnostics_retains_exactly_five_launch_sessions(self):
+    def test_enabled_diagnostics_retains_exactly_ten_launch_sessions(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             log_path = Path(temporary_directory) / "present-diagnostics.log"
             script = "\n".join([
@@ -1798,14 +1798,7 @@ class WrapperEnvironmentTests(unittest.TestCase):
                 'printf "%s\\n" "$MAKO_TEST_SESSION" >&2',
             ])
 
-            for session in (
-                "run-one",
-                "run-two",
-                "run-three",
-                "run-four",
-                "run-five",
-                "run-six",
-            ):
+            for session in range(1, 12):
                 result = subprocess.run(
                     ["bash", "-c", script],
                     check=False,
@@ -1815,27 +1808,22 @@ class WrapperEnvironmentTests(unittest.TestCase):
                         **os.environ,
                         "MAKO_PRESENT_DIAGNOSTICS": "1",
                         "MAKO_PRESENT_DIAGNOSTICS_LOG": str(log_path),
-                        "MAKO_TEST_SESSION": session,
+                        "MAKO_TEST_SESSION": f"run-{session}",
                     },
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-            for suffix, session in (
-                ("", "run-six"), (".1", "run-five"), (".2", "run-four"),
-                (".3", "run-three"), (".4", "run-two"),
-            ):
+            for index, session in enumerate(range(11, 1, -1)):
+                suffix = f".{index}" if index else ""
                 records = Path(f"{log_path}{suffix}").read_text(encoding="utf-8").splitlines()
                 self.assertEqual(len(records), 2)
                 self.assertRegex(records[0], r"^MAKO Renderer: present diagnostics: operation=launch-environment pid=\d+ steam_overlay_preload_filter_requested=1 steam_overlay_preload_removed=0$")
-                self.assertEqual(records[1], session)
+                self.assertEqual(records[1], f"run-{session}")
             self.assertEqual(
                 sorted(path.name for path in log_path.parent.iterdir()),
                 [
                     "present-diagnostics.log",
-                    "present-diagnostics.log.1",
-                    "present-diagnostics.log.2",
-                    "present-diagnostics.log.3",
-                    "present-diagnostics.log.4",
+                    *(f"present-diagnostics.log.{index}" for index in range(1, 10)),
                 ],
             )
 
@@ -1843,7 +1831,7 @@ class WrapperEnvironmentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             log_path = Path(temporary_directory) / "present-diagnostics.log"
             retained_paths = [
-                Path(f"{log_path}.{index}") for index in range(1, 5)
+                Path(f"{log_path}.{index}") for index in range(1, 10)
             ]
             log_path.write_text("latest\n", encoding="utf-8")
             for index, retained_path in enumerate(retained_paths, start=1):
@@ -1873,12 +1861,12 @@ class WrapperEnvironmentTests(unittest.TestCase):
                 )
 
     def test_diagnostics_preserves_unsafe_paths_and_still_launches(self):
-        for slot in range(5):
+        for slot in range(10):
             for kind in ("directory", "symlink", "dangling-symlink", "fifo"):
                 with self.subTest(slot=slot, kind=kind), tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
                     log = root / "present-diagnostics.log"
-                    history = [log, *(Path(f"{log}.{index}") for index in range(1, 5))]
+                    history = [log, *(Path(f"{log}.{index}") for index in range(1, 10))]
                     for index, path in enumerate(history):
                         path.write_text(f"session-{index}\n")
                     unsafe = history[slot]

@@ -151,8 +151,22 @@ vi.mock("@decky/ui", () => ({
     children,
     onClick,
     disabled,
-  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick} disabled={disabled}>
+    focusable,
+    style,
+  }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    focusable?: boolean;
+    noFocusRing?: boolean;
+  }) => (
+    <button
+      // Steam suppresses activation but deliberately leaves the DOM button
+      // enabled and registered in its navigation tree, even when disabled.
+      onClick={disabled ? undefined : onClick}
+      disabled={false}
+      tabIndex={focusable === false ? -1 : 0}
+      data-steam-button="true"
+      data-steam-focusable={focusable}
+      style={style}
+    >
       {children}
     </button>
   ),
@@ -679,6 +693,97 @@ describe("Configuration controls", () => {
     await waitFor(() =>
       expect(onConfigChange).toHaveBeenCalledWith("vkbasalt_shader", "none"),
     );
+  });
+
+  test("excludes unavailable shader actions from Steam focus and restores them after busy work", async () => {
+    let finish!: () => void;
+    const onRefreshShaders = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const onCustomizeShaders = vi.fn(async () => undefined);
+    const onAddShader = vi.fn(async () => undefined);
+    const onDeleteShaders = vi.fn(async () => undefined);
+    const props = {
+      config: {
+        ...getDefaults(),
+        external_vulkan_layer: EXTERNAL_VULKAN_LAYER_VKBASALT,
+        vkbasalt_shader: "none",
+      },
+      isDefaultProfile: false,
+      profileName: "game",
+      vkBasaltConfigPath: "/tmp/game.conf",
+      onConfigChange: vi.fn(async () => undefined),
+      onCustomizeShaders,
+      onAddShader,
+      onRefreshShaders,
+      onDeleteShaders,
+    };
+    const { rerender } = render(<ShadersConfigurationGroup {...props} />);
+    const actions = [
+      "Customize shaders",
+      "Add custom shader",
+      "Refresh",
+      "Delete selected custom shaders",
+    ];
+    const expectAvailable = (name: string, available: boolean) => {
+      const button = screen.getByRole("button", { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(!available);
+      // Disabled actions must leave Steam's navigation tree entirely, and
+      // native focus restoration must not select them either.
+      expect(button.dataset.steamButton).toBe(available ? "true" : undefined);
+      expect(button.style.pointerEvents).toBe(available ? "" : "none");
+      if (!available) {
+        expect(button.hasAttribute("tabindex")).toBe(false);
+        button.focus();
+        expect(document.activeElement).not.toBe(button);
+      }
+    };
+    expectAvailable("Customize shaders", false);
+    expectAvailable("Delete selected custom shaders", false);
+    expectAvailable("Add custom shader", true);
+    expectAvailable("Refresh", true);
+    fireEvent.click(screen.getByText("Customize shaders"));
+    fireEvent.click(screen.getByText("Delete selected custom shaders"));
+    expect(onCustomizeShaders).not.toHaveBeenCalled();
+    expect(onDeleteShaders).not.toHaveBeenCalled();
+
+    const selectedConfig = {
+      ...props.config,
+      vkbasalt_shader: "vibrance:custom/Tone",
+    };
+    rerender(<ShadersConfigurationGroup {...props} config={selectedConfig} />);
+    actions.forEach((name) => expectAvailable(name, true));
+    const customize = screen.getByText("Customize shaders");
+    customize.focus();
+    expect(document.activeElement).toBe(customize);
+    fireEvent.click(screen.getByText("Refresh"));
+    expect(document.activeElement).not.toBe(customize);
+    actions.forEach((name) => {
+      expectAvailable(name, false);
+      fireEvent.click(screen.getByText(name));
+    });
+    expect(onRefreshShaders).toHaveBeenCalledOnce();
+    expect(onCustomizeShaders).not.toHaveBeenCalled();
+    expect(onAddShader).not.toHaveBeenCalled();
+    expect(onDeleteShaders).not.toHaveBeenCalled();
+    finish();
+    await waitFor(() => actions.forEach((name) => expectAvailable(name, true)));
+    fireEvent.click(screen.getByText("Customize shaders"));
+    expect(onCustomizeShaders).toHaveBeenCalledOnce();
+    await waitFor(() => expectAvailable("Customize shaders", true));
+
+    rerender(
+      <ShadersConfigurationGroup
+        {...props}
+        config={selectedConfig}
+        onCustomizeShaders={undefined}
+      />,
+    );
+    expectAvailable("Customize shaders", false);
+    expectAvailable("Delete selected custom shaders", true);
   });
 
   test("deletes only selected custom shaders, locks selection while busy, and refreshes", async () => {

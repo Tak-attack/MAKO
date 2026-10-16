@@ -415,23 +415,109 @@ int main() {
     bridgeProfile.frame_generation_enabled = true;
     bridgeProfile.adaptive = true;
     bridgeProfile.target_fps = 90;
-    expect(gamescopeBridgeOutputFps(bridgeProfile, 120) == 90 &&
-            gamescopeBridgeOutputFps(bridgeProfile, 60) == 60,
+    expect(gamescopeBridgeOutputPolicy(bridgeProfile, 120).outputFps == 90 &&
+            gamescopeBridgeOutputPolicy(bridgeProfile, 60).outputFps == 60 &&
+            gamescopeBridgeOutputPolicy(bridgeProfile, 120).generatedTimeline,
         "bridge must respect Adaptive target and display ceiling");
+    bridgeProfile.adaptive_auto_base_fps_cap = false;
+    bridgeProfile.adaptive_fractional_real_frame_priority =
+        ls::AdaptiveFractionalRealFramePriority::Auto;
+    bridgeProfile.base_fps_cap = 0;
+    AdaptiveSchedulerSnapshot nativeScheduler{
+        .phase = AdaptiveSchedulerPhase::NearTargetNative,
+        .nearTargetNativePreference = true,
+    };
+    const auto nativeOutput = gamescopeBridgeOutputPolicy(
+        bridgeProfile, 120, nativeScheduler);
+    expect(nativeOutput.outputFps == 120 && !nativeOutput.generatedTimeline &&
+            gamescopeBridgeOutputPolicy(bridgeProfile, 60, nativeScheduler).outputFps == 60,
+        "qualified native Automatic must release target and generated lead within refresh");
+    for (const auto phase : {AdaptiveSchedulerPhase::Uninitialized,
+            AdaptiveSchedulerPhase::HistoryWarmup, AdaptiveSchedulerPhase::Stabilizing,
+            AdaptiveSchedulerPhase::DiscontinuityRecovery,
+            AdaptiveSchedulerPhase::RescueMeasurement, AdaptiveSchedulerPhase::RearmCooldown,
+            AdaptiveSchedulerPhase::RampEvaluation, AdaptiveSchedulerPhase::StableCadence,
+            AdaptiveSchedulerPhase::Active, AdaptiveSchedulerPhase::NativeCadenceProbe}) {
+        auto temporaryNative = nativeScheduler;
+        temporaryNative.phase = phase;
+        const auto output = gamescopeBridgeOutputPolicy(bridgeProfile, 120, temporaryNative);
+        expect(output.outputFps == 90 && output.generatedTimeline,
+            "unqualified or temporary native turns must retain generated timing");
+    }
+    for (const auto priority : {ls::AdaptiveFractionalRealFramePriority::Low,
+            ls::AdaptiveFractionalRealFramePriority::Medium,
+            ls::AdaptiveFractionalRealFramePriority::High,
+            ls::AdaptiveFractionalRealFramePriority::VeryHigh}) {
+        bridgeProfile.adaptive_fractional_real_frame_priority = priority;
+        const auto output = gamescopeBridgeOutputPolicy(bridgeProfile, 120, nativeScheduler);
+        expect(output.outputFps == 90 && output.generatedTimeline,
+            "native preference must not override explicit Fractional priorities");
+    }
+    bridgeProfile.adaptive_fractional_real_frame_priority =
+        ls::AdaptiveFractionalRealFramePriority::Auto;
+    for (const uint32_t cap : {90U, 100U, 144U}) {
+        bridgeProfile.base_fps_cap = cap;
+        const auto output = gamescopeBridgeOutputPolicy(bridgeProfile, 120, nativeScheduler);
+        expect(output.outputFps == 120 && !output.generatedTimeline &&
+                effectiveBaseFpsCap(bridgeProfile, nativeScheduler, 120) == cap,
+            "target-capable manual caps must release native output timing without releasing the cap");
+        const auto unqualified = gamescopeBridgeOutputPolicy(bridgeProfile, 120);
+        expect(unqualified.outputFps == 90 && unqualified.generatedTimeline,
+            "a high manual cap must still require qualified native cadence");
+    }
+    for (const uint32_t cap : {45U, 89U}) {
+        bridgeProfile.base_fps_cap = cap;
+        const auto output = gamescopeBridgeOutputPolicy(bridgeProfile, 120, nativeScheduler);
+        expect(output.outputFps == 90 && output.generatedTimeline,
+            "a cap changed below target must restore generated timing despite an old native snapshot");
+    }
+    bridgeProfile.base_fps_cap = 0;
+    bridgeProfile.adaptive_auto_base_fps_cap = true;
+    expect(gamescopeBridgeOutputPolicy(bridgeProfile, 120, nativeScheduler).outputFps == 90,
+        "Steady Adaptive must retain its existing output policy");
     bridgeProfile.adaptive = false;
     bridgeProfile.multiplier = 3;
     bridgeProfile.base_fps_cap = 30;
-    expect(gamescopeBridgeOutputFps(bridgeProfile, 120) == 90,
+    expect(gamescopeBridgeOutputPolicy(bridgeProfile, 120, nativeScheduler).outputFps == 90,
         "bridge must retain exact Fixed below-refresh output");
     bridgeProfile.base_fps_cap = 0;
-    expect(gamescopeBridgeOutputFps(bridgeProfile, 144) == 144,
+    expect(gamescopeBridgeOutputPolicy(bridgeProfile, 144).outputFps == 144,
         "uncapped Fixed must follow refresh without borrowing Adaptive target");
     bridgeProfile.frame_generation_enabled = false;
     bridgeProfile.adaptive = true;
     bridgeProfile.target_fps = 30;
-    expect(gamescopeBridgeOutputFps(bridgeProfile, 120) == 120,
+    expect(gamescopeBridgeOutputPolicy(bridgeProfile, 120).outputFps == 120 &&
+            !gamescopeBridgeOutputPolicy(bridgeProfile, 120).generatedTimeline,
         "live disabled generation must release its output ceiling");
+    bridgeProfile.frame_generation_enabled = true;
+    bridgeProfile.frame_generation_refresh_threshold = 60;
+    expect(!gamescopeBridgeOutputPolicy(bridgeProfile, 60).generatedTimeline &&
+            gamescopeBridgeOutputPolicy(bridgeProfile, std::nullopt).generatedTimeline,
+        "refresh guards must preserve disabled and unavailable-feedback policy");
     GenerationPolicyResetGate resetGate;
+    // The existing source-cap transition must rebuild native eligibility in
+    // both directions; no separate live-update or cap owner is needed.
+    auto belowTargetCap = adaptiveProfile();
+    belowTargetCap.frame_generation_provisioned = true;
+    belowTargetCap.target_fps = 60;
+    belowTargetCap.base_fps_cap = 30;
+    auto aboveTargetCap = belowTargetCap;
+    aboveTargetCap.base_fps_cap = 90;
+    for (const bool allowNative : {false, true}) {
+        const auto changedCap = planProfileUpdate(
+            allowNative ? belowTargetCap : aboveTargetCap,
+            allowNative ? aboveTargetCap : belowTargetCap, 4, true);
+        expect(changedCap.decision.baseFpsCapChanged &&
+                generationSchedulerPolicy(changedCap.appliedProfile, 90)->
+                    qualifyTargetNativeCadence == allowNative,
+            "live cap changes must rebuild the scheduler with the new native eligibility");
+    }
+    belowTargetCap.frame_generation_enabled = false;
+    aboveTargetCap.frame_generation_enabled = false;
+    const auto dormantNativeOwnership = planProfileUpdate(
+        belowTargetCap, aboveTargetCap, 4, true);
+    expect(dormantNativeOwnership.decision.action == ProfileUpdateAction::NoRuntimeChange,
+        "disabled generation must leave native qualification edits dormant");
     expect(!resetGate.pending() && !resetGate.consumeOnResume(),
         "A fresh policy-reset gate must not invent deferred work");
     expect(!resetGate.request(true) && resetGate.pending() &&

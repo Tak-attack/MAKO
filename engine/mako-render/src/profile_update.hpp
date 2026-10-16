@@ -715,11 +715,22 @@ namespace mako::layer {
             previous.vrrCapable != false && current.vrrCapable != false;
     }
 
+    /// Only Fractional Automatic can release the generated presentation ceiling.
+    /// A target-capable manual cap remains enforced by the source pacer.
+    [[nodiscard]] inline bool fractionalNativePresentationEligible(
+            const ls::GameConf& profile) {
+        return profile.adaptive && !profile.adaptive_auto_base_fps_cap &&
+            profile.adaptive_fractional_real_frame_priority ==
+                ls::AdaptiveFractionalRealFramePriority::Auto &&
+            (profile.base_fps_cap == 0 || profile.base_fps_cap >= profile.target_fps);
+    }
+
     struct GenerationSchedulerPolicy {
         uint32_t targetFps{0};
         size_t maximumMultiplier{0};
         bool stableCadence{false};
         bool nearTargetNativePreference{false};
+        bool qualifyTargetNativeCadence{false};
         bool dynamicCadenceRecovery{false};
         float dynamicCadenceProbeIntervalSeconds{
             ls::GameConfDefaults::dynamicCadenceProbeIntervalSeconds
@@ -769,6 +780,8 @@ namespace mako::layer {
                 .maximumMultiplier = profile.adaptive_max_multiplier,
                 .stableCadence = profile.adaptive_stable_cadence,
                 .nearTargetNativePreference = true,
+                .qualifyTargetNativeCadence =
+                    fractionalNativePresentationEligible(profile),
                 .dynamicCadenceRecovery =
                     dynamicCadenceRecoveryEnabled(profile),
                 .dynamicCadenceProbeIntervalSeconds =
@@ -796,22 +809,35 @@ namespace mako::layer {
         };
     }
 
-    /// The bridge follows the same output ceiling as generation policy. Exact
-    /// Fixed with a manual source cap may intentionally deliver below refresh.
-    /// Disabled generation and uncapped Fixed retain the display ceiling.
-    [[nodiscard]] inline double gamescopeBridgeOutputFps(
-            const ls::GameConf& profile, const uint32_t refreshHz) {
-        double outputFps = static_cast<double>(refreshHz);
-        if (effectiveFrameGenerationEnabled(profile, refreshHz)) {
+    struct GamescopeBridgeOutputPolicy {
+        double outputFps{0.0};
+        bool generatedTimeline{false};
+    };
+
+    /// Qualified native Automatic presentation releases both the Adaptive
+    /// ceiling and generated-work lead. A sparse Fractional turn or temporary
+    /// native probe still belongs to the generated timeline. A manual cap at
+    /// or above target remains enforced by the source pacer. Below-target caps,
+    /// explicit priorities and Steady retain their existing output policy.
+    [[nodiscard]] inline GamescopeBridgeOutputPolicy gamescopeBridgeOutputPolicy(
+            const ls::GameConf& profile, const std::optional<uint32_t> refreshHz,
+            const AdaptiveSchedulerSnapshot& scheduler = {}) {
+        const double baseFpsCap = effectiveBaseFpsCap(profile, refreshHz);
+        const bool nativeAutomatic = fractionalNativePresentationEligible(profile) &&
+            scheduler.phase == AdaptiveSchedulerPhase::NearTargetNative &&
+            scheduler.generationLimit == 0;
+        const bool generatedTimeline =
+            effectiveFrameGenerationEnabled(profile, refreshHz) && !nativeAutomatic;
+        double outputFps = static_cast<double>(refreshHz.value_or(0));
+        if (generatedTimeline) {
             if (profile.adaptive)
                 outputFps = std::min(outputFps,
                     static_cast<double>(profile.target_fps));
-            else if (effectiveBaseFpsCap(profile, refreshHz) > 0.0)
+            else if (baseFpsCap > 0.0)
                 outputFps = std::min(outputFps,
-                    effectiveBaseFpsCap(profile, refreshHz) *
-                        static_cast<double>(profile.multiplier));
+                    baseFpsCap * static_cast<double>(profile.multiplier));
         }
-        return outputFps;
+        return {outputFps, generatedTimeline};
     }
 
     /// Reserve one private output set that can serve both Fixed and Adaptive.

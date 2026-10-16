@@ -764,7 +764,12 @@ class DiagnosticsHelperTests(unittest.TestCase):
                 (Path(f"{base_path}.1"), "previous-slot"),
                 (Path(f"{base_path}.2"), "two-back-slot"),
                 (Path(f"{base_path}.3"), "three-back-slot"),
-                (Path(f"{base_path}.4"), "oldest-slot"),
+                (Path(f"{base_path}.4"), "four-back-slot"),
+                (Path(f"{base_path}.5"), "five-back-slot"),
+                (Path(f"{base_path}.6"), "six-back-slot"),
+                (Path(f"{base_path}.7"), "seven-back-slot"),
+                (Path(f"{base_path}.8"), "eight-back-slot"),
+                (Path(f"{base_path}.9"), "oldest-slot"),
             )
             for path, label in retained_sessions:
                 path.write_text(
@@ -818,7 +823,7 @@ class DiagnosticsHelperTests(unittest.TestCase):
             for _, label in reversed(retained_sessions)
         ]
         self.assertEqual(combined_markers, sorted(combined_markers))
-        self.assertEqual(combined.stderr.count("retained sessions: 5"), 5)
+        self.assertEqual(combined.stderr.count("retained sessions: 10"), 10)
 
     def test_missing_retained_session_fails_clearly(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

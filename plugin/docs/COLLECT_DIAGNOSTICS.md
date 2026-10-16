@@ -47,6 +47,8 @@ If the command is missing, select **Install MAKO Renderer** in Decky and retry. 
 
 For a slowdown after a long session, replace `--lines 5000` with `--lines 200000`. Collect before starting another game.
 
+With diagnostics enabled, `mako-run` retains ten launch sessions: the current `~/.config/mako-render/present-diagnostics.log` and nine older logs numbered `.1` through `.9`. Add `--session previous` to collect the preceding run, `--session oldest` for `.9`, or `--session all` to combine the available retained sessions.
+
 Collect from the original session log, not an older filtered report, which may have omitted error details. The report does not include the separate Gamescope system journal; support may request it if the game log is insufficient.
 
 For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution. For VRR comparisons, record Steam’s VRR setting for each run.

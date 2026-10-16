@@ -156,6 +156,33 @@ ApplicationWindow {
         require(empty->isVisible(), "successful empty discovery lost its message");
         editor->close();
         backend.noParameters = false;
+        QMetaObject::invokeMethod(editor,"openEditor");
+        auto* scrollView = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-editor-scroll"));
+        auto* controls = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-editor-controls"));
+        auto* scrollBar = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-editor-scrollbar"));
+        auto* resetButton = findNamed(findNamed, editor->contentItem(), QStringLiteral("shader-editor-reset"));
+        require(scrollView && controls && scrollBar && resetButton, "shader scroll layout is missing");
+        for (const auto size : {QSize(280, 360), QSize(360, 650)}) {
+            editor->resize(size);
+            QCoreApplication::processEvents();
+            // Layout polish can schedule another pass after a wrapped label changes height.
+            QCoreApplication::processEvents();
+            const auto contentOrigin = controls->mapToItem(scrollView, QPointF());
+            const auto barOrigin = scrollBar->mapToItem(scrollView, QPointF());
+            require(contentOrigin.x() >= 12, "shader controls lost their left inset");
+            require(barOrigin.x() - (contentOrigin.x() + controls->width()) >= 8, "shader controls overlap the scrollbar lane");
+            require(scrollView->width() - (barOrigin.x() + scrollBar->width()) >= 12, "shader scrollbar touches the outer border");
+            require(barOrigin.y() >= 12 && scrollView->height() - barOrigin.y() - scrollBar->height() >= 12, "shader scrollbar lost its vertical insets");
+            require(controls->width() <= scrollView->property("availableWidth").toReal(), "shader controls overflow horizontally");
+            const auto barSize = scrollBar->property("size").toReal();
+            require(barSize > 0 && barSize < 1, "long shader controls are not scrollable");
+            scrollBar->setProperty("position", 1 - barSize);
+            QCoreApplication::processEvents();
+            const auto resetOrigin = resetButton->mapToItem(scrollView, QPointF());
+            require(resetOrigin.y() >= 12 && resetOrigin.y() + resetButton->height() <= scrollView->height() - 11.5, "scrolling cannot reveal Reset inside the frame");
+            scrollBar->setProperty("position", 0);
+        }
+        editor->close();
         if (argc > 1) {
             QMetaObject::invokeMethod(editor,"openEditor");
             QTimer::singleShot(250, &application, [&] { editor->grabWindow().save(QString::fromLocal8Bit(argv[1])); application.quit(); });

@@ -307,7 +307,8 @@ namespace {
                     std::nullopt,
                 const bool nearTargetNativePreference = true,
                 const bool automaticBaseFpsCap = false,
-                const bool validateIntegerPacing = false) :
+                const bool validateIntegerPacing = false,
+                const bool qualifyTargetNativeCadence = false) :
             scheduler(
                 AdaptiveSchedulerConfig{
                     .targetFps = targetFps,
@@ -317,6 +318,7 @@ namespace {
                     .automaticBaseFpsCap = automaticBaseFpsCap,
                     .nearTargetNativePreference =
                         nearTargetNativePreference,
+                    .qualifyTargetNativeCadence = qualifyTargetNativeCadence,
                     .validateIntegerPacing = validateIntegerPacing,
                     .dynamicCadenceRecovery = dynamicCadenceRecovery,
                     .dynamicCadenceProbeInterval =
@@ -1094,6 +1096,219 @@ namespace {
         }
     }
 
+    void testAdaptiveNativePresentationAboveTarget() {
+        // Join the scheduler, applied policy and production output timeline.
+        // Submission backpressure feeds the next source interval, reproducing
+        // a native source held at target despite having no generated output.
+        struct Scenario {
+            uint32_t targetFps;
+            uint32_t refreshHz;
+            double nativeFps;
+            size_t maximumMultiplier;
+            uint32_t baseFpsCap{0};
+        };
+        constexpr std::array scenarios{
+            Scenario{60, 90, 60., 2},
+            Scenario{60, 90, 75., 2},
+            Scenario{60, 90, 90., 2},
+            Scenario{60, 90, 150., 2},
+            Scenario{90, 120, 110., 3},
+            Scenario{120, 144, 144., 4},
+            Scenario{30, 60, 45., 5},
+            Scenario{60, 90, 75., 2, 90},
+            Scenario{60, 120, 150., 2, 90},
+            Scenario{60, 90, 75., 2, 60},
+            Scenario{60, 90, 150., 2, 120},
+            Scenario{100, 144, 110., 3, 120},
+        };
+        for (const bool bridge : {false, true}) {
+            for (const bool smooth : {false, true}) {
+                for (const auto& [targetFps, refreshHz, nativeFps, maximumMultiplier,
+                        baseFpsCap] : scenarios) {
+                    for (const bool recovery : {false, true}) {
+                        // Dynamic Cadence Recovery is disabled by an effective cap.
+                        if (recovery && baseFpsCap > 0)
+                            continue;
+                        ls::GameConf profile;
+                        profile.frame_generation_provisioned = true;
+                        profile.frame_generation_enabled = true;
+                        profile.adaptive = true;
+                        profile.target_fps = targetFps;
+                        profile.adaptive_max_multiplier = maximumMultiplier;
+                        profile.adaptive_auto_base_fps_cap = false;
+                        profile.adaptive_fractional_real_frame_priority =
+                            ls::AdaptiveFractionalRealFramePriority::Auto;
+                        profile.base_fps_cap = baseFpsCap;
+                        profile.dynamic_cadence_recovery = recovery;
+                        const auto schedulerPolicy = generationSchedulerPolicy(profile, refreshHz);
+                        require(schedulerPolicy.has_value(), "Adaptive scheduler policy is absent");
+                        Harness harness(targetFps, maximumMultiplier, smooth,
+                            AdaptiveRecoveryPolicy::OrderedSdr, recovery, 2s, refreshHz,
+                            schedulerPolicy->nearTargetNativePreference, false, false,
+                            schedulerPolicy->qualifyTargetNativeCadence);
+                        harness.start();
+                        RealFramePacer sourcePacer;
+                        OrderedPresentTimeline timeline;
+                        TimePoint lastOutput{};
+                        uint64_t serial = 0;
+                        auto present = [&](const double sourceFps) {
+                            const auto renderInterval =
+                                std::chrono::duration_cast<TimePoint::duration>(
+                                    std::chrono::duration<double>(1.0 / sourceFps));
+                            const auto arrival = harness.now + renderInterval;
+                            const auto deadline = sourcePacer.schedule(arrival,
+                                effectiveBaseFpsCap(profile,
+                                    harness.scheduler.snapshot(), refreshHz));
+                            // Feed the production source-cap wait into the
+                            // same clock as rendering and presentation waits.
+                            harness.now += deadline - arrival;
+                            const auto plan = harness.deliveredFrameAtFps(sourceFps);
+                            const auto policy = gamescopeBridgeOutputPolicy(
+                                profile, refreshHz, harness.scheduler.snapshot());
+                            if (bridge)
+                                timeline.observeSourceBatch(harness.now, ++serial);
+                            for (size_t i = 0; i <= plan.size(); ++i) {
+                                const auto slot = timeline.schedule(harness.now,
+                                    policy.outputFps, refreshHz, plan.size() + 1,
+                                    policy.generatedTimeline);
+                                require(slot && slot->presentAt > lastOutput,
+                                    "Adaptive transition overtook queued output");
+                                harness.now = slot->submitAt;
+                                lastOutput = slot->presentAt;
+                            }
+                            harness.queuedPresentationDeadline = lastOutput;
+                            return plan;
+                        };
+                        const auto settledAt = harness.now + 8s;
+                        while (harness.now < settledAt)
+                            present(nativeFps);
+                        require(harness.scheduler.snapshot().nearTargetNativePreference,
+                            "at/above-target source never qualified native presentation");
+                        const auto firstOutput = lastOutput;
+                        constexpr size_t measuredFrames = 450;
+                        for (size_t frame = 0; frame < measuredFrames; ++frame)
+                            require(present(nativeFps).empty(),
+                                "target-capable native source generated an unnecessary frame");
+                        const double outputFps = measuredFrames /
+                            std::chrono::duration<double>(lastOutput - firstOutput).count();
+                        const double expectedFps = std::min({nativeFps, double(refreshHz),
+                            baseFpsCap > 0 ? double(baseFpsCap) : nativeFps});
+                        require(std::abs(outputFps - expectedFps) < 0.1,
+                            "Automatic presentation lost native FPS or its source cap: " +
+                                std::to_string(outputFps) + " expected=" + std::to_string(expectedFps));
+
+                        // A completion-paced caller must not retain a generated
+                        // readiness lead after qualification, in either transport.
+                        const auto nativePolicy = gamescopeBridgeOutputPolicy(
+                            profile, refreshHz, harness.scheduler.snapshot());
+                        const auto afterWait = lastOutput +
+                            std::chrono::duration_cast<TimePoint::duration>(
+                                std::chrono::duration<double>(2.0 / refreshHz));
+                        const auto nativeSlot = timeline.schedule(afterWait,
+                            nativePolicy.outputFps, refreshHz, 1, nativePolicy.generatedTimeline);
+                        require(nativeSlot && nativeSlot->presentAt == afterWait,
+                            "native Automatic retained generated-work readiness delay");
+                        lastOutput = nativeSlot->presentAt;
+                        harness.now = afterWait;
+
+                        bool resumedGeneration = false;
+                        const auto lowEnd = harness.now + 8s;
+                        while (harness.now < lowEnd) {
+                            const auto plan = present(double(targetFps) / 2.0);
+                            if (!plan.empty()) {
+                                const auto policy = gamescopeBridgeOutputPolicy(
+                                    profile, refreshHz, harness.scheduler.snapshot());
+                                require(policy.outputFps == targetFps && policy.generatedTimeline,
+                                    "resumed generation lost its target or readiness lead");
+                                resumedGeneration = true;
+                            }
+                        }
+                        require(resumedGeneration,
+                            "sustained native deficit did not resume generated output");
+                        // A faster source hidden by generated backpressure needs
+                        // the existing opt-in native probe before it is observable.
+                        if (!recovery)
+                            continue;
+                        const auto recoveredAt = harness.now + 10s;
+                        while (harness.now < recoveredAt)
+                            present(nativeFps);
+                        require(!gamescopeBridgeOutputPolicy(profile, refreshHz,
+                                harness.scheduler.snapshot()).generatedTimeline,
+                            "recovered native source retained the generated output ceiling: native=" +
+                                std::to_string(nativeFps) + " bridge=" + std::to_string(bridge) +
+                                " smooth=" + std::to_string(smooth) + " measured=" +
+                                std::to_string(harness.scheduler.snapshot().smoothedBaseFps) +
+                                " phase=" + std::to_string(static_cast<int>(
+                                    harness.scheduler.snapshot().phase)));
+                    }
+                }
+            }
+        }
+    }
+
+    void testTargetNativeQualificationIsFractionalOnly() {
+        using Priority = ls::AdaptiveFractionalRealFramePriority;
+        struct Scenario {
+            bool adaptive;
+            bool steady;
+            Priority priority;
+            uint32_t cap;
+            bool qualifies;
+        };
+        constexpr std::array scenarios{
+            Scenario{true, false, Priority::Auto, 0, true},
+            Scenario{true, false, Priority::Auto, 60, true},
+            Scenario{true, false, Priority::Auto, 90, true},
+            Scenario{true, false, Priority::Auto, 59, false},
+            Scenario{true, false, Priority::Auto, 30, false},
+            Scenario{true, false, Priority::Low, 90, false},
+            Scenario{true, false, Priority::Medium, 90, false},
+            Scenario{true, false, Priority::High, 90, false},
+            Scenario{true, false, Priority::VeryHigh, 90, false},
+            Scenario{true, true, Priority::Auto, 0, false},
+            Scenario{true, true, Priority::Auto, 90, false},
+            Scenario{false, false, Priority::Auto, 0, false},
+        };
+        for (const auto& scenario : scenarios) {
+            for (const bool smooth : {false, true}) {
+                ls::GameConf profile;
+                profile.frame_generation_provisioned = true;
+                profile.frame_generation_enabled = true;
+                profile.adaptive = scenario.adaptive;
+                profile.adaptive_auto_base_fps_cap = scenario.steady;
+                profile.adaptive_fractional_real_frame_priority = scenario.priority;
+                profile.base_fps_cap = scenario.cap;
+                profile.target_fps = 60;
+                profile.adaptive_max_multiplier = 2;
+                profile.multiplier = 2;
+                profile.adaptive_stable_cadence = smooth;
+                // Fixed only creates a scheduler for opt-in cadence recovery.
+                profile.dynamic_cadence_recovery = !scenario.adaptive;
+                const auto policy = generationSchedulerPolicy(profile, 90);
+                require(policy && policy->qualifyTargetNativeCadence == scenario.qualifies,
+                    "native qualification escaped its Fractional Automatic profile boundary");
+                for (const double ratio : {1.0, 1.25}) {
+                    Harness harness(policy->targetFps, policy->maximumMultiplier,
+                        policy->stableCadence, AdaptiveRecoveryPolicy::OrderedSdr,
+                        policy->dynamicCadenceRecovery, 2s, 90,
+                        policy->nearTargetNativePreference, scenario.steady, false,
+                        policy->qualifyTargetNativeCadence);
+                    harness.start();
+                    // Deliberately bypass the source cap: unusual fast samples
+                    // must not activate the new state in an ineligible mode.
+                    harness.runAtFps(policy->targetFps * ratio, 8s);
+                    const auto snapshot = harness.scheduler.snapshot();
+                    require(snapshot.nearTargetNativePreference == scenario.qualifies,
+                        "at/above-target samples changed another mode's native preference");
+                    const auto output = gamescopeBridgeOutputPolicy(profile, 90, snapshot);
+                    require(output.generatedTimeline == !scenario.qualifies &&
+                            output.outputFps == (scenario.qualifies || !scenario.adaptive ? 90 : 60),
+                        "native qualification changed another mode's output timing");
+                }
+            }
+        }
+    }
+
     void testNearTargetNativePreferenceCoversSteadySweep() {
         constexpr uint32_t targetFps = 120;
         for (size_t baseFps = 60; baseFps < targetFps; ++baseFps) {
@@ -1256,64 +1471,66 @@ namespace {
     }
 
     void testNearTargetNativePreferenceHasHysteresisAndNoChatter() {
-        Harness harness(120, 2);
-        harness.start();
-        harness.runAtFps(80.0, 8s);
-        require(harness.scheduler.snapshot().validatedGenerationLimit == 1 &&
-                !harness.scheduler.snapshot().nearTargetNativePreference,
-            "precondition failed: 80 FPS did not settle on Fractional");
+        for (const double nativeFps : {119.0, 125.0}) {
+            Harness harness(120, 2);
+            harness.start();
+            harness.runAtFps(80.0, 8s);
+            require(harness.scheduler.snapshot().validatedGenerationLimit == 1 &&
+                    !harness.scheduler.snapshot().nearTargetNativePreference,
+                "precondition failed: 80 FPS did not settle on Fractional");
 
-        bool generatedDuringEntryHold = false;
-        for (size_t frame = 0; frame < 50; ++frame) {
-            const auto plan = harness.frameAtFps(119.0);
-            requireValidTimestamps(plan, 1);
-            generatedDuringEntryHold = generatedDuringEntryHold ||
-                !plan.empty();
+            bool generatedDuringEntryHold = false;
+            for (size_t frame = 0; frame < 50; ++frame) {
+                const auto plan = harness.frameAtFps(nativeFps);
+                requireValidTimestamps(plan, 1);
+                generatedDuringEntryHold = generatedDuringEntryHold ||
+                    !plan.empty();
+            }
+            require(!harness.scheduler.snapshot().nearTargetNativePreference &&
+                    harness.scheduler.snapshot().validatedGenerationLimit == 1 &&
+                    generatedDuringEntryHold &&
+                    harness.diagnostics.count(
+                        "adaptive-near-target-native-enabled") == 0,
+                "cadence rise changed Fractional policy before the native-preference hold completed");
+            harness.runAtFps(nativeFps, 2500ms);
+            require(harness.scheduler.snapshot().nearTargetNativePreference &&
+                    harness.scheduler.snapshot().validatedGenerationLimit == 0,
+                "cadence rise did not enter near-target native preference");
+
+            constexpr std::array boundaryCadence{116.0, 120.0};
+            for (size_t frame = 0; frame < 1200; ++frame)
+                harness.frameAtFps(boundaryCadence[frame & 1U]);
+            require(harness.scheduler.snapshot().nearTargetNativePreference &&
+                    harness.diagnostics.count(
+                        "adaptive-near-target-native-enabled") == 1 &&
+                    harness.diagnostics.count(
+                        "adaptive-near-target-native-disabled") == 0,
+                "boundary oscillation caused native-preference chatter");
+
+            harness.runAtFps(80.0, 500ms);
+            require(harness.scheduler.snapshot().nearTargetNativePreference,
+                "brief cadence drop bypassed native-preference hysteresis");
+            harness.runAtFps(80.0, 2500ms);
+            require(!harness.scheduler.snapshot().nearTargetNativePreference &&
+                    harness.scheduler.snapshot().validatedGenerationLimit == 1 &&
+                    harness.diagnostics.count(
+                        "adaptive-near-target-native-disabled") == 1,
+                "sustained Fractional advantage did not resume generation");
+
+            harness.runAtFps(nativeFps, 3s);
+            require(harness.scheduler.snapshot().nearTargetNativePreference &&
+                harness.scheduler.snapshot().validatedGenerationLimit == 0 &&
+                    harness.diagnostics.count(
+                        "adaptive-near-target-native-enabled") == 2,
+                "second sustained cadence rise did not re-enter native preference");
+
+            const auto interruptionPlan = harness.frame(400ms);
+            require(interruptionPlan.empty() &&
+                    harness.scheduler.snapshot().phase ==
+                        AdaptiveSchedulerPhase::Stabilizing &&
+                    !harness.scheduler.snapshot().nearTargetNativePreference,
+                "native preference took ownership from cadence stabilization");
         }
-        require(!harness.scheduler.snapshot().nearTargetNativePreference &&
-                harness.scheduler.snapshot().validatedGenerationLimit == 1 &&
-                generatedDuringEntryHold &&
-                harness.diagnostics.count(
-                    "adaptive-near-target-native-enabled") == 0,
-            "cadence rise changed Fractional policy before the native-preference hold completed");
-        harness.runAtFps(119.0, 2500ms);
-        require(harness.scheduler.snapshot().nearTargetNativePreference &&
-                harness.scheduler.snapshot().validatedGenerationLimit == 0,
-            "cadence rise did not enter near-target native preference");
-
-        constexpr std::array boundaryCadence{116.0, 120.0};
-        for (size_t frame = 0; frame < 1200; ++frame)
-            harness.frameAtFps(boundaryCadence[frame & 1U]);
-        require(harness.scheduler.snapshot().nearTargetNativePreference &&
-                harness.diagnostics.count(
-                    "adaptive-near-target-native-enabled") == 1 &&
-                harness.diagnostics.count(
-                    "adaptive-near-target-native-disabled") == 0,
-            "boundary oscillation caused native-preference chatter");
-
-        harness.runAtFps(80.0, 500ms);
-        require(harness.scheduler.snapshot().nearTargetNativePreference,
-            "brief cadence drop bypassed native-preference hysteresis");
-        harness.runAtFps(80.0, 2500ms);
-        require(!harness.scheduler.snapshot().nearTargetNativePreference &&
-                harness.scheduler.snapshot().validatedGenerationLimit == 1 &&
-                harness.diagnostics.count(
-                    "adaptive-near-target-native-disabled") == 1,
-            "sustained Fractional advantage did not resume generation");
-
-        harness.runAtFps(119.0, 3s);
-        require(harness.scheduler.snapshot().nearTargetNativePreference &&
-            harness.scheduler.snapshot().validatedGenerationLimit == 0 &&
-                harness.diagnostics.count(
-                    "adaptive-near-target-native-enabled") == 2,
-            "second sustained cadence rise did not re-enter native preference");
-
-        const auto interruptionPlan = harness.frame(400ms);
-        require(interruptionPlan.empty() &&
-                harness.scheduler.snapshot().phase ==
-                    AdaptiveSchedulerPhase::Stabilizing &&
-                !harness.scheduler.snapshot().nearTargetNativePreference,
-            "native preference took ownership from cadence stabilization");
     }
 
     void testNearTargetNativePreferenceResumesAcrossNoisyHighExcursions() {
@@ -6266,6 +6483,8 @@ int main() {
         {"ordered fractional clock does not defer FIFO work", testOrderedFractionalClockDoesNotDeferFifoWork},
         {"fractional target clock ignores marginal placement", testFractionalTargetClockIgnoresMarginalPlacementBenefit},
         {"target clock covers steady and noisy cadence matrix", testTargetClockCoversSteadyAndNoisyCadenceMatrix},
+        {"Automatic preserves native presentation above target", testAdaptiveNativePresentationAboveTarget},
+        {"target-native qualification is Fractional only", testTargetNativeQualificationIsFractionalOnly},
         {"near-target native preference covers steady sweep", testNearTargetNativePreferenceCoversSteadySweep},
         {"near-target native preference scales across targets", testNearTargetNativePreferenceScalesAcrossTargets},
         {"near-target native preference tolerates boundary measurement noise", testNearTargetNativePreferenceToleratesBoundaryMeasurementNoise},

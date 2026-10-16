@@ -1889,13 +1889,14 @@ AdaptiveScheduler::advanceNearTargetNativePreference(
                 quality.nativeIntervalRmsMilliseconds();
         }
     } else if (baseFps >= targetFps &&
-            (preference.candidateActive.value_or(false) ||
+            (this->config.qualifyTargetNativeCadence ||
+             preference.candidateActive.value_or(false) ||
              this->state.nativeCadenceProbe.qualifyingNearTarget)) {
-        // Preserve an already-started near-target qualification through a
-        // noisy sample that briefly crosses the target. A confirmed native
-        // recovery starts that same hold even just above target: one sparse
-        // generated output on the next dip could hide the recovered rate
-        // behind FIFO again. Ordinary above-target streams need no transition.
+        // Qualify sustained at/above-target native cadence through the same
+        // hold as near-target cadence. Presentation uses this state to release
+        // Automatic's output ceiling, including when that ceiling prevents
+        // observing the game's full native rate yet. Other modes only retain
+        // an existing candidate or a confirmed native recovery measurement.
         requestedActive = true;
     } else if (quality.valid) {
         // The output-retention floor has already rejected material target

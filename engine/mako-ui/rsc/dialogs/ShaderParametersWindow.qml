@@ -121,13 +121,36 @@ Window {
             onActivated: editor.selectEffect(currentIndex)
         }
         ScrollView {
+            id: controlsView
+            objectName: "shader-editor-scroll"
+            readonly property int frameInset: 12
+            readonly property int scrollbarGap: 8
             visible: !editor.preview
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            topPadding: frameInset
+            bottomPadding: frameInset
+            leftPadding: frameInset + (mirrored ? ScrollBar.vertical.width + scrollbarGap : 0)
+            rightPadding: frameInset + (mirrored ? 0 : ScrollBar.vertical.width + scrollbarGap)
+            // Reserve a separate lane without Breeze's permanent separator frame.
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            ScrollBar.vertical.active: ScrollBar.vertical.size < 1
+            ScrollBar.vertical.objectName: "shader-editor-scrollbar"
+            ScrollBar.vertical.x: mirrored ? frameInset : width - ScrollBar.vertical.width - frameInset
+            ScrollBar.vertical.y: topPadding
+            ScrollBar.vertical.height: availableHeight
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            background: Rectangle {
+                color: "#131c26"
+                border.color: "#53677c"
+                border.width: 1
+                radius: 6
+            }
             contentWidth: availableWidth
             ColumnLayout {
-                width: parent.width
+                objectName: "shader-editor-controls"
+                width: controlsView.availableWidth
                 spacing: 12
                 Label { textFormat: Text.PlainText;
                     Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#ffbdad"
@@ -179,6 +202,7 @@ Window {
                     }
                 }
                 Button {
+                    objectName: "shader-editor-reset"
                     visible: !!editor.effect && editor.effect.parameters.some(function(p) { return p.resettable !== false })
                     text: strings.shaderEditorReset
                     Layout.fillWidth: true

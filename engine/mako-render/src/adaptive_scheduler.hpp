@@ -46,6 +46,9 @@ namespace mako::layer {
             ls::GameConfDefaults::adaptiveAutoBaseFpsCap
         };
         bool nearTargetNativePreference{false};
+        // Fractional Automatic may qualify native output at/above target.
+        // Other modes retain their existing near-target and recovery rules.
+        bool qualifyTargetNativeCadence{false};
         // Derived by the presentation owner; never a persisted setting.
         bool validateIntegerPacing{false};
         bool dynamicCadenceRecovery{

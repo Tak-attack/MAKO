@@ -486,8 +486,10 @@ function layoutScrollRegion(
 function expectInside(region: HTMLElement, element: HTMLElement) {
   const frame = region.getBoundingClientRect();
   const target = element.getBoundingClientRect();
-  expect(target.top).toBeGreaterThanOrEqual(frame.top);
-  expect(target.bottom).toBeLessThanOrEqual(frame.bottom);
+  const scale = frame.height / region.offsetHeight;
+  const inset = region.classList.contains("mako-shader-editor-controls") ? 12 : 4;
+  expect(target.top).toBeGreaterThanOrEqual(frame.top + inset * scale);
+  expect(target.bottom).toBeLessThanOrEqual(frame.bottom - inset * scale);
 }
 
 test("browser and virtual controller focus scroll only their own region without animation", async () => {
@@ -497,7 +499,7 @@ test("browser and virtual controller focus scroll only their own region without 
   field.focus();
   expectInside(region, field);
   expect(region.scrollTo).toHaveBeenLastCalledWith({
-    top: 244,
+    top: 252,
     behavior: "instant",
   });
   field.blur();
@@ -600,7 +602,7 @@ test("tall focused controls align their start without overscrolling and hidden c
   const field = screen.getByLabelText("Amount");
   const region = layoutScrollRegion([[field, 400, 500]]);
   navigation.scroll!({ Element: field });
-  expect(region.scrollTop).toBe(396);
+  expect(region.scrollTop).toBe(388);
   fireEvent.click(screen.getByText("Hide controls"));
   vi.mocked(region.scrollTo).mockClear();
   navigation.scroll!({ Element: field });
