@@ -11,6 +11,13 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Navigation, type GamepadEvent } from "@decky/ui";
 
+const panelNavigation = vi.hoisted(() => ({
+  scroll: undefined as
+    | ((node: { Element?: HTMLElement | null }) => boolean)
+    | undefined,
+  owner: undefined as boolean | "force" | undefined,
+}));
+
 vi.mock("@decky/ui", () => ({
   GamepadButton: { BUMPER_RIGHT: 6, BUMPER_LEFT: 5 },
   gamepadDialogClasses: { FieldDescription: "Steam_FieldDescription" },
@@ -18,6 +25,8 @@ vi.mock("@decky/ui", () => ({
     onButtonDown,
     onGamepadFocus,
     onGamepadBlur,
+    fnScrollIntoViewHandler,
+    scrollIntoViewWhenChildFocused,
     "flow-children": _flow,
     children,
     ...props
@@ -25,9 +34,15 @@ vi.mock("@decky/ui", () => ({
     onButtonDown?: (event: GamepadEvent) => void;
     onGamepadFocus?: (event: GamepadEvent) => void;
     onGamepadBlur?: (event: GamepadEvent) => void;
+    fnScrollIntoViewHandler?: (node: { Element?: HTMLElement | null }) => boolean;
+    scrollIntoViewWhenChildFocused?: boolean | "force";
     "flow-children"?: string;
   }) => {
     const ref = useRef<HTMLDivElement>(null);
+    if (props.className?.includes("Mako_InfoVisibility")) {
+      panelNavigation.scroll = fnScrollIntoViewHandler;
+      panelNavigation.owner = scrollIntoViewWhenChildFocused;
+    }
     useEffect(() => {
       const element = ref.current!;
       const handle = (event: Event) => onButtonDown?.(event as GamepadEvent);
@@ -113,6 +128,13 @@ beforeEach(() => {
     animationFrames.delete(id),
   );
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  HTMLElement.prototype.scrollTo = vi.fn(function (
+    this: HTMLElement,
+    options: ScrollToOptions | number,
+  ) {
+    if (typeof options === "object")
+      this.scrollTop = options.top ?? this.scrollTop;
+  }) as typeof HTMLElement.prototype.scrollTo;
 });
 afterEach(() => {
   cleanup();
@@ -401,6 +423,159 @@ test("effects navigation keeps rows visible without recentering the whole panel"
   });
 });
 
+test.each([
+  { scale: 1, collapseFirst: false },
+  { scale: 1, collapseFirst: true },
+  { scale: 1.5, collapseFirst: false },
+  { scale: 1.5, collapseFirst: true },
+])(
+  "effects collapse keeps Customize visible (scale $scale, collapse first $collapseFirst)",
+  ({ scale, collapseFirst }) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      render(
+        <div data-testid="scroller" style={{ overflowY: "auto" }}>
+          <InfoVisibility>
+            <button>Shaders tab</button>
+            <EffectsChecklist
+              options={[{ data: "clarity", label: "Clarity" }]}
+              initialSelection={["clarity"]}
+              onChange={vi.fn(async () => undefined)}
+            />
+            <button>Customize shaders</button>
+          </InfoVisibility>
+        </div>,
+      );
+      const scroller = screen.getByTestId("scroller");
+      Object.defineProperties(scroller, {
+        clientHeight: { value: 600 },
+        offsetHeight: { value: 600 },
+        scrollHeight: { value: 3000 },
+      });
+      scroller.getBoundingClientRect = () =>
+        new DOMRect(0, 0, 300, 600 * scale);
+      const tab = screen.getByRole("button", { name: "Shaders tab" });
+      tab.getBoundingClientRect = () =>
+        new DOMRect(0, (300 - scroller.scrollTop) * scale, 300, 40 * scale);
+      tab.focus();
+      flushAnimationFrames();
+      fireEvent.click(screen.getByRole("button", { name: /^Choose effects/ }));
+      const row = screen.getByRole("checkbox");
+      fireEvent(row, new CustomEvent("vgp_onfocus", { bubbles: true }));
+      flushAnimationFrames();
+      scroller.scrollTop = 1000;
+      const customize = screen.getByRole("button", {
+        name: "Customize shaders",
+      });
+      customize.getBoundingClientRect = () => {
+        const offset = screen.queryByTestId("mako-effects-list") ? 1440 : 1140;
+        return new DOMRect(
+          0,
+          (offset - scroller.scrollTop) * scale,
+          300,
+          40 * scale,
+        );
+      };
+      // Model native centering separately from Steam's pending animation. Only
+      // Steam's scrollTo wrapper cancels the old destination.
+      customize.scrollIntoView = vi.fn(() => {
+        scroller.scrollTop +=
+          customize.getBoundingClientRect().top / scale - 280;
+      });
+      const staleAnimation = setTimeout(() => {
+        scroller.scrollTop = 200;
+      }, 100);
+      scroller.scrollTo = vi.fn((options: ScrollToOptions | number) => {
+        if (typeof options === "object") {
+          if (options.behavior === "instant") clearTimeout(staleAnimation);
+          scroller.scrollTop = options.top ?? scroller.scrollTop;
+        }
+      }) as typeof scroller.scrollTo;
+      const detail = {
+        blurredNode: { Element: row },
+        focusedNode: { Element: customize },
+      };
+      // Steam runs its scroll hook before the bubbling blur/focus notifications.
+      act(() => panelNavigation.scroll?.({ Element: customize }));
+      fireEvent(row, new CustomEvent("vgp_onblur", { bubbles: true, detail }));
+      fireEvent(
+        customize,
+        new CustomEvent("vgp_onfocus", { bubbles: true, detail }),
+      );
+      if (collapseFirst) act(() => vi.advanceTimersByTime(0));
+      flushAnimationFrames();
+      if (!collapseFirst) act(() => vi.advanceTimersByTime(0));
+      act(() => vi.advanceTimersByTime(100));
+
+      expect(screen.queryByTestId("mako-effects-list")).toBeNull();
+      expect(customize.getBoundingClientRect().top).toBeCloseTo(280 * scale);
+      // Virtual focus does not need to refocus the browser's older tab target.
+      expect(document.activeElement).toBe(tab);
+      expect(panelNavigation.owner).toBe("force");
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+test("effects collapse follows virtual focus and cancels pending work on reentry or unmount", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { unmount } = render(
+      <>
+        <EffectsChecklist
+          options={[
+            { data: "clarity", label: "Clarity" },
+            { data: "vibrance", label: "Vibrance" },
+          ]}
+          initialSelection={["clarity"]}
+          onChange={vi.fn(async () => undefined)}
+        />
+        <button>Customize shaders</button>
+      </>,
+    );
+    const summary = screen.getByRole("button", { name: /^Choose effects/ });
+    fireEvent.click(summary);
+    const [first, second] = screen.getAllByRole("checkbox");
+    const customize = screen.getByRole("button", { name: "Customize shaders" });
+    // DOM focus stays inside the list throughout these controller moves.
+    first.focus();
+    const leave = (target: HTMLElement) =>
+      fireEvent(
+        first,
+        new CustomEvent("vgp_onblur", {
+          bubbles: true,
+          detail: { focusedNode: { Element: target } },
+        }),
+      );
+    leave(second);
+    act(() => vi.advanceTimersByTime(0));
+    expect(screen.getByTestId("mako-effects-list")).toBeTruthy();
+    leave(customize);
+    fireEvent(second, new CustomEvent("vgp_onfocus", { bubbles: true }));
+    act(() => vi.advanceTimersByTime(0));
+    expect(screen.getByTestId("mako-effects-list")).toBeTruthy();
+    leave(customize);
+    act(() => vi.advanceTimersByTime(0));
+    expect(screen.queryByTestId("mako-effects-list")).toBeNull();
+    expect(document.activeElement).not.toBe(customize);
+
+    fireEvent.click(summary);
+    fireEvent(
+      screen.getAllByRole("checkbox")[0],
+      new CustomEvent("vgp_onblur", {
+        bubbles: true,
+        detail: { focusedNode: { Element: customize } },
+      }),
+    );
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test.each([240, 480])(
   "tab grid positions only on entry from above in a %i-pixel viewport",
   (viewportHeight) => {
@@ -569,6 +744,7 @@ test("tab entry recognizes controls rendered in a separate Steam window", () => 
     );
     const before = scroller.querySelector<HTMLButtonElement>("button")!;
     const tab = group.querySelector<HTMLButtonElement>("button")!;
+    scroller.scrollTo = HTMLElement.prototype.scrollTo;
     tab.scrollIntoView = vi.fn();
     before.focus();
     tab.focus();

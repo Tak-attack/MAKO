@@ -40,6 +40,7 @@ export function EffectsChecklist({
     null,
   );
   const checklistRef = useRef<HTMLDivElement>(null);
+  const pendingClose = useRef<number>();
   const focusAnchor = useRef<{
     target: HTMLElement;
     top: number;
@@ -53,6 +54,13 @@ export function EffectsChecklist({
   );
   const pageCount = Math.max(1, Math.ceil(effects.length / EFFECTS_PER_PAGE));
 
+  const cancelPendingClose = () => {
+    window.clearTimeout(pendingClose.current);
+    pendingClose.current = undefined;
+  };
+
+  useEffect(() => cancelPendingClose, []);
+
   useEffect(() => {
     setPage((current) => Math.min(current, pageCount - 1));
   }, [pageCount]);
@@ -65,12 +73,20 @@ export function EffectsChecklist({
     if (expanded) return;
     const anchor = focusAnchor.current;
     if (!anchor) return;
-    if (anchor.target.isConnected) {
-      anchor.target.focus({ preventScroll: true });
-      if (anchor.scroller) {
-        anchor.scroller.scrollTop +=
-          anchor.target.getBoundingClientRect().top - anchor.top;
-      }
+    if (anchor.target.isConnected && anchor.scroller) {
+      const scroller = anchor.scroller;
+      const scale = scroller.offsetHeight
+        ? scroller.getBoundingClientRect().height / scroller.offsetHeight
+        : 1;
+      // Preserve the real navigation target without refocusing an unrelated
+      // DOM activeElement, and cancel Steam's previous scroll destination.
+      if (scale > 0)
+        scroller.scrollTo({
+          top:
+            scroller.scrollTop +
+            (anchor.target.getBoundingClientRect().top - anchor.top) / scale,
+          behavior: "instant",
+        });
     }
     focusAnchor.current = undefined;
   }, [expanded]);
@@ -103,22 +119,22 @@ export function EffectsChecklist({
       .then(() => onChange(value));
   };
 
-  const closeAfterFocusLeaves = () => {
+  const closeAfterFocusLeaves = (target: HTMLElement | null) => {
+    cancelPendingClose();
     if (!expanded) return;
-    window.setTimeout(() => {
+    if (target && checklistRef.current?.contains(target)) return;
+    pendingClose.current = window.setTimeout(() => {
+      pendingClose.current = undefined;
       const checklist = checklistRef.current;
-      const activeElement = checklist?.ownerDocument
-        .activeElement as HTMLElement | null;
       if (
         checklist &&
-        !checklist.contains(activeElement) &&
         !checklist.querySelector(".mako-effects-focus-within")
       ) {
-        if (activeElement && activeElement !== checklist.ownerDocument.body) {
+        if (target && target !== checklist.ownerDocument.body) {
           focusAnchor.current = {
-            target: activeElement,
-            top: activeElement.getBoundingClientRect().top,
-            scroller: findFocusScrollContainer(activeElement),
+            target,
+            top: target.getBoundingClientRect().top,
+            scroller: findFocusScrollContainer(target),
           };
         }
         setExpanded(false);
@@ -267,8 +283,14 @@ export function EffectsChecklist({
       <MakoFocusable
         flow-children="column"
         focusWithinClassName="mako-effects-focus-within"
-        onBlur={closeAfterFocusLeaves}
-        onGamepadBlur={closeAfterFocusLeaves}
+        onFocusCapture={cancelPendingClose}
+        onGamepadFocus={cancelPendingClose}
+        onBlur={(event) =>
+          closeAfterFocusLeaves(event.relatedTarget as HTMLElement | null)
+        }
+        onGamepadBlur={(event) =>
+          closeAfterFocusLeaves(event.detail?.focusedNode?.Element ?? null)
+        }
         {...(expanded ? { onCancel: handleExpandedCancel } : {})}
         style={{ width: "100%" }}
       >

@@ -219,8 +219,8 @@ vi.mock("../../src/components/MakoUi", async (importOriginal) => ({
     onActivate?: () => void;
     onButtonDown?: (event: CustomEvent<{ button: number }>) => void;
     onCancel?: (event: CustomEvent) => void;
-    onGamepadFocus?: () => void;
-    onGamepadBlur?: () => void;
+    onGamepadFocus?: (event: CustomEvent) => void;
+    onGamepadBlur?: (event: CustomEvent) => void;
     "flow-children"?: string;
   }) => {
     const ref = React.useRef<HTMLDivElement>(null);
@@ -233,8 +233,8 @@ vi.mock("../../src/components/MakoUi", async (importOriginal) => ({
         onCancel(event as CustomEvent);
         event.stopPropagation();
       };
-      const handleFocus = () => onGamepadFocus?.();
-      const handleBlur = () => onGamepadBlur?.();
+      const handleFocus = (event: Event) => onGamepadFocus?.(event as CustomEvent);
+      const handleBlur = (event: Event) => onGamepadBlur?.(event as CustomEvent);
       element.addEventListener("vgp_onbuttondown", handleButtonDown);
       element.addEventListener("vgp_oncancel", handleCancel);
       element.addEventListener("vgp_onfocus", handleFocus);
