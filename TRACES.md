@@ -20,7 +20,7 @@ Keep the authorized evidence archive outside the public MAKO worktree and pass i
 
 ## Capture a completed session
 
-Close the game so buffered diagnostics are complete. The managed wrapper stores the latest session at `~/.config/mako-render/present-diagnostics.log` and four older sessions as `.1` through `.4`. The extractor uses the latest by default; select one rotated file with `--diagnostics` for an earlier run. Do not pass a combined multi-session report.
+Close the game so buffered diagnostics are complete. The managed wrapper stores the latest session at `~/.config/mako-render/present-diagnostics.log` and nine older sessions as `.1` through `.9`. The extractor uses the latest by default; select one rotated file with `--diagnostics` for an earlier run. Do not pass a combined multi-session report.
 
 ```bash
 ./scripts/capture-trace.sh \

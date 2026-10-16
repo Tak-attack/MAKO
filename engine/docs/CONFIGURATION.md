@@ -55,7 +55,7 @@ Turn on **Enable Frame-gen (Restart)** before launching. **Real FPS** counts gam
 
 With **Fractional Adaptive** and **Automatic** Real Frame Priority, sustained native FPS can exceed **Target FPS** without generation when **Base FPS Cap** is off or at least the target. For example, a 60 FPS target on a 90 Hz display allows native 75 FPS gameplay with the cap off or set to 90; the manual cap still limits faster sources. Smooth Cadence can be on or off; below-target caps, explicit priorities and Steady keep their selected pacing.
 
-For games switching between 30 FPS cutscenes and 60 FPS gameplay on a 60 Hz display, try Fractional Adaptive with a 2x ceiling and a 60 FPS target, **Real Frame Priority** set to **Automatic**, **Base FPS Cap** off, and **Dynamic Cadence Recovery** enabled. Recovery briefly removes generated work to detect a faster native rate hidden by presentation pacing; its checks can lower output FPS or hitch. **Match Display Refresh Rate** can supply the target when Gamescope confirms 60 Hz. **Auto-disable Frame Generation by Refresh Rate** instead checks display Hz: a 50 Hz threshold allows generation on a 60 Hz display regardless of the game's real FPS. It is not a native-FPS cutoff.
+For games switching between 30 FPS cutscenes and 60 FPS gameplay on a 60 Hz display, try Fractional Adaptive with a 2x ceiling, a 60 FPS target, and **Dynamic Cadence Recovery** enabled. Recovery clears base caps and selects **Automatic** Real Frame Priority; keep those settings to let gameplay reach its native rate. Its checks can briefly lower output FPS or hitch. **Match Display Refresh Rate** can supply the target. **Auto-disable Frame Generation by Refresh Rate** instead checks display Hz, not the game's real FPS.
 
 ### Scaling
 

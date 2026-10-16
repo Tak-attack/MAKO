@@ -154,6 +154,8 @@ Run the installer again to update. See the <a href="engine/README.md#direct-linu
 
 ## Documentation
 
+These guides describe the selected branch. For a published version, select its `plugin-vX.Y.Z` or `render-vX.Y.Z` tag on GitHub; a development branch may document features that are not in the latest download.
+
 - <a href="plugin/docs/CONFIGURATION.md" target="_blank" rel="noopener noreferrer">MAKO Decky configuration</a>: panel controls, profiles, runtime boundaries, and compatibility.
 - <a href="engine/docs/CONFIGURATION.md" target="_blank" rel="noopener noreferrer">MAKO Renderer configuration</a>: Qt controls, profiles, and game launch setup.
 - <a href="engine/README.md" target="_blank" rel="noopener noreferrer">MAKO Renderer</a>: direct installation, usage, builds, and architecture guides.

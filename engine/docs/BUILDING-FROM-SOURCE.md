@@ -2,6 +2,8 @@
 
 This guide covers local development, source installation, and distributable Renderer packages.
 
+Once cloned, run build and packaging commands from `engine/` unless a section says otherwise. Paths in the build-path table are relative to the repository root.
+
 <!-- prettier-ignore -->
 > [!IMPORTANT]
 > If you are planning on compiling MAKO Renderer on SteamOS, check the direct-build prerequisites from the repository root, then run the installer if anything is missing:

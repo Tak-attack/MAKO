@@ -26,7 +26,7 @@ For testing intended to qualify a public release, use `MAKO_PORTABLE_PACKAGE=1 p
 
 The [Renderer source-build guide](../../engine/docs/BUILDING-FROM-SOURCE.md#package-dependency-pins) owns the shared Vulkan-Headers/vkBasalt pins and required presentation-header checks. SteamOS and portable native builders use the shared header revision; default host builds use installed headers with the same minimum check. Flatpak builds retain their runtime SDK compilers and libraries. Keep build identities distinct from release-owned archive pins.
 
-Native Remote Play is owned by [`engine/scripts/mako_remote_play/`](../../engine/scripts/mako_remote_play/), bundled byte-identically into Decky and checked by `check:generated-config`. Components have no runtime import between them. Qt controls and `mako-remote-play` require a current-source Renderer; a Decky-only ZIP using the older published payload cannot supply them.
+Native Remote Play is owned by [`engine/scripts/mako_remote_play/`](../../engine/scripts/mako_remote_play/), bundled byte-identically into Decky and checked by `check:generated-config`. Components have no runtime import between them. Changes to Qt controls or `mako-remote-play` require a matching Renderer build; a Decky-only ZIP uses the pinned release and cannot include newer Renderer changes.
 
 `package:local` is an exact alias for `package:local-engine`. Use `pnpm run package:local-engine-fast` only for a native 64-bit focused package; it omits 32-bit and Flatpak payloads and cannot become a release candidate.
 
