@@ -27,8 +27,13 @@ Open **Customize shaders** in the MAKO Renderer configuration app to fine-tune s
 
 Your adjustments save with the selected profile and are shared across its AC and battery modes. Changes apply live when Shaders was enabled at game launch; rebuilding an effect may cause a brief hitch. The movable editor stays above the game, and **Hide controls** collapses it for a clearer view while comparing results.
 
+Controls now stay clear of the scrollbar and window edges, keeping the reset action accessible in narrower editor windows.
+
 ### Supporting improvements
 
-- **Adaptive stability:** Brief image-availability misses during ordered presentation preserve an established Adaptive workload instead of unnecessarily resetting it. Unsuccessful higher-multiplier trials still back off.
+- **MangoHud in the configuration app:** Enable host-installed MangoHud per profile under **External Tools**, then copy the updated Steam launch option and restart the game. The selection is shared with MAKO Decky. Both launchers can use an optional `~/.config/mako-render/mangohud.conf` for a shared layout. Standalone activation requires Python 3; MangoHud remains exclusive with Shaders and unavailable for Flatpak games.
+- **Native FPS above the Adaptive target:** With **Fractional Adaptive** and **Automatic** Real Frame Priority, sustained native FPS can exceed **Target FPS** without generation when **Base FPS Cap** is off or at least the target. Manual caps remain enforced.
+- **Adaptive stability:** Brief image-availability misses during ordered presentation preserve an established Adaptive workload instead of unnecessarily resetting it. Smooth Cadence requires sustained delivery before accepting a lower multiplier, avoiding downshifts based on a short burst. Unsuccessful higher-multiplier trials still back off.
+- **Gamescope frame pacing:** Scaling keeps receiving compositor feedback while the game or driver is idle. Corrected VRR timing handling and reuse of ready presentation deadlines avoid unnecessary delays after presentation waits.
 - **More complete translations:** Performance, HDR, scaling and Remote Play controls have more consistent translations across the configuration app and MAKO Decky. Bundled shader names and the file picker’s “All Files” filter now follow the selected language. Thanks to [Tak-attack](https://github.com/Tak-attack) for the Japanese improvements in [PR #91](https://github.com/eugeniosegala/MAKO/pull/91).
-- **Better diagnostics:** Reports retain Wayland protocol errors that can explain compositor disconnects and scaling failures.
+- **Better diagnostics:** Reports retain Wayland protocol errors and multi-line failure details even when Steam adds timestamps, helping explain compositor disconnects and scaling failures. The collector can select from all ten launch sessions retained by MAKO Decky when diagnostics are enabled.
