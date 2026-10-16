@@ -122,7 +122,7 @@
   "CONFIG_FORCE_ALSA_AUDIO_DESC": "可能改善 Zink 兼容性、音频卡顿或突然的高音量。关闭后恢复默认音频设置。",
   "CONFIG_EXTERNAL_TOOLS_TITLE": "外部工具",
   "CONFIG_ENABLE_MANGOHUD": "启用 MangoHud（重启）",
-  "CONFIG_ENABLE_MANGOHUD_DESC": "使用已安装的 MangoHud 及其设置；按游戏修改的方法见专家指南。",
+  "CONFIG_ENABLE_MANGOHUD_DESC": "使用已安装的 MangoHud。要在已启用 MangoHud 的配置之间共用布局，请创建 ~/.config/mako-render/mangohud.conf，写入 MangoHud 选项，然后重启游戏。",
   "CONFIG_ENABLE_VKBASALT": "启用着色器（重启）",
   "CONFIG_ENABLE_VKBASALT_DESC": "启动游戏前启用，即可使用内置锐化、抗锯齿和着色器。无需另行安装。如果看不到效果，请尝试窗口模式或无边框全屏模式。",
   "INSTALL_INSTALLING": "正在安装 MAKO Renderer...",

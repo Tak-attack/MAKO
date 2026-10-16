@@ -1098,6 +1098,43 @@ ApplicationWindow {
                 }
 
                 Group {
+                    name: t.externalTools
+                    objectName: "externalToolsGroup"
+
+                    GroupEntry {
+                        title: t.enableMangoHud
+                        description: t.enableMangoHudDesc
+                        compactRestartMarker: true
+
+                        CheckBox {
+                            objectName: "enableMangoHud"
+                            Layout.alignment: Qt.AlignRight
+                            enabled: backend.available && !backend.mangohud_checking &&
+                                     (backend.mangohud_available || backend.enable_mangohud)
+                            checked: backend.enable_mangohud
+                            onToggled: backend.enable_mangohud = checked
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: t.mangoHudLaunchHelp
+                        color: Qt.rgba(palette.text.r, palette.text.g, palette.text.b, 0.7)
+                    }
+                    Label {
+                        visible: !backend.mangohud_available
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: backend.mangohud_checking ? t.mangoHudChecking : t.mangoHudUnavailable
+                    }
+                    ShaderActionButton {
+                        text: t.refreshMangoHud
+                        enabled: !backend.mangohud_checking
+                        onClicked: backend.refreshMangoHud()
+                    }
+                }
+
+                Group {
                     name: t.standaloneLaunchSettings
 
                     GroupEntry {

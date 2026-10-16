@@ -204,6 +204,20 @@ class LocalizationLanguageContractTests(unittest.TestCase):
         self.assertEqual(steam_aliases["german"], "de")
         self.assertEqual(steam_aliases["russian"], "ru")
 
+    def test_shared_mangohud_guidance_matches_in_every_language(self):
+        renderer = json.loads(RENDERER_TRANSLATIONS.read_text(encoding="utf-8"))["catalogs"]
+        shared = {
+            "CONFIG_ENABLE_MANGOHUD": "enableMangoHud",
+            "CONFIG_ENABLE_MANGOHUD_DESC": "enableMangoHudDesc",
+            "CONFIG_EXTERNAL_TOOLS_TITLE": "externalTools",
+        }
+        for language, catalog in renderer.items():
+            source = "template" if language == "en" else language
+            decky = json.loads((DECKY_I18N_ROOT / f"{source}.json").read_text(encoding="utf-8"))
+            for decky_key, qt_key in shared.items():
+                with self.subTest(language=language, key=qt_key):
+                    self.assertEqual(decky[decky_key], catalog[qt_key])
+
     def test_shared_control_names_agree_across_independent_catalogs(self):
         renderer = json.loads(
             RENDERER_TRANSLATIONS.read_text(encoding="utf-8")

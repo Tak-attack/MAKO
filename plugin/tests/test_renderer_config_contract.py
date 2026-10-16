@@ -45,6 +45,8 @@ from py_modules.mako_plugin.constants import (
     MAKO_LAYER_ENABLE_ENV,
     MAKO_PROFILE_ENV,
     MAKO_PROFILE_FALLBACK_ENV,
+    MANGOHUD_CONFIG_FILENAME,
+    MANGOHUD_CONFIG_FILE_ENV,
     PRESENT_ACQUIRE_TIMEOUT_ENV,
     PRESENT_DIAGNOSTICS_ENV,
     PRESENT_DIAGNOSTICS_LOG_ENV,
@@ -312,6 +314,9 @@ class RendererConfigContractTests(unittest.TestCase):
             "enable_zink",
             "force_alsa_audio",
             "enable_vkbasalt",
+            "enable_mangohud",
+            "mangohud_available",
+            "mangohud_checking",
         ):
             with self.subTest(field=field):
                 self.assertIn(f"backend.{field}", ui_source)
@@ -334,13 +339,24 @@ class RendererConfigContractTests(unittest.TestCase):
             "disable_steamdeck_mode",
             "external_vulkan_layer",
             "gamescope_wsi",
-            "mangohud",
         ):
             with self.subTest(control=unsupported_layer_control):
                 self.assertNotIn(
                     f"backend.{unsupported_layer_control}",
                     ui_source.lower(),
                 )
+
+    def test_native_mangohud_uses_the_shared_profile_and_layout_contract(self):
+        backend = (REPOSITORY_ROOT / "engine/mako-ui/src/backend.cpp").read_text(encoding="utf-8")
+        launcher = (REPOSITORY_ROOT / "engine/scripts/mako-launch").read_text(encoding="utf-8")
+        self.assertIn('QStringLiteral("external_vulkan_layer")', backend)
+        self.assertIn('QStringLiteral("mangohud")', backend)
+        self.assertIn('QStringLiteral("MANGOHUD=1")', backend)
+        self.assertIn('"--check-mangohud"', backend)
+        self.assertIn("mako-render/" + MANGOHUD_CONFIG_FILENAME, launcher)
+        self.assertIn(f'export {MANGOHUD_CONFIG_FILE_ENV}="$mako_mangohud_config"', launcher)
+        self.assertIn('layer.get("enable_environment") != {"MANGOHUD": "1"}', launcher)
+        self.assertIn('layer.get("disable_environment") != {"DISABLE_MANGOHUD": "1"}', launcher)
 
     def test_adaptive_minimum_base_fps_matches_renderer_policy(self):
         source = (

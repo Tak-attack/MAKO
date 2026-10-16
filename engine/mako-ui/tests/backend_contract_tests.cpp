@@ -94,6 +94,112 @@ void test_installed_launcher_selection() {
     else qputenv("PATH", previousPath);
 }
 
+void test_mangohud_profile_and_availability() {
+    require_property("enable_mangohud", "bool", true, false);
+    require_property("mangohud_available", "bool", false, false);
+    require_property("mangohud_checking", "bool", false, false);
+    QTemporaryDir directory;
+    require(directory.isValid(), "MangoHud fixture directory failed");
+    const auto previousConfig = qgetenv("MAKO_CONFIG");
+    const auto previousLaunch = qgetenv("MAKO_LAUNCH_CONFIG");
+    const auto previousConfigHome = qgetenv("XDG_CONFIG_HOME");
+    const auto previousShaders = qgetenv("MAKO_VKBASALT_SHADER_DIR");
+    qputenv("MAKO_CONFIG", directory.filePath("conf.toml").toUtf8());
+    qputenv("MAKO_LAUNCH_CONFIG", directory.filePath("launcher.conf").toUtf8());
+    qputenv("XDG_CONFIG_HOME", directory.path().toUtf8());
+    qputenv("MAKO_VKBASALT_SHADER_DIR", QByteArray(MAKO_UI_VKBASALT_SHADER_SOURCE_DIR));
+    ls::ConfigFile fixture;
+    fixture.profiles().front().name = "Mango game";
+    ls::GameConf other;
+    other.name = "Other game";
+    fixture.profiles().push_back(other);
+    fixture.write(directory.filePath("conf.toml").toStdString());
+    const auto helper = directory.filePath("launcher helper");
+    const auto writeHelper = [&](const QByteArray& response) {
+        QFile file(helper);
+        require(file.open(QIODevice::WriteOnly), "cannot write MangoHud check fixture");
+        file.write("#!/bin/sh\n[ \"$1\" = --check-mangohud ] || exit 1\nprintf '%s\\n' '");
+        file.write(response);
+        file.write("'\n");
+        file.close();
+        require(file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner),
+            "cannot make check fixture executable");
+    };
+    const auto wait = [](mako::ui::Backend& backend) {
+        QElapsedTimer timer;
+        timer.start();
+        while (backend.mangoHudChecking() && timer.elapsed() < 3000) {
+            QCoreApplication::processEvents();
+            QThread::msleep(5);
+        }
+        QCoreApplication::processEvents();
+        require(!backend.mangoHudChecking(), "MangoHud availability check did not finish");
+    };
+    writeHelper("{\"available\":true}");
+    {
+        mako::ui::Backend backend("/proc", {}, {}, helper);
+        wait(backend);
+        require(backend.mangoHudAvailable() && !backend.getEnableMangoHud(),
+            "availability must not enable MangoHud automatically");
+        backend.enableVkBasaltUpdated(true);
+        backend.vkBasaltSharpnessUpdated(0.65F);
+        backend.enableMangoHudUpdated(true);
+        require(backend.getEnableMangoHud() && !backend.getEnableVkBasalt() &&
+                backend.getLaunchOption().contains("MANGOHUD=1") &&
+                !backend.getLaunchOption().contains("ENABLE_VKBASALT=1"),
+            "MangoHud must replace Shaders in the copied launch option");
+        backend.profileSelected(1);
+        require(!backend.getEnableMangoHud(), "MangoHud leaked to another profile");
+        backend.profileSelected(0);
+        require(backend.getEnableMangoHud(), "MangoHud selection was not retained");
+        backend.enableVkBasaltUpdated(true);
+        backend.enableVkBasaltUpdated(false);
+        require(!backend.getEnableMangoHud(), "disabling Shaders resurrected an old MangoHud selection");
+        backend.enableMangoHudUpdated(true);
+        require(backend.getVkBasaltSharpness() == 0.65F, "switching external tools lost shader settings");
+        require(backend.createProfile("Mango copy") && backend.getEnableMangoHud() &&
+                backend.renameProfile("Mango renamed") && backend.getEnableMangoHud(),
+            "profile copy or rename discarded MangoHud");
+        require(backend.getLaunchOption().contains("MAKO_PROFILE='Mango renamed'"),
+            "renamed profile launch option is stale");
+    }
+    writeHelper("{\"available\":false}");
+    {
+        mako::ui::Backend backend("/proc", {}, {}, helper);
+        wait(backend);
+        require(!backend.mangoHudAvailable() && backend.getEnableMangoHud(),
+            "an unavailable installation must preserve the saved profile choice");
+        backend.enableMangoHudUpdated(false);
+        require(!backend.getEnableMangoHud() && !backend.getLaunchOption().contains("MANGOHUD=1"),
+            "an unavailable saved MangoHud selection could not be turned off");
+        backend.enableMangoHudUpdated(true);
+        require(!backend.getEnableMangoHud(), "Qt enabled an unavailable MangoHud installation");
+        writeHelper("{\"available\":\"true\"}");
+        backend.refreshMangoHud();
+        wait(backend);
+        require(!backend.mangoHudAvailable(), "malformed check response enabled MangoHud");
+        writeHelper("{\"available\":true}");
+        backend.refreshMangoHud();
+        wait(backend);
+        backend.enableMangoHudUpdated(true);
+        require(backend.getEnableMangoHud(), "refresh did not discover the newly installed MangoHud");
+        backend.profileSelected(0);
+    }
+    QFile sidecar(directory.filePath("profile-wrapper-settings.json"));
+    require(sidecar.open(QIODevice::ReadOnly), "Qt did not save the shared profile sidecar");
+    const auto profiles = QJsonDocument::fromJson(sidecar.readAll()).object().value("profiles").toObject();
+    require(profiles.value("Mango game").toObject().value("external_vulkan_layer") == "mangohud" &&
+            profiles.value("Mango renamed").toObject().value("external_vulkan_layer") == "mangohud" &&
+            profiles.value("Other game").toObject().value("external_vulkan_layer") == "",
+        "Qt did not preserve Decky's per-profile external-layer format");
+    for (const auto& entry : {std::pair{"MAKO_CONFIG", previousConfig},
+            std::pair{"MAKO_LAUNCH_CONFIG", previousLaunch},
+            std::pair{"XDG_CONFIG_HOME", previousConfigHome},
+            std::pair{"MAKO_VKBASALT_SHADER_DIR", previousShaders}}) {
+        if (entry.second.isNull()) qunsetenv(entry.first); else qputenv(entry.first, entry.second);
+    }
+}
+
 void test_scaling_properties() {
     require_property("hdr_quality", "QString", true, false);
     require_property("running_games", "QVariantList", false, false);
@@ -617,7 +723,7 @@ void test_compact_restart_markers() {
     QFile ui_file(QString::fromUtf8(MAKO_UI_QML_FILE));
     require(ui_file.open(QIODevice::ReadOnly), "MAKO UI QML could not be opened");
     const QString ui_qml = QString::fromUtf8(ui_file.readAll());
-    require(ui_qml.count(QStringLiteral("compactRestartMarker: true")) == 12,
+    require(ui_qml.count(QStringLiteral("compactRestartMarker: true")) == 13,
         "Every restart-bound Renderer control must opt into the compact marker");
 
     QFile entry_file(QString::fromUtf8(MAKO_UI_GROUP_ENTRY_QML_FILE));
@@ -1498,6 +1604,7 @@ int main(int argc, char* argv[]) {
     const QCoreApplication application(argc, argv);
     try {
         test_installed_launcher_selection();
+        test_mangohud_profile_and_availability();
         test_scaling_properties();
         test_lossless_scaling_is_optional();
         test_power_profile_editor();

@@ -60,6 +60,9 @@ namespace mako::ui {
         Q_PROPERTY(bool disable_steam_overlay READ getDisableSteamOverlay WRITE disableSteamOverlayUpdated NOTIFY refreshUI)
         Q_PROPERTY(bool enable_hdr READ getEnableHdr WRITE enableHdrUpdated NOTIFY refreshUI)
         Q_PROPERTY(bool force_alsa_audio READ getForceAlsaAudio WRITE forceAlsaAudioUpdated NOTIFY refreshUI)
+        Q_PROPERTY(bool enable_mangohud READ getEnableMangoHud WRITE enableMangoHudUpdated NOTIFY refreshUI)
+        Q_PROPERTY(bool mangohud_available READ mangoHudAvailable NOTIFY refreshUI)
+        Q_PROPERTY(bool mangohud_checking READ mangoHudChecking NOTIFY refreshUI)
         Q_PROPERTY(bool enable_vkbasalt READ getEnableVkBasalt WRITE enableVkBasaltUpdated NOTIFY refreshUI)
         Q_PROPERTY(QString vkbasalt_sharpening READ getVkBasaltSharpening WRITE vkBasaltSharpeningUpdated NOTIFY refreshUI)
         Q_PROPERTY(float vkbasalt_sharpness READ getVkBasaltSharpness WRITE vkBasaltSharpnessUpdated NOTIFY refreshUI)
@@ -134,7 +137,7 @@ namespace mako::ui {
 
     public:
         explicit Backend(std::filesystem::path procRoot = "/proc",
-                         QString remotePlayHelper = {}, QString shaderHelper = {});
+                         QString remotePlayHelper = {}, QString shaderHelper = {}, QString launcherHelper = {});
         ~Backend() override;
 
         [[nodiscard]] QVariantList getRunningGames() const;
@@ -307,6 +310,11 @@ namespace mako::ui {
         Q_INVOKABLE bool setShaderParameters(const QVariantMap& changes);
         [[nodiscard]] QString getShaderLoadError() const { return this->m_shader_load_error; }
         [[nodiscard]] QString getLaunchOption() const;
+        [[nodiscard]] bool getEnableMangoHud() const;
+        [[nodiscard]] bool mangoHudAvailable() const { return m_mangohud_available; }
+        [[nodiscard]] bool mangoHudChecking() const { return m_mangohud_process.state() != QProcess::NotRunning; }
+        Q_INVOKABLE void refreshMangoHud();
+        void enableMangoHudUpdated(bool enabled);
 
 #define VALIDATE_AND_GET_PROFILE(default) \
     if (!isValidProfileIndex()) return default; \
@@ -627,10 +635,8 @@ namespace mako::ui {
         }
         void enableVkBasaltUpdated(bool enabled) {
             if (!isValidProfileIndex()) return;
-            this->m_vkbasalt_profiles.at(
-                static_cast<size_t>(this->m_profile_index)
-            ).enabled = enabled;
-            MARK_SHADER_DIRTY()
+            setExternalVulkanLayer(enabled ? QStringLiteral("vkbasalt") :
+                (getEnableMangoHud() ? QStringLiteral("mangohud") : QString{}));
         }
         void vkBasaltSharpeningUpdated(const QString& sharpening) {
             const auto value = sharpening.toStdString();
@@ -980,6 +986,12 @@ namespace mako::ui {
         bool m_capture_failed{false};
 
         int m_power_mode{0};
+        QString m_launcher_helper;
+        QProcess m_mangohud_process;
+        QTimer m_mangohud_timeout;
+        bool m_mangohud_available{false};
+        void initializeMangoHud();
+        void setExternalVulkanLayer(const QString& layer);
         QString m_remote_play_helper;
         QProcess m_remote_play_process;
         QVariantList m_shader_parameter_effects;

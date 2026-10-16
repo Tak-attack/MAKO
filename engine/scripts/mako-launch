@@ -19,6 +19,13 @@ Enable MAKO's private bundled vkBasalt after the Renderer:
 
 VKBASALT_CONFIG_FILE=/absolute/path/vkBasalt.conf selects an optional config.
 
+Enable installed host MangoHud (exclusive with Shaders; requires Python 3):
+  MANGOHUD=1 mako-launch COMMAND [ARG ...]
+
+A readable ~/.config/mako-render/mangohud.conf supplies the shared HUD layout.
+XDG_CONFIG_HOME is respected. Check host availability without changing files:
+  mako-launch --check-mangohud
+
 Standalone launch compatibility settings are read from:
   ~/.config/mako-render/launcher.conf
 
@@ -32,6 +39,130 @@ may cause startup, synchronization, presentation, or image-quality failures.
 EOF
 }
 
+# Keep discovery and admission in one owner for both the Qt availability check
+# and launch. Only named, guarded manifests enter the private directory; never
+# expose the host's implicit-layer directory to the game. Python runs only when
+# MangoHud is requested, not on normal launches or in the rendering loop.
+mako_mangohud_manifests() {
+    python3 - "$1" <<'PYTHON'
+import contextlib
+import fcntl
+import json
+import os
+from pathlib import Path
+import platform
+import stat
+import sys
+import tempfile
+
+
+def discover():
+    if os.environ.get("FLATPAK_ID") or platform.machine() not in ("x86_64", "AMD64"):
+        return {}
+    home = Path.home()
+    roots = [Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config"),
+             Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")]
+    for key, default in (("XDG_CONFIG_DIRS", "/etc/xdg"), ("XDG_DATA_DIRS", "/usr/local/share:/usr/share")):
+        roots.extend(Path(value) for value in (os.environ.get(key) or default).split(":") if value.startswith("/"))
+    admitted = {}
+    for suffix, arch in (("x86_64", "64"), ("x86", "32")):
+        filename = "MangoHud." + suffix + ".json"
+        for root in roots:
+            if not root.is_absolute():
+                continue
+            source = root / "vulkan/implicit_layer.d" / filename
+            try:
+                # Nonblocking open plus fstat prevents special files from hanging
+                # the availability check or a game launch.
+                fd = os.open(source, os.O_RDONLY | os.O_NONBLOCK)
+                with os.fdopen(fd, "rb") as stream:
+                    if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                        continue
+                    content = stream.read(65537)
+                if len(content) > 65536:
+                    continue
+                manifest = json.loads(content)
+                layer = manifest.get("layer")
+                if (not isinstance(layer, dict) or "layers" in manifest or
+                        layer.get("name") != "VK_LAYER_MANGOHUD_overlay_" + suffix or
+                        layer.get("type") != "GLOBAL" or
+                        layer.get("library_arch") not in (None, arch) or
+                        layer.get("enable_environment") != {"MANGOHUD": "1"} or
+                        layer.get("disable_environment") != {"DISABLE_MANGOHUD": "1"}):
+                    continue
+                library = layer.get("library_path")
+                if not isinstance(library, str) or not library or any(c in library for c in "\r\n\0"):
+                    continue
+                if "/" in library:
+                    library_path = (source.parent / library).resolve()
+                    if not library_path.is_file() or not os.access(library_path, os.R_OK):
+                        continue
+                    layer["library_path"] = str(library_path)
+                layer["library_arch"] = arch
+                admitted[filename] = json.dumps(manifest, indent=2) + "\n"
+                break
+            except (OSError, ValueError, AttributeError, TypeError):
+                continue
+    return admitted
+
+
+@contextlib.contextmanager
+def locked_directory(directory):
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield os.fstat(fd)
+    finally:
+        os.close(fd)
+
+
+def prepare(manifests):
+    if not manifests:
+        raise ValueError("no compatible host MangoHud manifest")
+    directory = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "mako-render/mangohud"
+    if not directory.is_absolute() or any(c in str(directory) for c in ":\r\n"):
+        raise ValueError("invalid MangoHud cache path")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Concurrent launches must not observe another launch's temporary file.
+    with locked_directory(directory) as info:
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+            raise ValueError("MangoHud cache directory is not private")
+        names = {"MangoHud.x86_64.json", "MangoHud.x86.json"}
+        if any(path.name not in names for path in directory.iterdir()):
+            raise ValueError("unexpected files in MangoHud cache directory")
+        for name in names:
+            target = directory / name
+            if target.is_symlink() or (target.exists() and not target.is_file()):
+                raise ValueError("invalid cached MangoHud manifest")
+            if name not in manifests:
+                target.unlink(missing_ok=True)
+                continue
+            content = manifests[name]
+            if (target.exists() and target.stat().st_size == len(content.encode()) and
+                    target.read_bytes() == content.encode()):
+                continue
+            fd, temporary = tempfile.mkstemp(prefix="mangohud-manifest-", dir=directory.parent)
+            try:
+                with os.fdopen(fd, "w") as stream:
+                    stream.write(content)
+                os.replace(temporary, target)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+    return directory
+
+
+try:
+    manifests = discover()
+    if sys.argv[1] == "check":
+        print(json.dumps({"available": bool(manifests)}))
+    else:
+        print(prepare(manifests))
+except (OSError, ValueError) as error:
+    print("MAKO Renderer: MangoHud unavailable: " + str(error), file=sys.stderr)
+    sys.exit(1)
+PYTHON
+}
+
 if (($# == 0)); then
     echo "mako-launch requires a command to run." >&2
     usage >&2
@@ -39,6 +170,10 @@ if (($# == 0)); then
 fi
 
 case "$1" in
+    --check-mangohud)
+        mako_mangohud_manifests check
+        exit $?
+        ;;
     -h|--help)
         usage
         exit 0
@@ -197,6 +332,17 @@ case "$mako_vkbasalt_requested" in
         exit 2
         ;;
 esac
+mako_mangohud_requested="${MANGOHUD:-0}"
+case "$mako_mangohud_requested" in
+    0|1) ;;
+    *) echo "MAKO Renderer: MANGOHUD must be 0 or 1." >&2; exit 2 ;;
+esac
+if [[ "$mako_mangohud_requested" == 1 && "$mako_vkbasalt_requested" == 1 ]]; then
+    echo "MAKO Renderer: MangoHud and Shaders cannot be enabled together; select one." >&2
+    exit 2
+fi
+unset MANGOHUD
+export DISABLE_MANGOHUD=1
 mako_vkbasalt_config="${VKBASALT_CONFIG_FILE:-}"
 unset ENABLE_VKBASALT VKBASALT_CONFIG_FILE VKBASALT_CONFIG_RELOAD
 export DISABLE_VKBASALT=1
@@ -277,6 +423,11 @@ mako_existing_instance_layers=":${VK_INSTANCE_LAYERS:-}:"
 while [[ "$mako_existing_instance_layers" == *":VK_LAYER_VKBASALT_post_processing:"* ]]; do
     mako_existing_instance_layers="${mako_existing_instance_layers/:VK_LAYER_VKBASALT_post_processing:/:}"
 done
+for mako_mangohud_layer in VK_LAYER_MANGOHUD_overlay_x86_64 VK_LAYER_MANGOHUD_overlay_x86; do
+    while [[ "$mako_existing_instance_layers" == *":$mako_mangohud_layer:"* ]]; do
+        mako_existing_instance_layers="${mako_existing_instance_layers/:$mako_mangohud_layer:/:}"
+    done
+done
 if [[ -n "$mako_steam_overlay_layers" ]]; then
     for mako_steam_overlay_layer in VK_LAYER_VALVE_steam_overlay_64 VK_LAYER_VALVE_steam_overlay_32; do
         while [[ "$mako_existing_instance_layers" == *":$mako_steam_overlay_layer:"* ]]; do
@@ -349,6 +500,34 @@ elif [[ "$mako_vkbasalt_enabled" != 1 ]]; then
         unset VK_INSTANCE_LAYERS
     fi
 fi
+if [[ "$mako_mangohud_requested" == 1 && "${DISABLE_MAKO:-0}" != 1 ]]; then
+    if [[ -n "${FLATPAK_ID:-}" || "$mako_flatpak_launch" == 1 ]]; then
+        echo "MAKO Renderer: host MangoHud is unavailable for Flatpak; continuing without MangoHud." >&2
+    elif mako_mangohud_directory="$(mako_mangohud_manifests prepare)"; then
+        mako_implicit_layer_path="$mako_implicit_layer_path:$mako_mangohud_directory"
+        export MANGOHUD=1
+        unset DISABLE_MANGOHUD
+        # Match Decky's 64-bit explicit ordering. The guarded 32-bit manifest
+        # stays implicit and is admitted only to a matching 32-bit process.
+        if [[ -r "$mako_mangohud_directory/MangoHud.x86_64.json" ]]; then
+            mako_mangohud_chain=":${VK_INSTANCE_LAYERS:-}:"
+            while [[ "$mako_mangohud_chain" == *":VK_LAYER_MAKO_render:"* ]]; do
+                mako_mangohud_chain="${mako_mangohud_chain/:VK_LAYER_MAKO_render:/:}"
+            done
+            mako_mangohud_chain="${mako_mangohud_chain#:}"
+            mako_mangohud_chain="${mako_mangohud_chain%:}"
+            export VK_INSTANCE_LAYERS="VK_LAYER_MAKO_render:VK_LAYER_MANGOHUD_overlay_x86_64${mako_mangohud_chain:+:$mako_mangohud_chain}"
+        fi
+        mako_mangohud_config="${XDG_CONFIG_HOME:-$HOME/.config}/mako-render/mangohud.conf"
+        if [[ -f "$mako_mangohud_config" && -r "$mako_mangohud_config" ]]; then
+            export MANGOHUD_CONFIGFILE="$mako_mangohud_config"
+        fi
+    else
+        echo "MAKO Renderer: continuing without MangoHud." >&2
+    fi
+fi
+unset mako_mangohud_requested mako_mangohud_directory mako_mangohud_config
+unset mako_mangohud_chain mako_mangohud_layer
 export VK_IMPLICIT_LAYER_PATH="$mako_implicit_layer_path"
 unset VK_ADD_IMPLICIT_LAYER_PATH
 # Apply the saved process-start Performance setting before application exec.

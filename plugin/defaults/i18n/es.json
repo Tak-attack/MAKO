@@ -122,7 +122,7 @@
   "CONFIG_FORCE_ALSA_AUDIO_DESC": "Puede ayudar con Zink, cortes de audio o sonidos fuertes repentinos. Desactívalo para restaurar el audio normal.",
   "CONFIG_EXTERNAL_TOOLS_TITLE": "Herramientas externas",
   "CONFIG_ENABLE_MANGOHUD": "Activar MangoHud (Reiniciar)",
-  "CONFIG_ENABLE_MANGOHUD_DESC": "Usa MangoHud instalado y su configuración; consulta la guía avanzada para cambios por juego.",
+  "CONFIG_ENABLE_MANGOHUD_DESC": "Usa MangoHud instalado. Para compartir un diseño entre los perfiles con MangoHud activado, crea ~/.config/mako-render/mangohud.conf con opciones de MangoHud y reinicia el juego.",
   "CONFIG_ENABLE_VKBASALT": "Habilitar shaders (Reiniciar)",
   "CONFIG_ENABLE_VKBASALT_DESC": "Actívalo antes de iniciar para usar nitidez, antialiasing y shaders incluidos. No necesita instalación aparte. Si no ves los efectos, prueba el modo Ventana o Pantalla completa sin bordes.",
   "INSTALL_INSTALLING": "Instalando MAKO Renderer...",

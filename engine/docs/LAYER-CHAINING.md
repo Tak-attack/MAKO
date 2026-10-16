@@ -39,6 +39,20 @@ Flatpak apps require [Flatpak shader setup](FLATPAK-GUIDE.md#optional-private-vk
 ~/.local/bin/mako-launch %command%
 ```
 
+## Standalone MAKO Renderer with MangoHud
+
+Select a profile in the Qt UI and enable **External Tools → Enable MangoHud (Restart)**. Install host MangoHud and Python 3 first; **Refresh MangoHud** checks availability without blocking the UI. Copy the updated launch option into Steam and restart the game. Disabling MangoHud also requires copying the updated option. The profile selection is stored in the same `profile-wrapper-settings.json` field used by Decky.
+
+For manual native or Proton activation:
+
+```text
+MANGOHUD=1 ~/.local/bin/mako-launch %command%
+```
+
+MangoHud and Shaders are mutually exclusive. The UI switches the selected integration without deleting shader settings; a manual command requesting both is rejected. Host MangoHud is not enabled inside Flatpak or for a direct `flatpak run` command.
+
+`mako-launch --check-mangohud` reports availability as JSON without writing files. Native launch checks only the named `MangoHud.x86_64.json` and `MangoHud.x86.json` manifests in the standard XDG configuration/data locations. It verifies each layer's identity, architecture, library path and activation gates, resolves relative library paths, and stages only validated manifests under `$XDG_CACHE_HOME/mako-render/mangohud` (normally `~/.cache/mako-render/mangohud`). The directory is private to the user; concurrent launches are serialized during staging and unchanged files are not rewritten. Missing or invalid installations leave the game running without MangoHud and produce a diagnostic. The launcher never adds the host's full implicit-layer directory.
+
 ## MAKO Decky integrations
 
 ### Gamescope WSI compatibility
@@ -54,6 +68,28 @@ Save or select the game's profile, enable **Shaders** in its tab or **MangoHud**
 MangoHud and Shaders cannot run together. MangoHud requires a host installation and is unavailable inside Flatpak games. Shaders use bundled vkBasalt; prepare Flatpak apps in **Flatpak Setup** first.
 
 Shader selections apply live after activation. More effects cost more GPU time; **HDR Look (SDR)** does not enable HDR. Use **Refresh** after editing shader files. See [configuration](CONFIGURATION.md#qt-shaders-and-compatibility-controls) for controls and custom shaders.
+
+## Shared MangoHud layout
+
+Both Qt and MAKO Decky show shared-layout instructions under **External Tools → Enable MangoHud (Restart)**. In Decky, select **Show info** if descriptions are hidden. Create the configuration file manually; the toggle does not create it.
+
+To use one custom MangoHud layout across your games, create `~/.config/mako-render/mangohud.conf` with ordinary MangoHud options, for example:
+
+```ini
+fps
+frametime
+position=top-right
+```
+
+In Decky, keep the usual `mako-run %command%` launch option and enable **MangoHud** in each profile that should use it. In Qt, use the complete copied launch option, including `MANGOHUD=1`. Both launchers respect `XDG_CONFIG_HOME` for the shared file location. On each supported host launch, MAKO selects this file if it is a readable regular file. Creating or removing it takes effect on the next game launch without resaving profiles. Missing, unreadable, or non-file paths leave the inherited configuration unchanged. MAKO does not create, edit, or execute the file.
+
+The shared file replaces any inherited `MANGOHUD_CONFIGFILE`, including Gaming Mode's Gamescope preset file. This changes only the launched game's MangoHud configuration; Steam's separate performance overlay remains under Steam's control. Existing `MANGOHUD_CONFIG` values retain MangoHud's precedence: without `read_cfg`, that variable can bypass file loading; with `read_cfg`, its options override file values. For a per-game file exception, apply the override after MAKO's wrapper:
+
+```text
+/home/deck/.local/bin/mako-run env MANGOHUD_CONFIGFILE=/absolute/path/to/game.conf %command%
+```
+
+For standalone launches, use `MANGOHUD=1 ~/.local/bin/mako-launch env MANGOHUD_CONFIGFILE=/absolute/path/to/game.conf %command%`. Quote paths containing spaces. The shared file does not enable MangoHud by itself or add Flatpak or simultaneous Shader support. Choosing a layout adds no MAKO per-frame work. MangoHud's own cost depends on its metrics, and its FPS counter is not a guaranteed measurement of pre-generation game FPS; that depends on the active layer chain.
 
 ## Support boundaries
 

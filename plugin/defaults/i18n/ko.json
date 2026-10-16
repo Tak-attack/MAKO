@@ -122,7 +122,7 @@
   "CONFIG_FORCE_ALSA_AUDIO_DESC": "Zink 호환성, 오디오 끊김 또는 갑작스러운 큰 소리에 도움이 될 수 있습니다. 끄면 기본 오디오 설정으로 돌아갑니다.",
   "CONFIG_EXTERNAL_TOOLS_TITLE": "외부 도구",
   "CONFIG_ENABLE_MANGOHUD": "MangoHud 활성화 (재시작)",
-  "CONFIG_ENABLE_MANGOHUD_DESC": "설치된 MangoHud와 그 설정을 사용합니다. 게임별 변경은 전문가 가이드를 보세요.",
+  "CONFIG_ENABLE_MANGOHUD_DESC": "설치된 MangoHud를 사용합니다. MangoHud가 활성화된 프로필에서 레이아웃을 공유하려면 ~/.config/mako-render/mangohud.conf 파일에 MangoHud 옵션을 작성하고 게임을 다시 시작하세요.",
   "CONFIG_ENABLE_VKBASALT": "셰이더 사용 (재시작)",
   "CONFIG_ENABLE_VKBASALT_DESC": "게임 시작 전에 켜면 포함된 선명화, 안티앨리어싱, 셰이더를 사용합니다. 별도 설치는 필요 없습니다. 효과가 보이지 않으면 창 모드 또는 테두리 없는 전체 화면을 사용해 보세요.",
   "INSTALL_INSTALLING": "MAKO Renderer 설치 중...",

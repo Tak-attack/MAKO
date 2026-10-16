@@ -1151,7 +1151,8 @@ namespace {
                         OrderedPresentTimeline timeline;
                         TimePoint lastOutput{};
                         uint64_t serial = 0;
-                        auto present = [&](const double sourceFps) {
+                        // Clang 14 needs an init-capture for a structured binding.
+                        auto present = [&, refreshHz = refreshHz](const double sourceFps) {
                             const auto renderInterval =
                                 std::chrono::duration_cast<TimePoint::duration>(
                                     std::chrono::duration<double>(1.0 / sourceFps));
@@ -5339,6 +5340,47 @@ namespace {
             "a rejected native-cadence probe did not resume 2x generation");
     }
 
+    void testFractionalAutomaticDoesNotProbeWithoutRecovery() {
+        for (const uint32_t target : {50U, 60U, 90U, 120U}) {
+            for (const size_t multiplier : {2U, 3U, 5U}) {
+                const double baseFps = double(target) / multiplier;
+                if (baseFps < 12.0)
+                    continue;
+                for (const bool smooth : {false, true}) {
+                    for (const uint32_t cap : {0U, target, target * 2}) {
+                        ls::GameConf profile;
+                        profile.adaptive = true;
+                        profile.target_fps = target;
+                        profile.adaptive_max_multiplier = multiplier;
+                        profile.adaptive_auto_base_fps_cap = false;
+                        profile.adaptive_fractional_real_frame_priority =
+                            ls::AdaptiveFractionalRealFramePriority::Auto;
+                        profile.adaptive_stable_cadence = smooth;
+                        profile.base_fps_cap = cap;
+                        profile.dynamic_cadence_recovery = false;
+                        const auto policy = generationSchedulerPolicy(profile, target);
+                        require(policy && policy->qualifyTargetNativeCadence &&
+                                !policy->dynamicCadenceRecovery,
+                            "precondition failed: Fractional Automatic did not qualify native output");
+                        Harness harness(target, multiplier, smooth,
+                            AdaptiveRecoveryPolicy::OrderedSdr, false, 2s, target,
+                            policy->nearTargetNativePreference, false, false,
+                            policy->qualifyTargetNativeCadence);
+                        harness.start();
+                        const auto until = harness.now + 30s;
+                        while (harness.now < until) {
+                            harness.deliveredFrameAtFps(baseFps);
+                            require(!harness.scheduler.snapshot().nativeCadenceProbeActive,
+                                "Fractional Automatic interrupted generation for an unrequested native probe");
+                        }
+                        require(harness.scheduler.snapshot().validatedGenerationLimit > 0,
+                            "slow Fractional Automatic source lost its generated workload");
+                    }
+                }
+            }
+        }
+    }
+
     void testDynamicCadenceRecoveryIsOptInAndSdrOnly() {
         Harness disabled(
             60, 2, false, AdaptiveRecoveryPolicy::OrderedSdr, false
@@ -6484,6 +6526,7 @@ int main() {
         {"fractional target clock ignores marginal placement", testFractionalTargetClockIgnoresMarginalPlacementBenefit},
         {"target clock covers steady and noisy cadence matrix", testTargetClockCoversSteadyAndNoisyCadenceMatrix},
         {"Automatic preserves native presentation above target", testAdaptiveNativePresentationAboveTarget},
+        {"Fractional Automatic requires opt-in native probes", testFractionalAutomaticDoesNotProbeWithoutRecovery},
         {"target-native qualification is Fractional only", testTargetNativeQualificationIsFractionalOnly},
         {"near-target native preference covers steady sweep", testNearTargetNativePreferenceCoversSteadySweep},
         {"near-target native preference scales across targets", testNearTargetNativePreferenceScalesAcrossTargets},

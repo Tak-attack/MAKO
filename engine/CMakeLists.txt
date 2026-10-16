@@ -118,6 +118,10 @@ if(BUILD_TESTING AND UNIX)
         COMMAND bash
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test-mako-launch.sh"
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/mako-launch")
+    add_test(NAME standalone-mangohud
+        COMMAND "${MAKO_PYTHON3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test-mako-launch-mangohud.py")
+    set_tests_properties(standalone-mangohud PROPERTIES LABELS "portable-policy")
     add_test(NAME remote-play-bindings
         COMMAND "${MAKO_PYTHON3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate-remote-play-bindings.py" --check)

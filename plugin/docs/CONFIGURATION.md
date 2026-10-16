@@ -136,6 +136,8 @@ Keep defaults unless a game needs a change.
 | **Force ALSA** | Audio or Zink compatibility problems. |
 | **MangoHud (Restart)** | Host games only; requires installed MangoHud and cannot run alongside MAKO Shaders for the same profile. |
 
+For one MangoHud layout across profiles, create `~/.config/mako-render/mangohud.conf` and keep the normal `mako-run %command%` launch option. Profiles with MangoHud enabled select that file on the next supported host launch. See [shared MangoHud layouts](../../engine/docs/LAYER-CHAINING.md#shared-mangohud-layout) for an example, configuration precedence, and per-game exceptions.
+
 **Enable HDR (Restart)** is off by default because HDR is experimental. See [HDR setup](#hdr) to opt in.
 
 ## When changes apply

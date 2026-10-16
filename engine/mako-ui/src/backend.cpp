@@ -172,25 +172,30 @@ struct ProfileFileSnapshot {
 
 }
 
-QString ui::launcherCommandForUiDirectory(const QString& directory) {
+static QString launcherPathForUiDirectory(const QString& directory) {
     const QString sibling = QDir(directory).absoluteFilePath(
         QStringLiteral("mako-launch")
     );
     const QFileInfo siblingInfo(sibling);
     if (siblingInfo.isFile() && siblingInfo.isExecutable())
-        return shellQuote(sibling);
+        return sibling;
 
     const QString onPath = QStandardPaths::findExecutable(
         QStringLiteral("mako-launch")
     );
     if (!onPath.isEmpty())
-        return shellQuote(onPath);
+        return onPath;
 
-    return QStringLiteral("~/.local/bin/mako-launch");
+    return {};
 }
 
-Backend::Backend(std::filesystem::path procRoot, QString remotePlayHelper, QString shaderHelper)
-        : m_proc_root(std::move(procRoot)), m_remote_play_helper(std::move(remotePlayHelper)), m_shader_helper(std::move(shaderHelper)) {
+QString ui::launcherCommandForUiDirectory(const QString& directory) {
+    const auto path = launcherPathForUiDirectory(directory);
+    return path.isEmpty() ? QStringLiteral("~/.local/bin/mako-launch") : shellQuote(path);
+}
+
+Backend::Backend(std::filesystem::path procRoot, QString remotePlayHelper, QString shaderHelper, QString launcherHelper)
+        : m_proc_root(std::move(procRoot)), m_launcher_helper(std::move(launcherHelper)), m_remote_play_helper(std::move(remotePlayHelper)), m_shader_helper(std::move(shaderHelper)) {
     // load configuration
     ls::ConfigFile config{};
 
@@ -292,6 +297,7 @@ Backend::Backend(std::filesystem::path procRoot, QString remotePlayHelper, QStri
     this->m_save_timer.setInterval(500);
     connect(&this->m_save_timer, &QTimer::timeout, this, [this] { savePendingChanges(); });
     initializeRemotePlay();
+    initializeMangoHud();
 }
 
 void Backend::refreshLosslessScaling() {
@@ -536,6 +542,72 @@ void Backend::writeSelectedVkBasaltConfig() const {
     ls::writeVkBasaltConfiguration(cachePath, content);
 }
 
+bool Backend::getEnableMangoHud() const {
+    if (!isValidProfileIndex() || getEnableVkBasalt()) return false;
+    const auto name = QString::fromStdString(m_profiles.at(static_cast<size_t>(m_profile_index)).name);
+    return m_wrapper_settings_root.value(QStringLiteral("profiles")).toObject()
+        .value(name).toObject().value(QStringLiteral("external_vulkan_layer")).toString()
+        == QStringLiteral("mangohud");
+}
+
+void Backend::setExternalVulkanLayer(const QString& layer) {
+    if (!isValidProfileIndex()) return;
+    const auto index = static_cast<size_t>(m_profile_index);
+    m_vkbasalt_profiles.at(index).enabled = layer == QStringLiteral("vkbasalt");
+    auto profiles = m_wrapper_settings_root.value(QStringLiteral("profiles")).toObject();
+    const auto name = QString::fromStdString(m_profiles.at(index).name);
+    auto profile = profiles.value(name).toObject();
+    profile.insert(QStringLiteral("external_vulkan_layer"), layer);
+    profiles.insert(name, profile);
+    m_wrapper_settings_root.insert(QStringLiteral("profiles"), profiles);
+    m_vkbasalt_dirty = true;
+    m_save_timer.start();
+    emit refreshUI();
+}
+
+void Backend::enableMangoHudUpdated(bool enabled) {
+    if (enabled && !m_mangohud_available) return;
+    setExternalVulkanLayer(enabled ? QStringLiteral("mangohud") :
+        (getEnableVkBasalt() ? QStringLiteral("vkbasalt") : QString{}));
+}
+
+void Backend::initializeMangoHud() {
+    if (m_launcher_helper.isEmpty()) {
+        m_launcher_helper = launcherPathForUiDirectory(QCoreApplication::applicationDirPath());
+        if (m_launcher_helper.isEmpty())
+            m_launcher_helper = QDir::home().filePath(QStringLiteral(".local/bin/mako-launch"));
+    }
+    m_mangohud_timeout.setSingleShot(true);
+    m_mangohud_timeout.setInterval(5000);
+    connect(&m_mangohud_timeout, &QTimer::timeout, this, [this] {
+        if (m_mangohud_process.state() != QProcess::NotRunning)
+            m_mangohud_process.kill();
+    });
+    connect(&m_mangohud_process, &QProcess::errorOccurred, this, [this] {
+        m_mangohud_available = false;
+        m_mangohud_timeout.stop();
+        emit refreshUI();
+    });
+    connect(&m_mangohud_process, &QProcess::finished, this,
+        [this](int code, QProcess::ExitStatus status) {
+            m_mangohud_timeout.stop();
+            const auto result = QJsonDocument::fromJson(m_mangohud_process.readAllStandardOutput());
+            const auto available = result.object().value(QStringLiteral("available"));
+            m_mangohud_available = code == 0 && status == QProcess::NormalExit &&
+                available.isBool() && available.toBool();
+            emit refreshUI();
+        });
+    refreshMangoHud();
+}
+
+void Backend::refreshMangoHud() {
+    if (mangoHudChecking()) return;
+    m_mangohud_available = false;
+    m_mangohud_process.start(m_launcher_helper, {QStringLiteral("--check-mangohud")});
+    m_mangohud_timeout.start();
+    emit refreshUI();
+}
+
 QString Backend::getLaunchOption() const {
     const QString launcher = launcherCommandForUiDirectory(
         QCoreApplication::applicationDirPath()
@@ -549,6 +621,8 @@ QString Backend::getLaunchOption() const {
         environment.append(QStringLiteral("VKBASALT_CONFIG_FILE=") +
             shellQuote(QString::fromStdString(vkBasaltConfigPath(index).string())));
     }
+    if (getEnableMangoHud())
+        environment.append(QStringLiteral("MANGOHUD=1"));
     environment.append(QStringLiteral("MAKO_PROFILE=") + shellQuote(
         QString::fromStdString(this->m_profiles.at(index).name)
     ));
@@ -1135,6 +1209,12 @@ bool Backend::deleteProfile() {
 }
 
 Backend::~Backend() {
+    m_mangohud_timeout.stop();
+    if (m_mangohud_process.state() != QProcess::NotRunning) {
+        m_mangohud_process.disconnect(this);
+        m_mangohud_process.kill();
+        m_mangohud_process.waitForFinished(1000);
+    }
     if (m_detection_thread)
         m_detection_thread->wait();
     this->savePendingChanges();

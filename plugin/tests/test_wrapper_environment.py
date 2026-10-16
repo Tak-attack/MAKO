@@ -34,6 +34,7 @@ from py_modules.mako_plugin.config_schema_generated import (  # noqa: E402
 )
 from shared_config import VKBASALT_SHADER_VALUES  # noqa: E402
 from py_modules.mako_plugin.wrapper_generation import (  # noqa: E402
+    generate_profile_script_content,
     steam_overlay_preload_policy_lines,
 )
 
@@ -56,12 +57,16 @@ class WrapperEnvironmentTests(unittest.TestCase):
         )
         self.service.mangohud_layer_dir = Path("/private/mako/mangohud.d")
         self.service.vkbasalt_layer_dir = Path("/private/mako/vkbasalt.d")
+        config_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(config_directory.cleanup)
+        self.service.config_dir = Path(config_directory.name)
+        self.service.config_file_path = self.service.config_dir / "conf.toml"
         self.gamescope_environment = {
             "GAMESCOPE_WAYLAND_DISPLAY": "gamescope-0",
         }
         self.last_stderr = ""
 
-    def _evaluate(self, extra_environment=None, config=None):
+    def _evaluate(self, extra_environment=None, config=None, *, arguments=(), user=None):
         lines = []
         if config is not None:
             lines.extend(self.service._script_configuration_lines(config))
@@ -87,6 +92,7 @@ class WrapperEnvironmentTests(unittest.TestCase):
             'printf "MANGOHUD=%s\\n" "${MANGOHUD:-}"',
             'printf "MANGOHUD_DISABLED=%s\\n" "${DISABLE_MANGOHUD:-}"',
             'printf "MANGOHUD_CONFIG=%s\\n" "${MANGOHUD_CONFIG:-}"',
+            'printf "MANGOHUD_CONFIGFILE=%s\\n" "${MANGOHUD_CONFIGFILE:-}"',
             'printf "VKBASALT=%s\\n" "${ENABLE_VKBASALT:-}"',
             'printf "VKBASALT_DISABLED=%s\\n" "${DISABLE_VKBASALT:-}"',
             'printf "VKBASALT_CONFIG=%s\\n" "${VKBASALT_CONFIG_FILE:-}"',
@@ -100,11 +106,12 @@ class WrapperEnvironmentTests(unittest.TestCase):
             **(extra_environment or {}),
         }
         result = subprocess.run(
-            ["bash", "-c", script],
+            ["bash", "-c", script, "mako-run", *arguments],
             check=True,
             capture_output=True,
             text=True,
             env=environment,
+            user=user,
         )
         self.last_stderr = result.stderr
         return dict(line.split("=", 1) for line in result.stdout.splitlines())
@@ -659,6 +666,155 @@ class WrapperEnvironmentTests(unittest.TestCase):
         )
         self.assertEqual(values["MANGOHUD"], "1")
         self.assertEqual(values["VKBASALT"], "")
+
+    def _prepare_mangohud_config(self, manifest="MangoHud.x86_64.json"):
+        self.service.mangohud_layer_dir = self.service.config_dir / "layers"
+        self.service.mangohud_layer_dir.mkdir()
+        (self.service.mangohud_layer_dir / manifest).write_text("{}", encoding="utf-8")
+        path = self.service.config_dir / "mangohud.conf"
+        path.write_text("fps\n", encoding="utf-8")
+        return path
+
+    def test_shared_mangohud_config_replaces_inherited_path_for_both_architectures(self):
+        shared = self._prepare_mangohud_config()
+        config = {**ConfigurationManager.get_defaults(), "external_vulkan_layer": "mangohud"}
+        for manifest in ("MangoHud.x86_64.json", "MangoHud.x86.json"):
+            for path in self.service.mangohud_layer_dir.iterdir():
+                path.unlink()
+            (self.service.mangohud_layer_dir / manifest).write_text("{}", encoding="utf-8")
+            for inherited in (None, "", "/run/user/1000/gamescope.123/mangohud.config", "/custom/game.conf"):
+                with self.subTest(manifest=manifest, inherited=inherited):
+                    environment = {"MANGOHUD_CONFIG": "fps,read_cfg"}
+                    if inherited is not None:
+                        environment["MANGOHUD_CONFIGFILE"] = inherited
+                    values = self._evaluate(environment, config)
+                    self.assertEqual(values["MANGOHUD"], "1")
+                    self.assertEqual(values["MANGOHUD_CONFIGFILE"], str(shared))
+                    self.assertEqual(values["MANGOHUD_CONFIG"], "fps,read_cfg")
+                    self.assertEqual(environment.get("MANGOHUD_CONFIGFILE"), inherited)
+
+    def test_missing_or_nonregular_mangohud_config_preserves_inherited_path(self):
+        shared = self._prepare_mangohud_config()
+        shared.unlink()
+        config = {**ConfigurationManager.get_defaults(), "external_vulkan_layer": "mangohud"}
+        for kind in ("missing", "directory", "fifo", "dangling-symlink"):
+            with self.subTest(kind=kind):
+                if kind == "directory":
+                    shared.mkdir()
+                elif kind == "fifo":
+                    os.mkfifo(shared)
+                elif kind == "dangling-symlink":
+                    shared.symlink_to(shared.parent / "missing-target")
+                for inherited in (None, "/run/user/1000/gamescope.123/mangohud.config"):
+                    environment = {} if inherited is None else {"MANGOHUD_CONFIGFILE": inherited}
+                    values = self._evaluate(environment, config)
+                    self.assertEqual(values["MANGOHUD"], "1")
+                    self.assertEqual(values["MANGOHUD_CONFIGFILE"], inherited or "")
+                if kind == "directory":
+                    shared.rmdir()
+                elif kind != "missing":
+                    shared.unlink()
+
+    def test_unreadable_mangohud_config_preserves_inherited_path(self):
+        shared = self._prepare_mangohud_config()
+        # Root can read mode-000 files; run that case as an unprivileged UID.
+        self.service.config_dir.chmod(0o755)
+        shared.chmod(0)
+        values = self._evaluate(
+            {"MANGOHUD_CONFIGFILE": "/inherited.conf"},
+            {**ConfigurationManager.get_defaults(), "external_vulkan_layer": "mangohud"},
+            user=65534 if os.geteuid() == 0 else None,
+        )
+        self.assertEqual(values["MANGOHUD"], "1")
+        self.assertEqual(values["MANGOHUD_CONFIGFILE"], "/inherited.conf")
+
+    def test_shared_mangohud_config_requires_supported_activation(self):
+        self._prepare_mangohud_config()
+        config = {**ConfigurationManager.get_defaults(), "external_vulkan_layer": "mangohud"}
+        for tool in ("", "vkbasalt"):
+            with self.subTest(tool=tool):
+                values = self._evaluate(
+                    {"MANGOHUD_CONFIGFILE": "/inherited.conf"},
+                    {**config, "external_vulkan_layer": tool},
+                )
+                self.assertEqual(values["MANGOHUD_CONFIGFILE"], "/inherited.conf")
+        with patch.object(configuration_module, "FLATPAK_IMPLICIT_LAYER_DIR", str(self.service.config_dir)):
+            values = self._evaluate({"MANGOHUD_CONFIGFILE": "/inherited.conf"}, config)
+            self.assertEqual(values["MANGOHUD_CONFIGFILE"], "/inherited.conf")
+        values = self._evaluate(
+            {"MANGOHUD_CONFIGFILE": "/inherited.conf"}, config,
+            arguments=("flatpak", "run", "example.Game"),
+        )
+        self.assertEqual(values["MANGOHUD_CONFIGFILE"], "/inherited.conf")
+        for manifest in self.service.mangohud_layer_dir.iterdir():
+            manifest.unlink()
+        values = self._evaluate({"MANGOHUD_CONFIGFILE": "/inherited.conf"}, config)
+        self.assertEqual(values["MANGOHUD_CONFIGFILE"], "/inherited.conf")
+
+    def test_mangohud_config_is_selected_at_launch_and_allows_per_game_override(self):
+        # Shell metacharacters in the canonical config path must stay literal.
+        self.service.config_dir /= "custom 'config' $HOME `false` $(false)"
+        self.service.config_dir.mkdir()
+        shared = self._prepare_mangohud_config()
+        shared.unlink()
+        config = {**ConfigurationManager.get_defaults(), "external_vulkan_layer": "mangohud"}
+        wrapper = self.service.config_dir / "mako-run"
+        wrapper.write_text(self.service._generate_script_content(config), encoding="utf-8")
+        wrapper.chmod(0o755)
+        environment = {"PATH": os.environ.get("PATH", ""), "MANGOHUD_CONFIGFILE": "/inherited.conf"}
+
+        def launch(*arguments):
+            result = subprocess.run(
+                [str(wrapper), *arguments, "/usr/bin/env"], env=environment,
+                check=True, capture_output=True, text=True, timeout=10,
+            )
+            return dict(line.split("=", 1) for line in result.stdout.splitlines())
+
+        self.assertEqual(launch()["MANGOHUD_CONFIGFILE"], "/inherited.conf")
+        shared.write_text("fps\n", encoding="utf-8")
+        self.assertEqual(launch()["MANGOHUD_CONFIGFILE"], str(shared))
+        self.assertEqual(
+            launch("/usr/bin/env", "MANGOHUD_CONFIGFILE=/per-game config.conf")["MANGOHUD_CONFIGFILE"],
+            "/per-game config.conf",
+        )
+        shared.unlink()
+        self.assertEqual(launch()["MANGOHUD_CONFIGFILE"], "/inherited.conf")
+
+    def test_shared_mangohud_config_follows_each_automatically_selected_profile(self):
+        shared = self._prepare_mangohud_config()
+        defaults = ConfigurationManager.get_defaults()
+        profiles = {name: dict(defaults) for name in ("mako", "first", "second", "disabled")}
+        settings = {
+            name: self.service._normalize_wrapper_settings({
+                **defaults,
+                "external_vulkan_layer": "" if name == "disabled" else "mangohud",
+            })
+            for name in profiles
+        }
+        script = generate_profile_script_content(
+            ProfileData(current_profile="mako", profiles=profiles, global_config={}),
+            settings,
+            {name: {"steam_app_id": app_id} for name, app_id in (
+                ("first", "101"), ("second", "102"), ("disabled", "103"),
+            )},
+            self.service._wrapper_generation_context(),
+        )
+        wrapper = self.service.config_dir / "mako-run"
+        wrapper.write_text(script, encoding="utf-8")
+        wrapper.chmod(0o755)
+        for app_id in ("", "101", "102", "103"):
+            with self.subTest(app_id=app_id):
+                result = subprocess.run(
+                    [str(wrapper), "/usr/bin/env"],
+                    env={"PATH": os.environ.get("PATH", ""), "SteamAppId": app_id,
+                         "MANGOHUD_CONFIGFILE": "/inherited.conf"},
+                    check=True, capture_output=True, text=True, timeout=10,
+                )
+                values = dict(line.split("=", 1) for line in result.stdout.splitlines())
+                self.assertEqual(
+                    values["MANGOHUD_CONFIGFILE"],
+                    "/inherited.conf" if app_id == "103" else str(shared),
+                )
 
     def test_selected_postprocess_tool_fails_closed_without_staged_manifest(self):
         with tempfile.TemporaryDirectory() as empty_dir:
