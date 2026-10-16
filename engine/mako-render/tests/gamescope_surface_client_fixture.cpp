@@ -30,6 +30,7 @@ struct wl_interface {
     int event_count;
     const wl_message* events;
 };
+struct wl_message { const char* name; const char* signature; const wl_interface** types; };
 union wl_argument { int32_t i; uint32_t u; const char* s; void* o; };
 struct wl_proxy {
     std::string_view kind;
@@ -37,6 +38,8 @@ struct wl_proxy {
     void* data{};
     bool pending{};
     wl_proxy* surface{};
+    uint32_t version{1};
+    bool staged{};
 };
 
 namespace {
@@ -44,6 +47,7 @@ namespace {
     std::thread::id applicationThread;
     std::vector<wl_proxy*> objects;
     int mode{};
+    uint32_t advertisedVersion{1};
     int associations{};
     int feedbacks{};
     uint32_t hdrOutput{};
@@ -57,7 +61,7 @@ namespace {
     uint32_t hdrMetadata[12]{};
     int presentModes{};
     int presentTimes{};
-    uint32_t presentId{};
+    uint64_t presentId{};
     wl_proxy* lastTimedProxy{};
     uint64_t presentTime{};
     uint32_t presentMode{};
@@ -75,7 +79,7 @@ namespace {
     std::unordered_map<uint64_t, Override> overrides;
     bool ownershipModel{};
     bool delayedEvents{};
-    struct WireEvent { wl_proxy* proxy; uint32_t id; uint64_t time; bool retired; };
+    struct WireEvent { wl_proxy* proxy; uint64_t id; uint64_t time; bool retired; };
     std::deque<WireEvent> unreadEvents;
     std::deque<WireEvent> readEvents;
     int deliveredEvents{};
@@ -148,6 +152,38 @@ extern "C" {
     void mako_test_surface_mode(int value) {
         const std::lock_guard fixtureLock(fixtureMutex);
         mode = value;
+    }
+    void mako_test_surface_protocol(uint32_t version) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        advertisedVersion = version;
+    }
+    uint64_t mako_test_surface_present_serial() {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        return presentId;
+    }
+    void mako_test_surface_staged_timing(uint64_t serial, uint64_t ready,
+            uint64_t latch, uint64_t predicted) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        auto* proxy = lastTimedProxy;
+        if (!proxy || !proxy->staged || !proxy->listener)
+            std::abort();
+        using Timing = void (*)(void*, wl_proxy*, uint32_t, uint32_t, uint32_t,
+            uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+        reinterpret_cast<Timing>(proxy->listener[3])(proxy->data, proxy,
+            static_cast<uint32_t>(serial >> 32), static_cast<uint32_t>(serial),
+            static_cast<uint32_t>(ready >> 32), static_cast<uint32_t>(ready),
+            static_cast<uint32_t>(latch >> 32), static_cast<uint32_t>(latch),
+            static_cast<uint32_t>(predicted >> 32), static_cast<uint32_t>(predicted));
+    }
+    void mako_test_surface_timing_properties(uint64_t duration, uint64_t interval) {
+        const std::lock_guard fixtureLock(fixtureMutex);
+        auto* proxy = lastTimedProxy;
+        if (!proxy || !proxy->staged || !proxy->listener)
+            std::abort();
+        using Properties = void (*)(void*, wl_proxy*, uint32_t, uint32_t, uint32_t, uint32_t);
+        reinterpret_cast<Properties>(proxy->listener[4])(proxy->data, proxy,
+            static_cast<uint32_t>(duration >> 32), static_cast<uint32_t>(duration),
+            static_cast<uint32_t>(interval >> 32), static_cast<uint32_t>(interval));
     }
     void mako_test_surface_wire_event(bool retired) {
         const std::lock_guard fixtureLock(fixtureMutex);
@@ -251,7 +287,7 @@ extern "C" {
     }
     uint32_t mako_test_surface_present_id() {
         const std::lock_guard fixtureLock(fixtureMutex);
-        return presentId;
+        return static_cast<uint32_t>(presentId);
     }
     uint64_t mako_test_surface_present_time() {
         const std::lock_guard fixtureLock(fixtureMutex);
@@ -266,7 +302,7 @@ extern "C" {
             uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
         using Refresh = void (*)(void*, wl_proxy*, uint32_t, uint32_t);
         const uint64_t actual = presentTime + 100000;
-        reinterpret_cast<Timing>(proxy->listener[0])(proxy->data, proxy, presentId,
+        reinterpret_cast<Timing>(proxy->listener[0])(proxy->data, proxy, static_cast<uint32_t>(presentId),
             static_cast<uint32_t>(presentTime >> 32), static_cast<uint32_t>(presentTime),
             static_cast<uint32_t>(actual >> 32), static_cast<uint32_t>(actual),
             static_cast<uint32_t>(earliest >> 32), static_cast<uint32_t>(earliest),
@@ -420,7 +456,7 @@ extern "C" {
         return 0;
     }
     wl_proxy* wl_proxy_marshal_array_flags(wl_proxy* proxy, uint32_t opcode,
-            const wl_interface* interface, uint32_t, uint32_t flags, wl_argument* args) {
+            const wl_interface* interface, uint32_t version, uint32_t flags, wl_argument* args) {
         const std::lock_guard fixtureLock(fixtureMutex);
         if (flags & 1) {
             drop(proxy);
@@ -446,10 +482,19 @@ extern "C" {
                 for (unsigned index = 0; index < 12; ++index)
                     hdrMetadata[index] = args[index].u;
             } else if (opcode == 5) {
+                if (proxy->staged)
+                    std::abort();
                 lastTimedProxy = proxy;
                 ++presentTimes;
                 presentId = args[0].u;
                 presentTime = (uint64_t{args[1].u} << 32) | args[2].u;
+            } else if (opcode == 6) {
+                if (!proxy->staged || proxy->version != 2 || args[4].u != 0)
+                    std::abort();
+                lastTimedProxy = proxy;
+                ++presentTimes;
+                presentId = (uint64_t{args[0].u} << 32) | args[1].u;
+                presentTime = (uint64_t{args[2].u} << 32) | args[3].u;
             } else {
                 std::abort(); // No limiter control requests.
             }
@@ -460,8 +505,22 @@ extern "C" {
         if (mode == 7 && std::string_view(interface->name) == "gamescope_swapchain")
             return nullptr;
         auto* created = make(interface->name);
-        if (created->kind == "gamescope_swapchain")
+        created->version = version;
+        if (created->kind == "gamescope_swapchain_factory_v2" &&
+                (version != std::min(advertisedVersion, uint32_t{2}) || args[2].u != version ||
+                interface->method_count != 3 ||
+                std::string_view(interface->methods[2].signature) != "2on"))
+            std::abort();
+        if (created->kind == "gamescope_swapchain") {
+            if (version != proxy->version || opcode != (version == 2 ? 2U : 1U) ||
+                    interface->method_count != 7 || interface->event_count != 5 ||
+                    std::string_view(interface->methods[6].signature) != "2uuuuu" ||
+                    std::string_view(interface->events[3].signature) != "2uuuuuuuu" ||
+                    std::string_view(interface->events[4].signature) != "2uuuu")
+                std::abort();
+            created->staged = version == 2;
             created->surface = static_cast<wl_proxy*>(args[0].o);
+        }
         if (created->kind == "wl_registry" || created->kind == "wl_callback")
             created->pending = true;
         return created;
@@ -480,10 +539,17 @@ extern "C" {
             auto* proxy = event.proxy;
             if (event.retired) {
                 reinterpret_cast<void (*)(void*, wl_proxy*)>(proxy->listener[2])(proxy->data, proxy);
+            } else if (proxy->staged) {
+                using Timing = void (*)(void*, wl_proxy*, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+                reinterpret_cast<Timing>(proxy->listener[3])(proxy->data, proxy,
+                    static_cast<uint32_t>(event.id >> 32), static_cast<uint32_t>(event.id),
+                    0, 0, 0, 0,
+                    static_cast<uint32_t>(event.time >> 32), static_cast<uint32_t>(event.time));
             } else {
                 using Timing = void (*)(void*, wl_proxy*, uint32_t, uint32_t, uint32_t,
                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
-                reinterpret_cast<Timing>(proxy->listener[0])(proxy->data, proxy, event.id,
+                reinterpret_cast<Timing>(proxy->listener[0])(proxy->data, proxy, static_cast<uint32_t>(event.id),
                     static_cast<uint32_t>(event.time >> 32), static_cast<uint32_t>(event.time),
                     static_cast<uint32_t>(event.time >> 32), static_cast<uint32_t>(event.time),
                     0, 0, 0, 0);
@@ -501,7 +567,7 @@ extern "C" {
                 auto callback = reinterpret_cast<void (*)(void*, wl_proxy*, uint32_t, const char*, uint32_t)>(proxy->listener[0]);
                 callback(proxy->data, proxy, 1, "wl_compositor", 4);
                 if (mode != 2)
-                    callback(proxy->data, proxy, 2, "gamescope_swapchain_factory_v2", 1);
+                    callback(proxy->data, proxy, 2, "gamescope_swapchain_factory_v2", advertisedVersion);
             } else if (proxy->kind == "wl_callback") {
                 reinterpret_cast<void (*)(void*, wl_proxy*, uint32_t)>(proxy->listener[0])(proxy->data, proxy, 0);
             } else if (proxy->kind == "gamescope_swapchain") {

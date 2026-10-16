@@ -25,6 +25,10 @@
 
 extern "C" {
     void mako_test_surface_mode(int);
+    void mako_test_surface_protocol(uint32_t);
+    uint64_t mako_test_surface_present_serial();
+    void mako_test_surface_staged_timing(uint64_t, uint64_t, uint64_t, uint64_t);
+    void mako_test_surface_timing_properties(uint64_t, uint64_t);
     void mako_test_surface_ownership(bool);
     void mako_test_surface_delay_events(bool);
     int mako_test_surface_overrides();
@@ -659,6 +663,31 @@ int main() {
             &ambiguousMode).mode == -1,
         "multi-swapchain modes must not be attributed to the first element");
     using present_diagnostics::BridgePresentTiming;
+    {
+        BridgePresentTiming staged(true);
+        constexpr uint64_t at = 10000000000;
+        constexpr uint64_t id = uint64_t{UINT32_MAX} + 1;
+        staged.request(id, at + 20000000, at, at);
+        staged.feedbackTiming(static_cast<uint32_t>(id), at + 2000000,
+            at + 10000000, at + 20000000, at + 15000000);
+        staged.feedbackTiming(id, at + 2000000,
+            at + 10000000, at + 20000000, at + 15000000);
+        staged.feedbackTiming(id, 0, 0, 0, at + 15000000); // Duplicate.
+        staged.request(id + 1, at + 30000000, at, at);
+        staged.feedbackTiming(id + 1, 0, 0, 0, at + 15000000);
+        staged.request(id + 2, at + 40000000, at, at);
+        staged.feedbackTiming(id + 2, 0, 0, at + 40000000, at + 15000000);
+        staged.request(id + 3, at + 50000000, at, at);
+        staged.feedbackTiming(id + 3, at - 1, at + 10000000,
+            at + 50000000, at + 15000000);
+        const auto window = staged.take(at + 1000000000);
+        expect(window && window->feedbacks == 3 && window->dropped == 1 &&
+                window->unmatched == 2 && window->invalidStages == 1 &&
+                window->unavailableStages == 1 && window->queueReady.count == 1 &&
+                window->queueReady.mean() == 2 && window->compositorHold.mean() == 8 &&
+                staged.outstanding() == 0,
+            "V2 diagnostics mixed stage times, serial namespaces or explicit drops");
+    }
     BridgePresentTiming timing;
     constexpr uint64_t origin = 10000000000;
     timing.request(UINT32_MAX, origin, origin, origin - 100000);
@@ -1508,5 +1537,66 @@ int main() {
     expect(decision.extents && sameExtent(decision.extents->source, {1920, 1080}) &&
         sameExtent(decision.extents->presentation, {3840, 2160}), "RE4 explicit render extent must scale through proven variable surface");
     testUnreadFeedback();
+    // Opt-in constructor, version clamping, stage callbacks, idle reader and
+    // resource lifetime run with diagnostics both enabled and disabled.
+    for (const uint32_t advertised : {2U, 9U}) {
+        mako_test_surface_protocol(advertised);
+        mako_test_surface_resize(1920, 1080);
+        GamescopeScalingSurface bridge;
+        VkSurfaceKHR surface{};
+        expect(bridge.connect() &&
+            bridge.create(VK_NULL_HANDLE, next, info, nullptr, &surface) == VK_SUCCESS,
+            "V2 bridge connection");
+        const auto handle = fakeHandle<VkSwapchainKHR>(4010);
+        const auto nanos = [] {
+            return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        };
+        for (const bool dropped : {false, true}) {
+            expect(bridge.createSwapchain(surface, handle, swapchainInfo(surface),
+                {1920, 1080}, 5, "MAKO Renderer", VK_PRESENT_MODE_FIFO_KHR, 120),
+                "V2 swapchain constructor");
+            expect(bridge.preparePresent(surface, handle, 120, 120, 2, true, 1) == VK_SUCCESS,
+                "V2 first timing request");
+            expect(mako_test_surface_present_serial() == 1, "V2 serial starts with swapchain lifetime");
+            mako_test_surface_timing_properties(8333333, UINT64_MAX);
+            const auto ready = nanos();
+            mako_test_surface_staged_timing(1, dropped ? 0 : ready, dropped ? 0 : ready,
+                dropped ? 0 : mako_test_surface_present_time());
+            // Legacy broadcasts must not contaminate the opted-in estimator.
+            mako_test_surface_ready_timing(ready);
+            std::this_thread::sleep_for(std::chrono::milliseconds(55));
+            const auto before = nanos();
+            expect(bridge.preparePresent(surface, handle, 120, 120, 2, true, 2) == VK_SUCCESS,
+                "V2 second timing request");
+            const auto lead = mako_test_surface_present_time() - before;
+            expect(dropped ? lead >= 30000000 : lead < 20000000,
+                "V2 readiness depends on diagnostics or inferred readiness from a drop");
+            // A limiter cycle constrains spacing without becoming GPU work.
+            // The variable-refresh sentinel is never treated as a duration.
+            mako_test_surface_timing_properties(16666666, UINT64_MAX);
+            const auto previous = mako_test_surface_present_time();
+            expect(bridge.preparePresent(surface, handle, 120, 120, 2, true, 2) == VK_SUCCESS &&
+                mako_test_surface_present_time() - previous == 16666666,
+                "V2 compositor duration did not constrain the output ceiling");
+            mako_test_surface_timing_properties(UINT64_MAX, 0);
+            const auto limited = mako_test_surface_present_time();
+            expect(bridge.preparePresent(surface, handle, 120, 120, 2, true, 2) == VK_SUCCESS &&
+                mako_test_surface_present_time() - limited == 8333333,
+                "unknown V2 timing properties poisoned the refresh clock");
+            const int delivered = mako_test_surface_delivered_events();
+            const int reads = mako_test_surface_reads();
+            mako_test_surface_wire_event(false);
+            for (int attempt = 0; attempt < 100 &&
+                    mako_test_surface_delivered_events() == delivered; ++attempt)
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            expect(mako_test_surface_delivered_events() == delivered + 1 &&
+                mako_test_surface_reads() == reads, "V2 feedback must drain while the application is idle");
+            bridge.destroySwapchain(surface, handle);
+        }
+        bridge.destroy(surface);
+    }
+    mako_test_surface_protocol(1);
+    expect(mako_test_surface_objects() == 0, "V2 protocol lifetime leaked resources");
     std::cout << "Gamescope scaling surface tests passed\n";
 }

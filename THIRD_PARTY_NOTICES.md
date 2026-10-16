@@ -24,7 +24,7 @@ Copyright in the incorporated portions remains with the respective lsfg-vk copyr
 
 ## Gamescope surface protocol
 
-MAKO Renderer's optional scaling surface adapter declares the association/destruction requests and version-one events from Valve's [Gamescope swapchain protocol at commit `2d217a16c7e5b56c7417257279bf102320cff024`](https://github.com/ValveSoftware/gamescope/blob/2d217a16c7e5b56c7417257279bf102320cff024/protocol/gamescope-swapchain.xml). This protocol material carries the following MIT notice:
+MAKO Renderer's optional scaling surface adapter declares the association, swapchain feedback, HDR and version-one/version-two presentation timing requests and events from Valve's [Gamescope swapchain protocol at commit `2b5cf191d1047d6895516a834de8a72ac1c342f3`](https://github.com/ValveSoftware/gamescope/blob/2b5cf191d1047d6895516a834de8a72ac1c342f3/protocol/gamescope-swapchain.xml). This protocol material carries the following MIT notice:
 
 Copyright © 2023 Joshua Ashton for Valve Software
 

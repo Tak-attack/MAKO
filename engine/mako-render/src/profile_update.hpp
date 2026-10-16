@@ -430,12 +430,14 @@ namespace mako::layer {
     }
 
     /// Use the existing cap interval for Fractional, below-refresh automatic
-    /// caps, and exact Fixed batches that fit the known refresh. Target-matched
-    /// automatic caps and other pacing owners retain their current path.
+    /// caps, and exact Fixed batches that fit the known refresh. A compositor
+    /// output clock can also prepare inside a target-matched automatic cap;
+    /// direct FIFO retains its existing target-matched source pacing.
     [[nodiscard]] inline bool baseCapPacesOutputs(
             const ls::GameConf& profile, const double effectiveCap,
             const bool untimedOrderedTransport,
-            const std::optional<uint32_t> gamescopeRefreshHz = std::nullopt) {
+            const std::optional<uint32_t> gamescopeRefreshHz = std::nullopt,
+            const bool compositorOutputTiming = false) {
         if (!effectiveFrameGenerationEnabled(profile, gamescopeRefreshHz) ||
                 !untimedOrderedTransport || !std::isfinite(effectiveCap) ||
                 effectiveCap <= 0.0)
@@ -443,7 +445,10 @@ namespace mako::layer {
         if (profile.adaptive)
             return static_cast<double>(profile.target_fps) > effectiveCap &&
                 (!profile.adaptive_auto_base_fps_cap ||
-                    (gamescopeRefreshHz && profile.target_fps < *gamescopeRefreshHz));
+                    (gamescopeRefreshHz &&
+                        (profile.target_fps < *gamescopeRefreshHz ||
+                         (compositorOutputTiming &&
+                          profile.target_fps == *gamescopeRefreshHz))));
         return !profile.dynamic_cadence_recovery && profile.base_fps_cap > 0 &&
             profile.multiplier >= ls::GameConfLimits::minimumMultiplier &&
             profile.multiplier <= ls::GameConfLimits::maximumMultiplier &&
@@ -525,7 +530,8 @@ namespace mako::layer {
             const std::optional<uint32_t> gamescopeRefreshHz,
             const AdaptiveSchedulerSnapshot& scheduler,
             const GamescopePresentationFeedback& presentationFeedback = {},
-            const std::optional<size_t> activeGenerationLimit = std::nullopt) {
+            const std::optional<size_t> activeGenerationLimit = std::nullopt,
+            const bool handoffSettling = false) {
         const size_t generationLimit = scheduler.stableCadenceLimit.value_or(
             scheduler.validatedGenerationLimit
         );
@@ -563,11 +569,12 @@ namespace mako::layer {
             projectedOutputFps <= targetFps *
                 (generationLimit == 1 ? 1.02 : 1.25);
         // FIFO can move the immediate source estimator without changing its
-        // long-term output rate. Retain only the same VRR rung; the scheduler
-        // remains responsible for sustained cadence and delivery exits.
-        const bool retainVrrHandoff =
+        // long-term output rate. Retain the same VRR rung, or a fixed-refresh
+        // rung during its bounded activation settling. Scheduler and transport
+        // guards remain authoritative, including during that interval.
+        const bool retainActiveHandoff =
             activeGenerationLimit == generationLimit &&
-            presentationFeedback.variableRefreshRequested();
+            (presentationFeedback.variableRefreshRequested() || handoffSettling);
         const bool eligible = profile.adaptive &&
             profile.adaptive_stable_cadence &&
             effectiveFrameGenerationEnabled(profile, gamescopeRefreshHz) &&
@@ -579,7 +586,7 @@ namespace mako::layer {
             ((profile.adaptive_auto_base_fps_cap &&
               (provenTwoX || higherVrrRung)) ||
              acceptedFractionalVrrInteger) &&
-            (entryCadenceMatched || retainVrrHandoff);
+            (entryCadenceMatched || retainActiveHandoff);
         return eligible ? std::optional<size_t>{generationLimit} : std::nullopt;
     }
 

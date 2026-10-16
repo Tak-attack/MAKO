@@ -69,7 +69,8 @@ namespace mako::layer::present_diagnostics {
 
     void logBridgeTiming(uint64_t bridgeId, VkSwapchainKHR swapchain,
         const BridgePresentTiming::Window& window,
-        size_t outstanding, uint64_t refreshCycleNs);
+        size_t outstanding, uint64_t refreshCycleNs,
+        uint32_t timingVersion = 1, uint64_t refreshIntervalNs = 0);
 
     enum class PresentWaitApi { Khr, Khr2 };
 

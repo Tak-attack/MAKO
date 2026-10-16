@@ -52,6 +52,28 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
         this->diagnosticsState.contextId
     );
     this->bridgeOutputBatchSize = 1;
+    this->outputSourceDeadline.reset();
+#if defined(VK_EXT_present_timing) && defined(VK_KHR_present_id2)
+    if (this->info.ownedPresentTiming && !this->presentTimingInitialized &&
+            this->info.presentMode == VK_PRESENT_MODE_FIFO_KHR) {
+        this->presentTimingInitialized = true;
+        const auto get = [&](const char* name) { return vk.fi().GetDeviceProcAddr(vk.dev(), name); };
+        const bool enabled = this->presentTiming.initialize(vk.dev(), swapchain, {
+            .setSize = reinterpret_cast<PFN_vkSetSwapchainPresentTimingQueueSizeEXT>(get("vkSetSwapchainPresentTimingQueueSizeEXT")),
+            .properties = reinterpret_cast<PFN_vkGetSwapchainTimingPropertiesEXT>(get("vkGetSwapchainTimingPropertiesEXT")),
+            .domains = reinterpret_cast<PFN_vkGetSwapchainTimeDomainPropertiesEXT>(get("vkGetSwapchainTimeDomainPropertiesEXT")),
+            .past = reinterpret_cast<PFN_vkGetPastPresentationTimingEXT>(get("vkGetPastPresentationTimingEXT")),
+            .calibrate = reinterpret_cast<PFN_vkGetCalibratedTimestampsKHR>(get("vkGetCalibratedTimestampsKHR")),
+        });
+        std::clog << "MAKO Renderer: presentation timing initialized; owner=renderer; "
+                     "transport=VK_EXT_present_timing; active=" << enabled << '\n';
+    }
+    const bool hadPresentTiming = this->presentTiming.active();
+    this->presentTiming.update(this->wsiPresentTimeline, this->frameState.realFrameIndex);
+    if (hadPresentTiming && !this->presentTiming.active())
+        std::clog << "MAKO Renderer: presentation timing fallback; owner=renderer; "
+                     "transport=VK_EXT_present_timing; reason=feedback-or-clock-unavailable\n";
+#endif
     this->applyPendingSpatialScaler(vk);
     if (hdrShaderPrecisionSupported(this->colorPipeline, this->hdrExposureDisabled) &&
             this->shaderHdrReducedPrecision != ls::hdrCompactBuffers(this->profile.hdr_quality)) {
@@ -113,6 +135,9 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
         );
     }
     const void* lowerNextChain = filteredPresentChain.head();
+#if defined(VK_EXT_present_timing) && defined(VK_KHR_present_id2)
+    this->presentTiming.observePresentMode(lowerNextChain);
+#endif
     const bool gamescopeHdrTransport =
         this->gamescopeDetected && !this->privateOrderedTransport;
 
@@ -144,7 +169,8 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
             this->gamescopeRefreshHz,
             schedulerSnapshot,
             this->gamescopePresentationFeedback,
-            this->smoothCadencePacerHandoff.activeGenerationLimit()
+            this->smoothCadencePacerHandoff.activeGenerationLimit(),
+            this->smoothCadencePacerHandoff.settling(limiterArrival)
         );
     }
     const auto cadenceBaseCap = this->smoothCadenceBaseCap.update(
@@ -226,23 +252,43 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
     const auto limiterDeadline = this->realFramePacer.schedule(
         limiterArrival, baseFpsCap
     );
-    const bool sourceDeadlinePacing = limiterDeadline > limiterArrival &&
+    const bool ownedTimingControlsOutput = this->presentTiming.controlsOutput(
+        this->gamescopeRefreshHz.value_or(0));
+    auto sourceRefreshHz = this->gamescopeRefreshHz;
+#if defined(VK_EXT_present_timing) && defined(VK_KHR_present_id2)
+    if (!sourceRefreshHz && ownedTimingControlsOutput) {
+        const double refresh = this->presentTiming.refreshRate(0);
+        if (OrderedPresentTimeline::validRate(refresh))
+            sourceRefreshHz = static_cast<uint32_t>(std::round(refresh));
+    }
+#endif
+    // These transports already own an output clock. Preparing inside a
+    // target-matched automatic cap must not add another CPU output clock.
+    const bool compositorOutputTiming = this->info.gamescopeScalingSurface ||
+        displayTimingControlsOutput(this->wsiPresentTimingQuery != nullptr,
+            this->privateOrderedTransport, this->gamescopeRefreshHz.value_or(0)) ||
+        ownedTimingControlsOutput;
+    const bool sourceDeadlinePreparation = limiterDeadline > limiterArrival &&
         baseCapPacesOutputs(
             this->profile, baseFpsCap,
-            this->privateOrderedTransport && !this->info.variableSurface &&
-                !this->info.gamescopeScalingSurface && !this->spatialScaler &&
-                !this->wsiPresentTimingQuery && !hasPresentTiming(lowerNextChain) &&
+            (this->privateOrderedTransport || ownedTimingControlsOutput) &&
+                !hasPresentTiming(lowerNextChain) &&
                 !this->recoveryState.orderedAcquireRecovery.active(),
-            this->gamescopeRefreshHz) &&
+            sourceRefreshHz, compositorOutputTiming) &&
         orderedGeneratedBatchCanPrepareBeforeCap(
             this->info.requestedMinImageCount, this->info.images.size(),
             generatedFrameCapacityForActivePolicy(this->profile),
             this->recoveryState.generatedImageAdmission.underPressure());
-    if (!sourceDeadlinePacing) {
+    // Bridge and owned Vulkan timing already space outputs in the compositor.
+    // Prepare inside the cap interval without adding a second output clock.
+    const bool sourceDeadlinePacing = sourceDeadlinePreparation &&
+        !compositorOutputTiming;
+    if (sourceDeadlinePreparation && compositorOutputTiming)
+        this->outputSourceDeadline = limiterDeadline;
+    if (!sourceDeadlinePacing)
         this->realFramePacer.resetOutputs();
-        if (limiterDeadline > limiterArrival)
-            std::this_thread::sleep_until(limiterDeadline);
-    }
+    if (!sourceDeadlinePreparation && limiterDeadline > limiterArrival)
+        std::this_thread::sleep_until(limiterDeadline);
     // Output deadlines may put the last image before the cap boundary. Keep
     // the existing application-return deadline on every exit, including
     // fallback and exception paths, without adding another frame of latency.
@@ -252,14 +298,14 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
             if (deadline)
                 std::this_thread::sleep_until(*deadline);
         }
-    } sourceCapCompletion{sourceDeadlinePacing
+    } sourceCapCompletion{sourceDeadlinePreparation
         ? std::optional{limiterDeadline} : std::nullopt};
 
     const auto presentNow = DiagnosticsClock::now();
     // Observe the reserved real-frame cadence, while resource/recovery clocks
     // continue using wall time. Capped work uses the existing limiter's
     // slack; control returns to the game no earlier than that same deadline.
-    const auto cadenceNow = sourceDeadlinePacing
+    const auto cadenceNow = sourceDeadlinePreparation
         ? std::max(limiterDeadline, presentNow) : presentNow;
     PresentInvocation invocation{
         .vk = vk,
@@ -442,6 +488,23 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
         return this->presentNativeFrame(invocation);
     }
 
+    if (plan.historyWarmupActive && !this->adaptiveScheduler)
+        this->diagnosticsState.fixedSkippedFrames +=
+            plan.requestedGeneratedFrames.size();
+
+    // Resolve prior work before acquiring any generated images or reusing
+    // their acquire semaphores. A fence-budget miss must leave no new image
+    // held by this plan when it falls back to native presentation.
+    const auto renderFenceStarted = startPresentDiagnostic();
+    const bool renderFenceReady = this->prepareRenderFence(vk);
+    plan.renderFenceWaitDuration = finishPresentDiagnostic(
+        renderFenceStarted
+    );
+    if (!renderFenceReady) {
+        this->handleRenderFenceBudgetMiss(plan);
+        return this->presentNativeFrame(invocation);
+    }
+
     if (this->privateOrderedTransport) {
         plan.configuredAcquireTimeout = orderedGeneratedBatchAcquireBudget(
             this->info.requestedMinImageCount, this->info.images.size(),
@@ -507,22 +570,6 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
     );
     bool bypassGeneratedFrames = plan.historyWarmupActive ||
         plan.scheduledGeneratedFrames.empty();
-    if (plan.historyWarmupActive && !this->adaptiveScheduler)
-        this->diagnosticsState.fixedSkippedFrames +=
-            plan.requestedGeneratedFrames.size();
-
-    // Resolve previous application-device work before scheduling another
-    // backend frame. If the fence budget is missed, no new backend work has
-    // been created and the current game image can be presented natively.
-    const auto renderFenceStarted = startPresentDiagnostic();
-    const bool renderFenceReady = this->prepareRenderFence(vk);
-    plan.renderFenceWaitDuration = finishPresentDiagnostic(
-        renderFenceStarted
-    );
-    if (!renderFenceReady) {
-        this->handleRenderFenceBudgetMiss(plan);
-        return this->presentNativeFrame(invocation);
-    }
 
     if (orderedAcquireProbeEligible(orderedAcquireRecoveryProbe,
             plan.historyWarmupActive, plan.requestedGeneratedFrames.size())) {

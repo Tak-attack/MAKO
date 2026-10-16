@@ -107,12 +107,15 @@ namespace mako::layer {
         /// observes one source batch, including all generated/real outputs.
         /// scheduledDeadline reports the owned timeline's last scheduled slot
         /// without a query or wait; nullopt means no owned output clock.
+        /// sourceDeadline bounds submission waits to an existing source-cap
+        /// interval without changing compositor display targets.
         [[nodiscard]] VkResult preparePresent(
             VkSurfaceKHR surface, VkSwapchainKHR swapchain,
             double outputFps = 0.0, uint32_t refreshHz = 0,
             size_t outputBatchSize = 1, bool generationEnabled = false,
             std::optional<uint64_t> sourceFrameSerial = std::nullopt,
-            std::optional<std::chrono::steady_clock::time_point>* scheduledDeadline = nullptr);
+            std::optional<std::chrono::steady_clock::time_point>* scheduledDeadline = nullptr,
+            std::optional<std::chrono::steady_clock::time_point> sourceDeadline = std::nullopt);
         [[nodiscard]] bool owns(VkSurfaceKHR surface) const;
         [[nodiscard]] bool hdrEnabled() const;
 

@@ -53,16 +53,56 @@ VkResult Swapchain::queuePresentWithRetirementFence(
         .swapchainCount = 1,
         .pTimes = &presentTime,
     };
-    if (this->wsiPresentTimingQuery && this->privateOrderedTransport &&
+#if defined(VK_EXT_present_timing) && defined(VK_KHR_present_id2)
+    VkPresentTimingInfoEXT timing{};
+    uint64_t timingId{};
+    VkPresentId2KHR presentId{
+        .sType = VK_STRUCTURE_TYPE_PRESENT_ID_2_KHR,
+        .pNext = presentInfo.pNext,
+        .swapchainCount = 1,
+        .pPresentIds = &timingId,
+    };
+    VkPresentTimingsInfoEXT timings{
+        .sType = VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT,
+        .pNext = &presentId,
+        .swapchainCount = 1,
+        .pTimingInfos = &timing,
+    };
+    if (this->presentTiming.controlsOutput(this->gamescopeRefreshHz.value_or(0)) &&
+            !this->info.gamescopeScalingSurface &&
+            this->info.presentMode == VK_PRESENT_MODE_FIFO_KHR &&
+            presentInfo.swapchainCount == 1 && !hasPresentTiming(presentInfo.pNext)) {
+        const double refresh = this->presentTiming.refreshRate(this->gamescopeRefreshHz.value_or(0));
+        const auto ceiling = this->gamescopeRefreshHz
+            ? this->gamescopeRefreshHz : (OrderedPresentTimeline::validRate(refresh)
+                ? std::optional{static_cast<uint32_t>(std::round(refresh))} : std::nullopt);
+        const auto policy = gamescopeBridgeOutputPolicy(this->profile, ceiling,
+            this->adaptiveScheduler && !this->steamMenuSuspended &&
+                    fractionalNativePresentationEligible(this->profile)
+                ? this->adaptiveScheduler->snapshot() : AdaptiveSchedulerSnapshot{});
+        this->wsiPresentTimeline.observeSourceBatch(DiagnosticsClock::now(), this->frameState.realFrameIndex);
+        const auto slot = this->wsiPresentTimeline.schedule(DiagnosticsClock::now(),
+            this->presentTiming.outputRate(policy.outputFps), refresh,
+            this->bridgeOutputBatchSize, policy.generatedTimeline, this->outputSourceDeadline);
+        if (slot) {
+            std::this_thread::sleep_until(slot->submitAt);
+            if (this->presentTiming.prepare(slot->presentAt, this->wsiPresentTimeline, timing, timingId)) {
+                this->orderedPresentationDeadline = slot->presentAt;
+                presentInfo.pNext = &timings;
+            }
+        }
+    }
+#endif
+    if (displayTimingControlsOutput(this->wsiPresentTimingQuery != nullptr,
+            this->privateOrderedTransport, this->gamescopeRefreshHz.value_or(0)) &&
             !this->info.gamescopeScalingSurface &&
             presentInfo.swapchainCount == 1 &&
-            !hasPresentTiming(presentInfo.pNext) &&
-            this->gamescopeRefreshHz.value_or(0) > 0) {
+            !hasPresentTiming(presentInfo.pNext)) {
         const auto slot = this->wsiPresentTimeline.schedule(
             DiagnosticsClock::now(),
             outputPolicy.outputFps,
             *this->gamescopeRefreshHz, this->bridgeOutputBatchSize,
-            outputPolicy.generatedTimeline);
+            outputPolicy.generatedTimeline, this->outputSourceDeadline);
         if (slot) {
             this->orderedPresentationDeadline = slot->presentAt;
             // Google timing creates feedback even when diagnostics are off.
@@ -101,7 +141,7 @@ VkResult Swapchain::queuePresentWithRetirementFence(
                     this->gamescopeRefreshHz.value_or(0),
                     this->bridgeOutputBatchSize, outputPolicy.generatedTimeline,
                     this->frameState.realFrameIndex,
-                    &this->orderedPresentationDeadline);
+                    &this->orderedPresentationDeadline, this->outputSourceDeadline);
             if (prepared != VK_SUCCESS)
                 return completeRejectedPresent(vk.df().QueueSubmit,
                     queue, presentInfo, prepared);

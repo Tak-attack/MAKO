@@ -27,6 +27,14 @@ namespace mako::layer {
         return frameGenerationProvisioned || scalingProvisioned || bridgeProvisioned;
     }
 
+    /// Capability alone is not a pacing owner: legacy targets need the known
+    /// refresh clock. Source-cap preparation must use the same gate as present.
+    [[nodiscard]] constexpr bool displayTimingControlsOutput(
+            const bool timingAvailable, const bool orderedTransport,
+            const uint32_t refreshHz) noexcept {
+        return timingAvailable && orderedTransport && refreshHz > 0;
+    }
+
     [[nodiscard]] inline bool rendererOwnsDisplayTiming(
             const VkDeviceCreateInfo& createInfo,
             const bool gamescopeWsiEligible, const bool extensionSupported) {
@@ -35,15 +43,7 @@ namespace mako::layer {
         // A client may wait for its real present before producing the next
         // source. Our generated-output lead would then throttle that source.
         // Keep its wait contract and leave presentation timing to the client.
-        if (requestsApplicationPresentWait(createInfo.pNext))
-            return false;
-        for (uint32_t i = 0; i < createInfo.enabledExtensionCount; ++i) {
-            const char* name = createInfo.ppEnabledExtensionNames[i];
-            if (std::strcmp(name, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) == 0 ||
-                    std::strcmp(name, "VK_EXT_present_timing") == 0)
-                return false;
-        }
-        return true;
+        return !applicationOwnsPresentationTiming(createInfo);
     }
 
     // Consume only MAKO-owned feedback. Query the available count first:

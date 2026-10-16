@@ -349,6 +349,12 @@ int main() {
             "automatic caps must preserve target-matched FIFO and unknown-refresh pacing");
         expect(baseCapPacesOutputs(fractionalPacing, 45.0, true, 120),
             "below-refresh automatic caps must space their existing generated outputs");
+        expect(baseCapPacesOutputs(fractionalPacing, 45.0, true, 90, true),
+            "compositor-owned timing must prepare inside a target-matched automatic cap");
+        expect(!baseCapPacesOutputs(fractionalPacing, 45.0, false, 90, true) &&
+                !baseCapPacesOutputs(fractionalPacing, 45.0, true, {}, true) &&
+                !baseCapPacesOutputs(fractionalPacing, 45.0, true, 60, true),
+            "timed preparation bypassed transport, refresh or output-ceiling guards");
         fractionalPacing.adaptive_auto_base_fps_cap = false;
     }
     expect(!baseCapPacesOutputs(fractionalPacing, 60.0, false) &&
@@ -870,6 +876,38 @@ int main() {
             steadyPacing, true, false, 120, acceptedTwoX,
             fixedRefresh, 1),
         "fixed-refresh handoff changed its existing retention guard");
+    {
+        using namespace std::chrono_literals;
+        // Replay the fixed-refresh 60 -> 68.59 -> 60 FPS transition observed
+        // immediately after releasing the cap in FF7. Entry still needs the
+        // narrow cadence window; only the accepted handoff can settle.
+        SmoothCadencePacerHandoff handoff;
+        const auto start = SmoothCadencePacerHandoff::TimePoint{10s};
+        auto snapshot = acceptedTwoX;
+        const auto step = [&](auto elapsed, double fps, bool pressure = false) {
+            snapshot.smoothedBaseFps = fps;
+            const auto now = start + elapsed;
+            return handoff.update(now, smoothCadencePacerHandoffGenerationLimit(
+                steadyPacing, true, pressure, 120, snapshot, fixedRefresh,
+                handoff.activeGenerationLimit(), handoff.settling(now)));
+        };
+        expect(!step(0ms, 68.5929).active,
+            "settling admitted an unqualified initial cadence");
+        expect(step(1ms, 60).active && step(17ms, 68.5929).active &&
+                step(100ms, 62.36).active && step(251ms, 60).active &&
+                step(1001ms, 60).active,
+            "handoff queue turnover caused a spurious minute-long cooldown");
+        expect(!step(1100ms, 68.5929).active && !step(2100ms, 60).active,
+            "settling suppressed a sustained post-transition cadence failure");
+        handoff.reset();
+        expect(step(0ms, 60).active && !step(10ms, 60, true).active,
+            "settling delayed the acquire-recovery safety exit");
+        handoff.reset();
+        expect(step(0ms, 60).active, "handoff did not restart after reset");
+        snapshot.stableCadenceEvaluationActive = true;
+        expect(!step(10ms, 60).active,
+            "settling bypassed an active scheduler probe");
+    }
     acceptedTwoX.smoothedBaseFps = 60.0;
     auto fractionalVrr = steadyPacing;
     fractionalVrr.adaptive_auto_base_fps_cap = false;

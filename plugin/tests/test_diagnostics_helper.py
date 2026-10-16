@@ -62,7 +62,10 @@ MAKO Renderer: present diagnostics: operation=swapchain-recreation-observed cont
 MAKO Renderer: present diagnostics: operation=replacement-wsi-prime context=2 reason=null-old-swapchain spatial_scaling_active=1 wait_semaphores=1 frame=0 sequence=1 action=direct-application-present-before-spatial-work
 MAKO Renderer: present diagnostics: operation=replacement-backend-stabilization context=2 phase=started duration_ms=250 action=scaled-real-frame-only
 MAKO Renderer: present diagnostics: operation=runtime-state-applied context=2 state_revision=2 adaptive=1 target_fps=110 effective_flow_scale=0.75 lighter_model=1 generated_frame_capacity=3 hdr=1
+MAKO Renderer: presentation timing initialized; owner=renderer; transport=VK_EXT_present_timing; active=1
+MAKO Renderer: presentation timing fallback; owner=renderer; transport=VK_EXT_present_timing; reason=feedback-or-clock-unavailable
 MAKO Renderer: present diagnostics: operation=gamescope-bridge-timing bridge=12 pid=4242 timestamp_source=compositor-reported requests=120 feedbacks=118 outstanding=2 unmatched=0 nonconsecutive_ids=0 repeated_timestamps=94 backwards_timestamps=0 late_latch_feedbacks=23
+MAKO Renderer: present diagnostics: operation=gamescope-bridge-timing bridge=13 pid=4242 timing_protocol=2 timestamp_kind=prediction requests=120 feedbacks=117 dropped=1 outstanding=2 invalid_stages=0 unavailable_stages=1 queue_ready_samples=116 queue_ready_mean_ms=2.5 compositor_hold_samples=116 compositor_hold_mean_ms=8 refresh_interval_ns=18446744073709551615
 MAKO Renderer: present diagnostics: operation=application-present-mode context=2 swapchain=1234 requested_present_mode=0 dynamic_override=1 effective_present_mode=2 ordered_transport=1 bridge=1 action=diagnostic-only
 MAKO Renderer: present diagnostics: operation=application-present-wait waiter=19 pid=4242 device=55 swapchain=1234 api=KHR2 calls=60 successful=59 timeouts=1 errors=0 polls=1 first_present_id=20 last_present_id=79 duration_mean_ms=8.2 duration_max_ms=21.5
 MAKO Renderer: present diagnostics: operation=application-acquire stream=20 pid=4242 device=55 swapchain=1234 api=KHR2 calls=45 entry_interval_samples=45 entry_interval_mean_ms=22.2 entry_interval_max_ms=72.2 duration_mean_ms=1.1 duration_max_ms=50.1 successful=45 timeouts=0 not_ready=0 errors=0 polls=0
@@ -477,8 +480,13 @@ class DiagnosticsHelperTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("spatial scaling surface virtualized", result.stdout)
         self.assertIn("operation=gamescope-bridge-timing", result.stdout)
+        self.assertIn("presentation timing initialized; owner=renderer; transport=VK_EXT_present_timing; active=1", result.stdout)
+        self.assertIn("presentation timing fallback; owner=renderer; transport=VK_EXT_present_timing; reason=feedback-or-clock-unavailable", result.stdout)
         self.assertIn("repeated_timestamps=94", result.stdout)
         self.assertIn("late_latch_feedbacks=23", result.stdout)
+        self.assertIn("timing_protocol=2 timestamp_kind=prediction", result.stdout)
+        self.assertIn("queue_ready_mean_ms=2.5", result.stdout)
+        self.assertIn("compositor_hold_mean_ms=8", result.stdout)
         self.assertIn("operation=application-present-mode", result.stdout)
         self.assertIn("operation=application-present-wait", result.stdout)
         self.assertIn("spatial scaling surface bridge", result.stdout)
@@ -706,8 +714,13 @@ class DiagnosticsHelperTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("operation=fixed-plan", result.stdout)
         self.assertIn("operation=gamescope-bridge-timing", result.stdout)
+        self.assertIn("presentation timing initialized; owner=renderer; transport=VK_EXT_present_timing; active=1", result.stdout)
+        self.assertIn("presentation timing fallback; owner=renderer; transport=VK_EXT_present_timing; reason=feedback-or-clock-unavailable", result.stdout)
         self.assertIn("repeated_timestamps=94", result.stdout)
         self.assertIn("late_latch_feedbacks=23", result.stdout)
+        self.assertIn("timing_protocol=2 timestamp_kind=prediction", result.stdout)
+        self.assertIn("queue_ready_mean_ms=2.5", result.stdout)
+        self.assertIn("compositor_hold_mean_ms=8", result.stdout)
         self.assertIn("operation=application-present-mode", result.stdout)
         self.assertIn("operation=application-present-wait", result.stdout)
         self.assertIn("fixed-cadence-collapse-probe-start", result.stdout)

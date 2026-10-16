@@ -63,11 +63,13 @@ namespace {
         std::string engineName;
         std::unique_ptr<GamescopeScalingSurface> scalingSurfaces;
         SurfaceMaintenance1Support surfaceMaintenance1;
+        bool surfaceCapabilities2{false};
 
         std::unordered_map<VkDevice, vk::Vulkan> devices;
         std::unordered_set<VkDevice> nativeDevices;
         std::unordered_set<VkDevice> presentRetirementDevices;
         std::unordered_set<VkDevice> gamescopeTimingDevices;
+        std::unordered_set<VkDevice> presentTimingDevices;
         std::unordered_set<VkDevice> hdrMetadataDevices;
         std::unordered_set<VkDevice> lowerHdrMetadataDevices;
         struct QueueIdentity {
@@ -574,6 +576,14 @@ namespace {
                     extensions.push_back(name);
             };
             const auto maintenance1 = surfaceMaintenance1Support(available);
+            const bool timingCapabilities = retirementRequested &&
+                std::ranges::any_of(available, [](const auto& extension) {
+                    return std::string_view(extension.extensionName) == "VK_KHR_get_surface_capabilities2";
+                });
+            if (timingCapabilities) {
+                appendExtension("VK_KHR_surface");
+                appendExtension("VK_KHR_get_surface_capabilities2");
+            }
             if (retirementRequested) {
                 if (maintenance1.khr || maintenance1.ext) {
                     appendExtension("VK_KHR_surface");
@@ -610,12 +620,14 @@ namespace {
                         ? info->pApplicationInfo->pEngineName : "",
                     .scalingSurfaces = std::move(scalingSurfaces),
                     .surfaceMaintenance1 = maintenance1,
+                    .surfaceCapabilities2 = timingCapabilities,
                 };
             else {
                 // Shared dispatch may serve several Wine instances. Only use
                 // a spelling whose prerequisites were enabled on every one.
                 instance_info->surfaceMaintenance1.khr &= maintenance1.khr;
                 instance_info->surfaceMaintenance1.ext &= maintenance1.ext;
+                instance_info->surfaceCapabilities2 &= timingCapabilities;
                 if (instance_info->engineName.empty() &&
                         info->pApplicationInfo &&
                         info->pApplicationInfo->pEngineName) {
@@ -779,6 +791,36 @@ namespace {
                 physdev, *info, scalingEngineProvisioned
             )
             : std::nullopt;
+        bool ownedPresentTiming = false;
+#if defined(VK_EXT_present_timing) && defined(VK_KHR_present_id2)
+        if (frameGenerationInteropEnabled && instance_info->surfaceCapabilities2 &&
+                OwnedPresentTiming::ownsNamespace(*info) &&
+                instance_info->funcs.GetPhysicalDeviceFeatures2) {
+            const auto extensions = lowerDeviceExtensions(physdev);
+            const auto supported = [&](const char* name) {
+                return std::ranges::any_of(extensions, [name](const auto& extension) {
+                    return std::strcmp(extension.extensionName, name) == 0;
+                });
+            };
+            if (supported(VK_EXT_PRESENT_TIMING_EXTENSION_NAME) &&
+                    supported(VK_KHR_PRESENT_ID_2_EXTENSION_NAME) &&
+                    supported(VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) {
+                VkPhysicalDevicePresentId2FeaturesKHR ids{
+                    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR,
+                };
+                VkPhysicalDevicePresentTimingFeaturesEXT timing{
+                    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_TIMING_FEATURES_EXT,
+                    .pNext = &ids,
+                };
+                VkPhysicalDeviceFeatures2 features{
+                    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                    .pNext = &timing,
+                };
+                instance_info->funcs.GetPhysicalDeviceFeatures2(physdev, &features);
+                ownedPresentTiming = ids.presentId2 && timing.presentTiming && timing.presentAtAbsoluteTime;
+            }
+        }
+#endif
         const bool gamescopeDisplayTiming = presentationDevice &&
             supportedGamescopeDisplayTiming(physdev, *info);
         bool presentRetirementEnabled = false;
@@ -869,6 +911,34 @@ namespace {
                 }
             }
             const vk::ShaderFloat16FeatureRequest precisionFeatures(newInfo, enableScalingFp16);
+#if defined(VK_EXT_present_timing) && defined(VK_KHR_present_id2)
+            std::vector<const char*> timingExtensions;
+            VkPhysicalDevicePresentId2FeaturesKHR timingIds{
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR,
+                .pNext = const_cast<void*>(newInfo.pNext),
+                .presentId2 = VK_TRUE,
+            };
+            VkPhysicalDevicePresentTimingFeaturesEXT timingFeatures{
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_TIMING_FEATURES_EXT,
+                .pNext = &timingIds,
+                .presentTiming = VK_TRUE,
+                .presentAtAbsoluteTime = VK_TRUE,
+            };
+            if (ownedPresentTiming) {
+                for (uint32_t i = 0; i < newInfo.enabledExtensionCount; ++i)
+                    timingExtensions.push_back(newInfo.ppEnabledExtensionNames[i]);
+                for (const auto* name : {VK_EXT_PRESENT_TIMING_EXTENSION_NAME,
+                        VK_KHR_PRESENT_ID_2_EXTENSION_NAME, VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME}) {
+                    if (!std::ranges::any_of(timingExtensions, [name](const auto* existing) {
+                            return std::strcmp(name, existing) == 0;
+                        }))
+                        timingExtensions.push_back(name);
+                }
+                newInfo.enabledExtensionCount = static_cast<uint32_t>(timingExtensions.size());
+                newInfo.ppEnabledExtensionNames = timingExtensions.data();
+                newInfo.pNext = &timingFeatures;
+            }
+#endif
             layer_info->root.modifyDeviceCreateInfo(
                 newInfo,
                 swapchainMaintenance1Extension.value_or(nullptr),
@@ -900,6 +970,8 @@ namespace {
             instance_info->presentRetirementDevices.insert(*device);
         if (gamescopeDisplayTiming)
             instance_info->gamescopeTimingDevices.insert(*device);
+        if (ownedPresentTiming)
+            instance_info->presentTimingDevices.insert(*device);
         if (hdrMetadataEnabled)
             instance_info->hdrMetadataDevices.insert(*device);
         if (lowerHdrMetadataEnabled)
@@ -929,6 +1001,7 @@ namespace {
             }
             instance_info->presentRetirementDevices.erase(*device);
             instance_info->gamescopeTimingDevices.erase(*device);
+            instance_info->presentTimingDevices.erase(*device);
             instance_info->hdrMetadataDevices.erase(*device);
             instance_info->lowerHdrMetadataDevices.erase(*device);
         };
@@ -1043,6 +1116,7 @@ namespace {
         instance_info->nativeDevices.erase(device);
         instance_info->presentRetirementDevices.erase(device);
         instance_info->gamescopeTimingDevices.erase(device);
+        instance_info->presentTimingDevices.erase(device);
         instance_info->hdrMetadataDevices.erase(device);
         instance_info->lowerHdrMetadataDevices.erase(device);
 
@@ -2221,6 +2295,7 @@ namespace {
 
             // create swapchain
             VkSwapchainCreateInfoKHR newInfo = *info;
+            bool ownedPresentTiming = false;
             std::optional<SpatialScalingExtents> previousVariableExtents;
             std::optional<SpatialScalingExtents>
                 variableSurfaceRollbackExtents;
@@ -2381,6 +2456,38 @@ namespace {
                             if (prepared != VK_SUCCESS)
                                 throw ls::vulkan_error(prepared, "HDR surface format is unavailable");
                         }
+#if defined(VK_EXT_present_timing) && defined(VK_KHR_present_id2)
+                        // The bridge already owns protocol timing. Native and
+                        // full-WSI surfaces negotiate their own Vulkan contract.
+                        if (instance_info->presentTimingDevices.contains(device) &&
+                                !(instance_info->scalingSurfaces &&
+                                  instance_info->scalingSurfaces->owns(info->surface))) {
+                            const auto query = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR>(
+                                layer_info->GetInstanceProcAddr(it->second.inst(),
+                                    "vkGetPhysicalDeviceSurfaceCapabilities2KHR"));
+                            VkSurfaceCapabilitiesPresentId2KHR ids{
+                                .sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_PRESENT_ID_2_KHR,
+                            };
+                            VkPresentTimingSurfaceCapabilitiesEXT timing{
+                                .sType = VK_STRUCTURE_TYPE_PRESENT_TIMING_SURFACE_CAPABILITIES_EXT,
+                                .pNext = &ids,
+                            };
+                            VkSurfaceCapabilities2KHR caps{
+                                .sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR,
+                                .pNext = &timing,
+                            };
+                            const VkPhysicalDeviceSurfaceInfo2KHR surface{
+                                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR,
+                                .surface = driverInfo.surface,
+                            };
+                            ownedPresentTiming = query &&
+                                query(it->second.physdev(), &surface, &caps) == VK_SUCCESS &&
+                                OwnedPresentTiming::surfaceSupported(timing, ids);
+                            if (ownedPresentTiming)
+                                driverInfo.flags |= VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT |
+                                    VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR;
+                        }
+#endif
                         const uint32_t provisionedMinImages =
                             newInfo->minImageCount;
                         auto res = it->second.df().CreateSwapchainKHR(
@@ -2712,6 +2819,7 @@ namespace {
                     ? instance_info->scalingSurfaces.get() : nullptr,
                 .gamescopeDisplayTiming =
                     instance_info->gamescopeTimingDevices.contains(device),
+                .ownedPresentTiming = ownedPresentTiming,
                 .format = newInfo.imageFormat,
                 .colorSpace = newInfo.imageColorSpace,
                 .requestedMinImageCount = info->minImageCount,

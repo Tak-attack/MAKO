@@ -45,19 +45,26 @@ namespace mako::layer::present_diagnostics {
             size_t backwardsTimestamps{};
             // Matched feedback with a decodable latch later than its prediction.
             size_t lateLatchFeedbacks{};
+            size_t dropped{};
+            size_t invalidStages{};
+            size_t unavailableStages{};
+            Samples queueReady;
+            Samples compositorHold;
             Samples requestedInterval;
             Samples reportedInterval;
             Samples lateness;
             Samples submitLateness;
         };
 
-        void request(uint32_t id, uint64_t desired, uint64_t wake, uint64_t submit) {
+        explicit BridgePresentTiming(bool staged = false) : staged(staged) {}
+
+        void request(uint64_t id, uint64_t desired, uint64_t wake, uint64_t submit) {
             if (!started)
                 started = wake;
             auto& entry = pending[id % pending.size()];
             if (entry.valid)
                 ++window.overwritten;
-            entry = {id, desired, true};
+            entry = {id, desired, wake, true};
             ++window.requests;
             if (previousDesired && desired > previousDesired)
                 window.requestedInterval.add(milliseconds(desired - previousDesired));
@@ -65,7 +72,7 @@ namespace mako::layer::present_diagnostics {
             window.submitLateness.add(wake > submit ? milliseconds(wake - submit) : 0);
         }
 
-        void feedback(uint32_t id, uint64_t desired, uint64_t actual,
+        void feedback(uint64_t id, uint64_t desired, uint64_t actual,
                 bool lateLatch = false) {
             auto& entry = pending[id % pending.size()];
             if (!entry.valid || entry.id != id || entry.desired != desired || !actual) {
@@ -79,16 +86,52 @@ namespace mako::layer::present_diagnostics {
             window.lateness.add(actual >= desired ? milliseconds(actual - desired)
                                                   : -milliseconds(desired - actual));
             if (previousActual) {
-                window.nonconsecutiveIds += id != previousId + uint32_t{1};
+                const auto nextId = staged ? previousId + 1
+                    : static_cast<uint32_t>(previousId + 1);
+                window.nonconsecutiveIds += id != nextId;
                 window.repeatedTimestamps += actual == previousActual;
                 window.backwardsTimestamps += actual < previousActual;
-                if (id == previousId + uint32_t{1} && actual > previousActual)
+                if (id == nextId && actual > previousActual)
                     window.reportedInterval.add(milliseconds(actual - previousActual));
                 else
                     ++window.discontinuities;
             }
             previousActual = actual;
             previousId = id;
+        }
+
+        void feedbackTiming(uint64_t id, uint64_t queueEnd, uint64_t latch,
+                uint64_t predicted, uint64_t receivedAt) {
+            auto& entry = pending[id % pending.size()];
+            if (!entry.valid || entry.id != id) {
+                ++window.unmatched;
+                return;
+            }
+            if (!queueEnd && !latch && !predicted) {
+                entry.valid = false;
+                ++window.dropped;
+                return;
+            }
+            const bool invalid =
+                (queueEnd && (queueEnd < entry.submittedAt || queueEnd > receivedAt)) ||
+                (latch && (latch > receivedAt || (queueEnd && latch < queueEnd))) ||
+                predicted > static_cast<uint64_t>(INT64_MAX);
+            if (invalid)
+                ++window.invalidStages;
+            else {
+                if (queueEnd)
+                    window.queueReady.add(milliseconds(queueEnd - entry.submittedAt));
+                if (queueEnd && latch)
+                    window.compositorHold.add(milliseconds(latch - queueEnd));
+            }
+            if (!queueEnd || !latch || !predicted)
+                ++window.unavailableStages;
+            if (predicted && predicted <= static_cast<uint64_t>(INT64_MAX))
+                feedback(id, entry.desired, predicted, !invalid && latch > predicted);
+            else {
+                entry.valid = false;
+                ++window.feedbacks;
+            }
         }
 
         [[nodiscard]] std::optional<Window> take(uint64_t now) {
@@ -104,12 +147,18 @@ namespace mako::layer::present_diagnostics {
         }
 
     private:
-        struct Pending { uint32_t id{}; uint64_t desired{}; bool valid{}; };
+        struct Pending {
+            uint64_t id{};
+            uint64_t desired{};
+            uint64_t submittedAt{};
+            bool valid{};
+        };
         std::array<Pending, 128> pending{};
         uint64_t started{};
         uint64_t previousDesired{};
         uint64_t previousActual{};
-        uint32_t previousId{};
+        uint64_t previousId{};
+        bool staged{};
         Window window;
         static double milliseconds(uint64_t ns) { return static_cast<double>(ns) / 1000000.0; }
     };

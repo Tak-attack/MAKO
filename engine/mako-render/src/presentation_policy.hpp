@@ -902,7 +902,7 @@ namespace mako::layer {
     /// Spaces ordered compositor commits without a lower Wayland FIFO wait.
     /// The isolated bridge learns readiness from its own compositor feedback,
     /// never from source-frame intervals (which include application waits).
-    /// Full WSI, without bridge observations, retains its fixed batch lead.
+    /// Legacy WSI, without queue-stage observations, retains its fixed batch lead.
     /// Deadlines remain ordered across changes and submission stays bounded.
     class OrderedPresentTimeline {
     public:
@@ -912,6 +912,17 @@ namespace mako::layer {
             TimePoint submitAt;
             TimePoint presentAt;
         };
+
+        /// Clock changes invalidate learned work without moving output targets.
+        void invalidateReadiness() { this->resetReadiness(); }
+
+        /// A lost feedback transport returns to the fixed legacy lead. Clearing
+        /// samples alone would retain observed-mode startup lead indefinitely.
+        void useUnobservedTiming() {
+            this->resetReadiness();
+            this->lastBatchSerial.reset();
+            this->lastBatchAt.reset();
+        }
 
         [[nodiscard]] static bool validRate(const double fps) noexcept {
             return std::isfinite(fps) && fps >= 1.0 && fps <= 1000.0;
@@ -940,6 +951,11 @@ namespace mako::layer {
             this->lastBatchSerial = serial;
             this->lastBatchAt = now;
             this->batchIndex = (this->batchIndex + 1) % this->pending.size();
+            // V2 reports individual drops, possibly before earlier outputs.
+            // Retire forgotten entries individually when the bounded ring wraps.
+            const auto& expired = this->pending[this->batchIndex];
+            if (expired.staged)
+                this->completedOutputs += expired.count - expired.acknowledged;
             this->pending[this->batchIndex] = {};
             this->queuedOutputs = this->submittedOutputs - this->completedOutputs;
         }
@@ -948,6 +964,43 @@ namespace mako::layer {
         /// Fixed storage also bounds sessions with absent/dropped feedback.
         void submitted(const uint32_t id, const TimePoint desired,
                 const TimePoint submittedAt) {
+            this->recordSubmission(id, desired, submittedAt, false);
+        }
+
+        /// Timing-v2 serials identify this swapchain's outputs without a
+        /// wrapping 32-bit namespace or legacy broadcast feedback.
+        void submittedTiming(const uint64_t serial, const TimePoint desired,
+                const TimePoint submittedAt) {
+            this->recordSubmission(serial, desired, submittedAt, true);
+        }
+
+        /// Queue completion is observed before the compositor's requested-time
+        /// hold. Learn only that stage, not latch/feedback latency or a nominal
+        /// FIFO duration. Zero queueEnd includes explicit drops and unavailable
+        /// timestamps: acknowledge the output without learning fabricated work.
+        void feedbackTiming(const uint64_t serial, const TimePoint queueEnd,
+                const TimePoint receivedAt) {
+            for (auto& batch : this->pending) {
+                const auto index = serial - batch.firstId;
+                if (!batch.staged || index >= batch.count || batch.received[index])
+                    continue;
+                batch.received[index] = true;
+                ++batch.acknowledged;
+                ++this->completedOutputs;
+                const auto submittedAt = batch.outputSubmittedAt[index];
+                if (batch.observed || queueEnd <= TimePoint{} ||
+                        queueEnd < submittedAt || queueEnd > receivedAt ||
+                        queueEnd - submittedAt > maximumReadiness)
+                    return;
+                batch.observed = true;
+                this->recordReadiness(queueEnd - submittedAt);
+                return;
+            }
+        }
+
+    private:
+        void recordSubmission(const uint64_t id, const TimePoint desired,
+                const TimePoint submittedAt, const bool staged) {
             if (!this->lastBatchSerial || !this->generationEnabled)
                 return;
             auto& batch = this->pending[this->batchIndex];
@@ -955,6 +1008,7 @@ namespace mako::layer {
                 return;
             if (batch.count == 0) {
                 batch.firstId = id;
+                batch.staged = staged;
                 batch.firstSubmission = this->submittedOutputs + 1;
                 batch.lead = this->scheduledLead;
                 batch.refreshPeriod = this->scheduledRefreshPeriod;
@@ -965,12 +1019,24 @@ namespace mako::layer {
                     std::min<uint64_t>(this->submittedOutputs - this->completedOutputs,
                         GeneratedFramePlan::capacity + 1));
                 batch.submittedAt = submittedAt;
-            } else if (id != batch.firstId + static_cast<uint32_t>(batch.count)) {
+            } else if (staged != batch.staged || id != (staged
+                    ? batch.firstId + batch.count
+                    : static_cast<uint32_t>(batch.firstId + batch.count))) {
                 return;
             }
+            batch.outputSubmittedAt[batch.count] = submittedAt;
             batch.desired[batch.count++] = desired;
             ++this->submittedOutputs;
         }
+
+        void recordReadiness(const Clock::duration sample) {
+            this->readiness[this->readinessIndex] = sample;
+            this->readinessIndex = (this->readinessIndex + 1) % this->readiness.size();
+            this->readinessCount = std::min(this->readinessCount + 1,
+                this->readiness.size());
+        }
+
+    public:
 
         /// Gamescope reports when a ready output was first eligible to latch,
         /// separately from the requested hold. Correct the lead
@@ -983,7 +1049,7 @@ namespace mako::layer {
                 const TimePoint earliest, const Clock::duration margin = {}) {
             for (auto& batch : this->pending) {
                 const auto index = static_cast<uint32_t>(id - batch.firstId);
-                if (index >= batch.count || batch.desired[index] != desired)
+                if (batch.staged || index >= batch.count || batch.desired[index] != desired)
                     continue;
                 // Completion is acknowledged at the compositor latch, which
                 // can precede the predicted display timestamp. Every matched
@@ -1014,10 +1080,7 @@ namespace mako::layer {
                     batch.lead + (readyAt - batch.desired[0]) + allowance - queuedHold);
                 if (sample > maximumReadiness)
                     return;
-                this->readiness[this->readinessIndex] = sample;
-                this->readinessIndex = (this->readinessIndex + 1) % this->readiness.size();
-                this->readinessCount = std::min(this->readinessCount + 1,
-                    this->readiness.size());
+                this->recordReadiness(sample);
                 return;
             }
         }
@@ -1025,7 +1088,8 @@ namespace mako::layer {
         [[nodiscard]] std::optional<Slot> schedule(const TimePoint now,
                 const double outputFps, const double refreshFps,
                 const size_t outputBatchSize = 1,
-                const bool generationEnabled = true) {
+                const bool generationEnabled = true,
+                const std::optional<TimePoint> sourceDeadline = std::nullopt) {
             if (!validRate(outputFps) || !validRate(refreshFps) ||
                     outputBatchSize == 0 ||
                     outputBatchSize > GeneratedFramePlan::capacity + 1)
@@ -1104,8 +1168,14 @@ namespace mako::layer {
                 this->lastBatchAt.reset();
             }
             this->generationEnabled = generationEnabled;
+            // A capped producer has already reserved its return deadline.
+            // Stage this bounded batch by then so submission backpressure
+            // does not consume the next source interval. Display targets and
+            // readiness lead remain unchanged; late work never submits early.
+            const auto submitAt = presentAt - lead - refreshPeriod;
             return Slot{
-                .submitAt = std::max(now, presentAt - lead - refreshPeriod),
+                .submitAt = std::max(now, sourceDeadline
+                    ? std::min(submitAt, *sourceDeadline) : submitAt),
                 .presentAt = presentAt,
             };
         }
@@ -1129,10 +1199,14 @@ namespace mako::layer {
 
         static constexpr auto maximumReadiness = std::chrono::milliseconds(100);
         struct PendingBatch {
-            uint32_t firstId{};
+            uint64_t firstId{};
             uint64_t firstSubmission{};
             size_t count{};
             std::array<TimePoint, GeneratedFramePlan::capacity + 1> desired{};
+            std::array<TimePoint, GeneratedFramePlan::capacity + 1> outputSubmittedAt{};
+            std::array<bool, GeneratedFramePlan::capacity + 1> received{};
+            size_t acknowledged{};
+            bool staged{};
             TimePoint submittedAt{};
             Clock::duration lead{};
             Clock::duration refreshPeriod{};
@@ -1507,6 +1581,7 @@ namespace mako::layer {
                     this->retryAt[*this->activeLimit - 1] = now + retryDelay();
                 }
                 this->activeLimit.reset();
+                this->activatedAt.reset();
             }
             if (!this->activeLimit && eligibleGenerationLimit &&
                     *eligibleGenerationLimit >= 1 &&
@@ -1514,6 +1589,7 @@ namespace mako::layer {
                 auto& retry = this->retryAt[*eligibleGenerationLimit - 1];
                 if (!retry || now >= *retry) {
                     this->activeLimit = eligibleGenerationLimit;
+                    this->activatedAt = now;
                     retry.reset();
                 }
             }
@@ -1529,10 +1605,12 @@ namespace mako::layer {
             // Losing focus is not a failed FIFO pacing experiment. Preserve
             // any genuine earlier failure's backoff without creating one.
             this->activeLimit.reset();
+            this->activatedAt.reset();
         }
 
         void reset() {
             this->activeLimit.reset();
+            this->activatedAt.reset();
             this->retryAt.fill(std::nullopt);
         }
 
@@ -1544,12 +1622,22 @@ namespace mako::layer {
             return this->activeLimit;
         }
 
+        /// Releasing the source cap briefly drains queued work and perturbs
+        /// the instantaneous estimator. Only cadence retention may use this
+        /// bounded interval; eligibility's transport/probe guards still apply.
+        [[nodiscard]] bool settling(const TimePoint now) const {
+            return this->activeLimit && this->activatedAt &&
+                now >= *this->activatedAt &&
+                now - *this->activatedAt < std::chrono::milliseconds{250};
+        }
+
         [[nodiscard]] static constexpr std::chrono::seconds retryDelay() {
             return std::chrono::seconds{60};
         }
 
     private:
         std::optional<size_t> activeLimit;
+        std::optional<TimePoint> activatedAt;
         std::array<std::optional<TimePoint>, 4> retryAt{};
     };
 

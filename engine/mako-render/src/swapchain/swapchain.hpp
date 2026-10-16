@@ -22,6 +22,7 @@
 #include "spatial_scaler.hpp"
 #include "spatial_scaling_policy.hpp"
 #include "spatial_command_recording.hpp"
+#include "present_timing.hpp"
 
 #include <array>
 #include <chrono>
@@ -50,6 +51,7 @@ namespace mako::layer {
         // Enabled only when the lower chain advertises display timing and the
         // application has not selected its own timing-feedback namespace.
         bool gamescopeDisplayTiming{false};
+        bool ownedPresentTiming{false};
         VkFormat format;
         VkColorSpaceKHR colorSpace;
         // Preserve the application's requested minimum separately from the
@@ -469,10 +471,13 @@ namespace mako::layer {
         // Actual scheduled batch, including the real image; never the user's
         // unproven maximum multiplier. Reset before native/history fallbacks.
         size_t bridgeOutputBatchSize{1};
+        std::optional<std::chrono::steady_clock::time_point> outputSourceDeadline;
         // Last deadline scheduled by an owned output timeline. Recovery may
         // sample native cadence only after this earlier queue has cleared.
         std::optional<std::chrono::steady_clock::time_point> orderedPresentationDeadline;
         OrderedPresentTimeline wsiPresentTimeline;
+        OwnedPresentTiming presentTiming;
+        bool presentTimingInitialized{false};
         PFN_vkGetPastPresentationTimingGOOGLE wsiPresentTimingQuery{nullptr};
         uint32_t wsiTimingPresentsSinceDrain{0};
         bool wsiPresentTimingLogged{false};

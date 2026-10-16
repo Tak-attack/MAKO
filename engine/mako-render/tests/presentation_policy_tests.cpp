@@ -820,6 +820,134 @@ void testFractionalUsesExistingSourceDeadline() {
     }
 }
 
+void testBridgeSourceDeadlinePreservesDisplayClock() {
+    using Clock = OrderedPresentTimeline::Clock;
+    const auto start = Clock::time_point{10s};
+    OrderedPresentTimeline ordinary;
+    OrderedPresentTimeline capped;
+    ordinary.observeSourceBatch(start, 1);
+    capped.observeSourceBatch(start, 1);
+    (void)ordinary.schedule(start, 60, 120, 2);
+    (void)capped.schedule(start, 60, 120, 2);
+    // A below-refresh batch can outlast the normal submission lookahead.
+    // Its producer's existing deadline permits earlier staging, never an
+    // earlier display target or a second output clock.
+    auto expected = ordinary.schedule(start, 60, 120, 2);
+    auto actual = capped.schedule(start, 60, 120, 2, true, start + 5ms);
+    expect(expected->submitAt > start + 5ms && actual->submitAt == start + 5ms &&
+            actual->presentAt == expected->presentAt,
+        "bridge source budget changed display timing or consumed the next source interval");
+    expected = ordinary.schedule(start, 60, 120, 2);
+    actual = capped.schedule(start, 60, 120, 2, true, start - 1ms);
+    expect(actual->submitAt == start && actual->presentAt == expected->presentAt,
+        "expired source budget moved submission into the past or compressed display targets");
+    expected = ordinary.schedule(start, 60, 120, 2);
+    actual = capped.schedule(start, 60, 120, 2);
+    expect(actual->submitAt == expected->submitAt && actual->presentAt == expected->presentAt,
+        "bridge retained a source budget after its producer released it");
+}
+
+void testBridgeStagedReadiness() {
+    using Clock = OrderedPresentTimeline::Clock;
+    const auto start = Clock::time_point{10s};
+    for (const double refresh : {30., 60., 90., 120., 144., 240.}) {
+        const auto period = std::chrono::duration_cast<Clock::duration>(
+            std::chrono::duration<double>(1.0 / refresh));
+        for (size_t batchSize = 2; batchSize <= 5; ++batchSize) {
+            // Different compositor holds must learn identical queue readiness.
+            for (const auto hold : {0ms, 20ms, 60ms}) {
+                OrderedPresentTimeline timeline;
+                timeline.observeSourceBatch(start, 1);
+                const auto slot = timeline.schedule(start, refresh, refresh, batchSize);
+                constexpr uint64_t serial = uint64_t{UINT32_MAX} + 5;
+                timeline.submittedTiming(serial, slot->presentAt, start);
+                timeline.feedbackTiming(serial, start + 2ms, start + 2ms + hold);
+                timeline.feedbackTiming(serial, start + 90ms, start + 90ms); // Duplicate.
+                const auto next = start + 500ms;
+                timeline.observeSourceBatch(next, 2);
+                const auto learned = timeline.schedule(next, refresh, refresh, batchSize);
+                expect(learned->presentAt == next + period,
+                    "V2 readiness included compositor waiting or duplicate evidence");
+                // Idle recovery and native history retain the existing guard.
+                timeline.observeSourceBatch(next + 2s, 3);
+                const auto recovered = timeline.schedule(next + 2s, refresh, refresh, batchSize);
+                expect(recovered->presentAt == next + 2s + 2 * period,
+                    "V2 feedback lost bounded recovery readiness");
+            }
+        }
+    }
+    for (const int invalid : {0, 1, 2, 3, 4}) {
+        OrderedPresentTimeline timeline;
+        timeline.observeSourceBatch(start, 1);
+        const auto slot = timeline.schedule(start, 120, 120, 2);
+        constexpr uint64_t serial = uint64_t{UINT32_MAX} + 8;
+        timeline.submittedTiming(serial, slot->presentAt, start);
+        timeline.feedbackTiming(invalid == 4 ? static_cast<uint32_t>(serial) : serial,
+            invalid == 0 ? Clock::time_point{} : invalid == 1 ? start - 1ns :
+            invalid == 2 ? start + 101ms : start + 2ms,
+            invalid == 3 ? start + 1ms : start + 200ms);
+        timeline.observeSourceBatch(start + 500ms, 2);
+        const auto next = timeline.schedule(start + 500ms, 120, 120, 2);
+        expect(next->presentAt - (start + 500ms) > 30ms,
+            "drop, malformed clock or truncated serial fabricated V2 readiness");
+    }
+    OrderedPresentTimeline outOfOrder;
+    {
+        OrderedPresentTimeline droppedFirst;
+        droppedFirst.observeSourceBatch(start, 1);
+        auto slot = droppedFirst.schedule(start, 120, 120, 2);
+        droppedFirst.submittedTiming(1, slot->presentAt, start);
+        slot = droppedFirst.schedule(start + 20ms, 120, 120, 2);
+        droppedFirst.submittedTiming(2, slot->presentAt, start + 20ms);
+        droppedFirst.feedbackTiming(1, {}, start + 40ms);
+        droppedFirst.feedbackTiming(2, start + 22ms, start + 40ms);
+        droppedFirst.observeSourceBatch(start + 500ms, 2);
+        slot = droppedFirst.schedule(start + 500ms, 120, 120, 2);
+        expect(slot->presentAt - (start + 500ms) < 9ms,
+            "later V2 feedback learned CPU spacing after an earlier dropped output");
+    }
+    uint64_t serial = 0;
+    for (uint64_t batch = 1; batch <= 3; ++batch) {
+        const auto now = start + batch * 20ms;
+        outOfOrder.observeSourceBatch(now, batch);
+        for (size_t output = 0; output < 2; ++output) {
+            const auto slot = outOfOrder.schedule(now, 120, 120, 2);
+            outOfOrder.submittedTiming(++serial, slot->presentAt, now);
+        }
+    }
+    outOfOrder.feedbackTiming(1, start + 22ms, start + 100ms);
+    outOfOrder.feedbackTiming(6, {}, start + 100ms); // Drop newer output first.
+    outOfOrder.feedbackTiming(6, {}, start + 100ms); // Duplicate must not retire twice.
+    outOfOrder.observeSourceBatch(start + 500ms, 4);
+    auto slot = outOfOrder.schedule(start + 500ms, 120, 120, 2);
+    expect(slot->presentAt - (start + 500ms) > 24ms,
+        "out-of-order V2 drop retired unacknowledged older outputs");
+    for (uint64_t id = 2; id <= 5; ++id)
+        outOfOrder.feedbackTiming(id, {}, start + 501ms);
+    outOfOrder.observeSourceBatch(start + 700ms, 5);
+    slot = outOfOrder.schedule(start + 700ms, 120, 120, 2);
+    expect(slot->presentAt - (start + 700ms) < 9ms,
+        "explicit V2 drops retained nonexistent queue occupancy");
+    OrderedPresentTimeline missing;
+    serial = 0;
+    for (uint64_t batch = 1; batch <= 33; ++batch) {
+        const auto now = start + batch * 20ms;
+        missing.observeSourceBatch(now, batch);
+        for (size_t output = 0; output < 2; ++output) {
+            slot = missing.schedule(now, 120, 120, 2);
+            missing.submittedTiming(++serial, slot->presentAt, now);
+        }
+    }
+    missing.feedbackTiming(66, start + 662ms, start + 700ms);
+    for (uint64_t id = 35; id < 66; ++id)
+        missing.feedbackTiming(id, {}, start + 700ms);
+    missing.feedbackTiming(1, start + 750ms, start + 750ms); // Expired ring entry.
+    missing.observeSourceBatch(start + 900ms, 34);
+    slot = missing.schedule(start + 900ms, 120, 120, 2);
+    expect(slot->presentAt - (start + 900ms) < 9ms,
+        "V2 ring expiry retained phantom occupancy or accepted stale feedback");
+}
+
 int main() {
     testLongSessionDeadlineBounds();
     testFractionalUsesExistingSourceDeadline();
@@ -828,6 +956,8 @@ int main() {
     testOrderedPresentationTimeline();
     testBridgeCompositorReadiness();
     testBridgeCompletionReturnDoesNotDrift();
+    testBridgeStagedReadiness();
+    testBridgeSourceDeadlinePreservesDisplayClock();
     testOrderedAcquireUsesExplicitFailureOnly();
     testOrderedAcquireBackoffAndProbeAreFinite();
     testExternalInterruptionDiscardsOldFailure();
@@ -1432,12 +1562,20 @@ int main() {
         "a rejected lower-load probe failed to restore its retained integer cap");
 
     SmoothCadencePacerHandoff pacerHandoff;
+    expect(!pacerHandoff.settling(pacingStart),
+        "inactive handoff reported a settling interval");
     auto handoff = pacerHandoff.update(pacingStart, 1);
     expect(handoff.active && handoff.changed && handoff.generationLimit == 1,
         "qualified Smooth Cadence did not hand pacing to ordered FIFO");
+    expect(!pacerHandoff.settling(pacingStart - 1ns) &&
+            pacerHandoff.settling(pacingStart + 249ms) &&
+            !pacerHandoff.settling(pacingStart + 250ms),
+        "handoff settling was unbounded or accepted a backwards clock");
     handoff = pacerHandoff.update(pacingStart + 1s, 1);
     expect(handoff.active && !handoff.changed,
         "retained ordered-FIFO handoff reported a false transition");
+    expect(!pacerHandoff.settling(pacingStart + 1s),
+        "retaining a handoff renewed its settling interval");
     handoff = pacerHandoff.update(pacingStart + 2s, std::nullopt);
     expect(!handoff.active && handoff.changed,
         "lost Smooth Cadence qualification did not restore the base cap");

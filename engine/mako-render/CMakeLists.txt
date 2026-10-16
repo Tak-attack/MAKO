@@ -262,6 +262,11 @@ if(BUILD_TESTING)
     mako_register_portable_policy_test(
         mako-swapchain-retirement-tests swapchain-retirement)
 
+    add_executable(mako-present-timing-tests "tests/present_timing_tests.cpp")
+    target_include_directories(mako-present-timing-tests PRIVATE "src")
+    add_test(NAME present-timing COMMAND mako-present-timing-tests)
+    mako_register_portable_policy_test(mako-present-timing-tests present-timing)
+
     add_executable(mako-generated-frame-plan-tests
         "tests/generated_frame_plan_tests.cpp")
     target_include_directories(mako-generated-frame-plan-tests

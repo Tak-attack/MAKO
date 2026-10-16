@@ -119,6 +119,7 @@ struct GamescopeScalingSurface::Impl {
     wl_proxy* registry{};
     wl_proxy* compositor{};
     wl_proxy* factory{};
+    uint32_t factoryVersion{1};
     bool ready{};
     bool allowHdr{};
     HdrOutputQuery rootHdrOutput;
@@ -161,34 +162,38 @@ struct GamescopeScalingSurface::Impl {
     const wl_interface* callbackInterface{};
 
     // Minimal wire subset of Gamescope's MIT-licensed swapchain protocol at
-    // 2d217a16c7e5b56c7417257279bf102320cff024. Association plus create-time
+    // 2b5cf191d1047d6895516a834de8a72ac1c342f3. Association plus create-time
     // swapchain feedback are used. Ordered combined delivery annotates every
     // commit with FIFO and its own timestamp. HDR uses only colour feedback
     // and metadata; the limiter interface remains unused.
-    // All v1 events are declared so unsolicited feedback is consumed without
-    // retaining history.
+    // V2 is explicitly negotiated and opted into by its constructor; all
+    // legacy events remain declared for compositors advertising version one.
     // See THIRD_PARTY_NOTICES.md.
     std::array<const wl_interface*, 2> createTypes{};
-    std::array<wl_message, 2> factoryRequests{{
+    std::array<wl_message, 3> factoryRequests{{
         {"destroy", "", nullptr}, {"create_swapchain", "on", createTypes.data()},
+        {"create_swapchain_with_timing", "2on", createTypes.data()},
     }};
-    std::array<wl_message, 6> contentRequests{{
+    std::array<wl_message, 7> contentRequests{{
         {"destroy", "", nullptr},
         {"override_window_content", "uu", nullptr},
         {"swapchain_feedback", "uuuuuus", nullptr},
         {"set_present_mode", "u", nullptr},
         {"set_hdr_metadata", "uuuuuuuuuuuu", nullptr},
         {"set_present_time", "uuu", nullptr},
+        {"set_present_timing", "2uuuuu", nullptr},
     }};
-    std::array<wl_message, 3> contentEvents{{
+    std::array<wl_message, 5> contentEvents{{
         {"past_present_timing", "uuuuuuuuu", nullptr},
         {"refresh_cycle", "uu", nullptr}, {"retired", "", nullptr},
+        {"present_timing", "2uuuuuuuu", nullptr},
+        {"timing_properties", "2uuuu", nullptr},
     }};
     wl_interface factoryInterface{
-        "gamescope_swapchain_factory_v2", 1, 2, factoryRequests.data(), 0, nullptr,
+        "gamescope_swapchain_factory_v2", 2, 3, factoryRequests.data(), 0, nullptr,
     };
     wl_interface contentInterface{
-        "gamescope_swapchain", 1, 6, contentRequests.data(), 3, contentEvents.data(),
+        "gamescope_swapchain", 2, 7, contentRequests.data(), 5, contentEvents.data(),
     };
 
     struct Content {
@@ -201,12 +206,14 @@ struct GamescopeScalingSurface::Impl {
         std::optional<VkExtent2D> applicationExtent;
         VkResult acquisitionResult{VK_SUCCESS};
         uint32_t refreshHz{};
-        uint32_t presentId{};
+        uint64_t presentId{};
+        uint32_t timingVersion{1};
         OrderedPresentTimeline presentTimeline;
         std::optional<VkPresentModeKHR> compositorPresentMode;
         std::unique_ptr<present_diagnostics::BridgePresentTiming> timing;
         uint64_t diagnosticId{};
         uint64_t refreshCycleNs{};
+        uint64_t refreshIntervalNs{};
         ~Content() {
             if (owner)
                 owner->release(proxy);
@@ -492,9 +499,10 @@ struct GamescopeScalingSurface::Impl {
             callbackInterface;
     }
 
-    wl_proxy* bind(const uint32_t name, const wl_interface& interface) {
-        wl_argument args[4]{{.u = name}, {.s = interface.name}, {.u = 1}, {.o = nullptr}};
-        auto* proxy = marshal(registry, 0, &interface, 1, 0, args);
+    wl_proxy* bind(const uint32_t name, const wl_interface& interface,
+            const uint32_t version = 1) {
+        wl_argument args[4]{{.u = name}, {.s = interface.name}, {.u = version}, {.o = nullptr}};
+        auto* proxy = marshal(registry, 0, &interface, version, 0, args);
         if (proxy)
             setQueue(proxy, queue);
         return proxy;
@@ -507,8 +515,10 @@ struct GamescopeScalingSurface::Impl {
             return;
         if (!self.compositor && std::strcmp(interface, "wl_compositor") == 0)
             self.compositor = self.bind(name, *self.compositorInterface);
-        else if (!self.factory && std::strcmp(interface, self.factoryInterface.name) == 0)
-            self.factory = self.bind(name, self.factoryInterface);
+        else if (!self.factory && std::strcmp(interface, self.factoryInterface.name) == 0) {
+            self.factoryVersion = std::min(version, uint32_t{2});
+            self.factory = self.bind(name, self.factoryInterface, self.factoryVersion);
+        }
     }
 
     static void globalRemoved(void*, wl_proxy*, uint32_t) {}
@@ -605,6 +615,8 @@ struct GamescopeScalingSurface::Impl {
             uint32_t desiredHi, uint32_t desiredLo, uint32_t actualHi, uint32_t actualLo,
             uint32_t earliestHi, uint32_t earliestLo, uint32_t marginHi, uint32_t marginLo) {
         auto& content = *static_cast<Content*>(data);
+        if (content.timingVersion >= 2)
+            return; // V2 reports are owned; legacy events can be broadcast.
         const auto time = [](const uint32_t hi, const uint32_t lo) {
             const uint64_t ns = (uint64_t{hi} << 32) | lo;
             return ns <= static_cast<uint64_t>(INT64_MAX)
@@ -639,8 +651,36 @@ struct GamescopeScalingSurface::Impl {
     }
     static void refreshCycle(void* data, wl_proxy*, uint32_t hi, uint32_t lo) {
         auto& content = *static_cast<Content*>(data);
-        if (content.timing)
+        if (content.timingVersion == 1 && content.timing)
             content.refreshCycleNs = (uint64_t{hi} << 32) | lo;
+    }
+    static void presentTiming(void* data, wl_proxy*, uint32_t serialHi, uint32_t serialLo,
+            uint32_t queueHi, uint32_t queueLo, uint32_t latchHi, uint32_t latchLo,
+            uint32_t pixelHi, uint32_t pixelLo) {
+        auto& content = *static_cast<Content*>(data);
+        const uint64_t serial = (uint64_t{serialHi} << 32) | serialLo;
+        const uint64_t queueEnd = (uint64_t{queueHi} << 32) | queueLo;
+        const uint64_t latch = (uint64_t{latchHi} << 32) | latchLo;
+        const uint64_t pixel = (uint64_t{pixelHi} << 32) | pixelLo;
+        const auto now = OrderedPresentTimeline::Clock::now();
+        const auto nowNs = static_cast<uint64_t>(std::chrono::duration_cast<
+            std::chrono::nanoseconds>(now.time_since_epoch()).count());
+        // A missing stage is not zero work; an invalid stage cannot train the
+        // estimator. Pixel-out is a prediction and need not follow the latch.
+        const bool valid = queueEnd > 0 && queueEnd <= static_cast<uint64_t>(INT64_MAX) &&
+            (!latch || (queueEnd <= latch && latch <= nowNs));
+        content.presentTimeline.feedbackTiming(serial, valid
+            ? OrderedPresentTimeline::TimePoint{std::chrono::duration_cast<
+                OrderedPresentTimeline::Clock::duration>(std::chrono::nanoseconds(queueEnd))}
+            : OrderedPresentTimeline::TimePoint{}, now);
+        if (content.timing)
+            content.timing->feedbackTiming(serial, queueEnd, latch, pixel, nowNs);
+    }
+    static void timingProperties(void* data, wl_proxy*, uint32_t durationHi,
+            uint32_t durationLo, uint32_t intervalHi, uint32_t intervalLo) {
+        auto& content = *static_cast<Content*>(data);
+        content.refreshCycleNs = (uint64_t{durationHi} << 32) | durationLo;
+        content.refreshIntervalNs = (uint64_t{intervalHi} << 32) | intervalLo;
     }
     static void retired(void* data, wl_proxy*) {
         static_cast<Content*>(data)->retired = true;
@@ -896,18 +936,23 @@ bool GamescopeScalingSurface::createSwapchain(
         content->applicationExtent = applicationExtent;
     content->compositorPresentMode = compositorPresentMode;
     content->refreshHz = refreshHz;
+    content->timingVersion = impl->factoryVersion;
     if (present_diagnostics::enabled()) {
-        content->timing = std::make_unique<present_diagnostics::BridgePresentTiming>();
+        content->timing = std::make_unique<present_diagnostics::BridgePresentTiming>(
+            content->timingVersion >= 2);
         content->diagnosticId = present_diagnostics::allocateContextId();
     }
     wl_argument createArgs[2]{{.o = state.surface}, {.o = nullptr}};
     content->proxy = impl->marshal(
-        impl->factory, 1, &impl->contentInterface, 1, 0, createArgs
+        impl->factory, impl->factoryVersion >= 2 ? 2 : 1,
+        &impl->contentInterface, impl->factoryVersion, 0, createArgs
     );
     static void (*contentListener[])(void){
         reinterpret_cast<void (*)(void)>(Impl::pastTiming),
         reinterpret_cast<void (*)(void)>(Impl::refreshCycle),
         reinterpret_cast<void (*)(void)>(Impl::retired),
+        reinterpret_cast<void (*)(void)>(Impl::presentTiming),
+        reinterpret_cast<void (*)(void)>(Impl::timingProperties),
     };
     if (!content->proxy || impl->addListener(
             content->proxy, contentListener, content.get()) != 0) {
@@ -1308,7 +1353,8 @@ VkResult GamescopeScalingSurface::preparePresent(
         const double outputFps, const uint32_t refreshHz,
         const size_t outputBatchSize, const bool generationEnabled,
         const std::optional<uint64_t> sourceFrameSerial,
-        std::optional<std::chrono::steady_clock::time_point>* const scheduledDeadline) {
+        std::optional<std::chrono::steady_clock::time_point>* const scheduledDeadline,
+        const std::optional<std::chrono::steady_clock::time_point> sourceDeadline) {
     std::unique_lock lock(impl->mutex);
     auto found = impl->surfaces.find(surface);
     if (found == impl->surfaces.end())
@@ -1332,11 +1378,24 @@ VkResult GamescopeScalingSurface::preparePresent(
         const auto now = OrderedPresentTimeline::Clock::now();
         if (sourceFrameSerial)
             content->second->presentTimeline.observeSourceBatch(now, *sourceFrameSerial);
+        double outputRate = OrderedPresentTimeline::validRate(outputFps)
+            ? outputFps : content->second->refreshHz;
+        double refreshRate = content->second->refreshHz;
+        if (content->second->timingVersion >= 2) {
+            // Properties are swapchain-local and include compositor limiting.
+            // Unknown/variable sentinels cannot be converted into a clock.
+            const auto validCycle = [](const uint64_t ns) {
+                return ns >= 1000000 && ns <= 1000000000;
+            };
+            const auto cycle = content->second->refreshCycleNs;
+            const auto interval = content->second->refreshIntervalNs;
+            if (validCycle(interval))
+                refreshRate = 1e9 / static_cast<double>(interval);
+            if (validCycle(cycle) && (!validCycle(interval) || cycle >= interval))
+                outputRate = std::min(outputRate, 1e9 / static_cast<double>(cycle));
+        }
         slot = content->second->presentTimeline.schedule(
-            now,
-            OrderedPresentTimeline::validRate(outputFps)
-                ? outputFps : content->second->refreshHz,
-            content->second->refreshHz, outputBatchSize, generationEnabled);
+            now, outputRate, refreshRate, outputBatchSize, generationEnabled, sourceDeadline);
         if (!slot)
             return impl->failure(*found->second, content->second.get(), surface, swapchain,
                 VK_ERROR_SURFACE_LOST_KHR, "invalid-timeline", "present");
@@ -1370,25 +1429,45 @@ VkResult GamescopeScalingSurface::preparePresent(
         const auto ns = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 slot->presentAt.time_since_epoch()).count());
-        wl_argument timing[3]{
-            {.u = ++content->second->presentId},
-            {.u = static_cast<uint32_t>(ns >> 32)},
-            {.u = static_cast<uint32_t>(ns)},
-        };
-        impl->marshal(content->second->proxy, 5, nullptr, 1, 0, timing);
-        content->second->presentTimeline.submitted(content->second->presentId,
-            slot->presentAt, OrderedPresentTimeline::Clock::now());
+        auto& state = *content->second;
+        if (state.timingVersion >= 2) {
+            if (++state.presentId == 0)
+                ++state.presentId; // Zero disarms timing rather than identifying a frame.
+            wl_argument timing[5]{
+                {.u = static_cast<uint32_t>(state.presentId >> 32)},
+                {.u = static_cast<uint32_t>(state.presentId)},
+                {.u = static_cast<uint32_t>(ns >> 32)},
+                {.u = static_cast<uint32_t>(ns)},
+                {.u = 0}, // Absolute CLOCK_MONOTONIC deadline, including under VRR.
+            };
+            impl->marshal(state.proxy, 6, nullptr, 2, 0, timing);
+        } else {
+            state.presentId = static_cast<uint32_t>(state.presentId + 1);
+            wl_argument timing[3]{
+                {.u = static_cast<uint32_t>(state.presentId)},
+                {.u = static_cast<uint32_t>(ns >> 32)},
+                {.u = static_cast<uint32_t>(ns)},
+            };
+            impl->marshal(state.proxy, 5, nullptr, 1, 0, timing);
+        }
+        const auto submittedAt = OrderedPresentTimeline::Clock::now();
+        if (state.timingVersion >= 2)
+            state.presentTimeline.submittedTiming(state.presentId, slot->presentAt, submittedAt);
+        else
+            state.presentTimeline.submitted(static_cast<uint32_t>(state.presentId),
+                slot->presentAt, submittedAt);
         if (content->second->timing) {
             const auto nanos = [](const auto time) {
                 return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                     time.time_since_epoch()).count());
             };
-            const auto now = nanos(OrderedPresentTimeline::Clock::now());
+            const auto now = nanos(submittedAt);
             auto& diagnostics = *content->second->timing;
             diagnostics.request(content->second->presentId, ns, now, nanos(slot->submitAt));
             if (const auto window = diagnostics.take(now))
                 present_diagnostics::logBridgeTiming(content->second->diagnosticId,
-                    swapchain, *window, diagnostics.outstanding(), content->second->refreshCycleNs);
+                    swapchain, *window, diagnostics.outstanding(), state.refreshCycleNs,
+                    state.timingVersion, state.refreshIntervalNs);
         }
     }
     if (impl->flush() < 0 && errno != EAGAIN)

@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <string_view>
 
 #include <vulkan/vulkan_core.h>
 
@@ -72,6 +73,22 @@ namespace mako::layer {
                     node.sType == detail::presentTimingsInfoExtType)
                 return true;
             chain = node.pNext;
+        }
+        return false;
+    }
+
+    /// Optional Renderer timing must never share a consuming feedback queue
+    /// or present-ID namespace with the application.
+    [[nodiscard]] inline bool applicationOwnsPresentationTiming(
+            const VkDeviceCreateInfo& info, const bool includePresentIds = false) {
+        if (requestsApplicationPresentWait(info.pNext))
+            return true;
+        for (uint32_t i = 0; i < info.enabledExtensionCount; ++i) {
+            const std::string_view name(info.ppEnabledExtensionNames[i]);
+            if (name == "VK_GOOGLE_display_timing" || name == "VK_EXT_present_timing" ||
+                    (includePresentIds && (name == "VK_KHR_present_id2" ||
+                        name == "VK_KHR_present_id")))
+                return true;
         }
         return false;
     }

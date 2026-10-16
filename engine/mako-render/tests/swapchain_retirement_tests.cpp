@@ -236,6 +236,11 @@ int main() {
     const VkDeviceCreateInfo untimedDevice{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
     };
+    expect(displayTimingControlsOutput(true, true, 120) &&
+            !displayTimingControlsOutput(true, true, 0) &&
+            !displayTimingControlsOutput(false, true, 120) &&
+            !displayTimingControlsOutput(true, false, 120),
+        "legacy timing capability cannot suppress direct pacing without an ordered refresh clock");
     expect(rendererOwnsDisplayTiming(untimedDevice, true, true) &&
             !rendererOwnsDisplayTiming(untimedDevice, false, true) &&
             !rendererOwnsDisplayTiming(untimedDevice, true, false),
