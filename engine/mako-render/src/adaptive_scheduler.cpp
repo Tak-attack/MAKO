@@ -652,8 +652,19 @@ AdaptiveScheduler::observeCadence(
             adaptiveTransientFastBurstTargetRatio
     );
     if (instantaneousBaseFps > fastBurstThresholdFps) {
-        this->cancelPacedLoadValidation("fast-cadence-burst");
-        this->state.ramp.resetPacingObservation();
+        auto& paced = this->state.ramp.pacedLoad;
+        // Releasing the higher cap/FIFO for our lower-load probe can drain a
+        // queued app return. This interval is already outside the measurement
+        // window: keep the bounded turnover, not an immediately retried probe.
+        // Do not extend settling or accept this native-only burst as evidence.
+        const bool lowerProbeTurnover = paced.lowerLoadProbe &&
+            paced.settlingUntil && now <= *paced.settlingUntil;
+        if (lowerProbeTurnover) {
+            paced.discardTurnoverInterval = true;
+        } else {
+            this->cancelPacedLoadValidation("fast-cadence-burst");
+            this->state.ramp.resetPacingObservation();
+        }
         // This native-only interval is untrusted cadence evidence, but it can
         // finish draining the captured presentation horizon. The next whole
         // interval is then measurable instead of needlessly discarded too.
@@ -2014,6 +2025,13 @@ AdaptiveFramePlan AdaptiveScheduler::planFrame(
     lowerLoad.deliveryObserved = false;
     if (this->diagnosticsActive)
         this->state.pacingWindow.beginFrame();
+    // A real owner change also invalidates a lower probe during an excluded
+    // turnover burst, before cadence observation can return a native-only plan.
+    const auto& paced = this->state.ramp.pacedLoad;
+    if (paced.lowerLoadProbe && (paced.fifo
+            ? integerBaseCapGenerationLimit.has_value()
+            : orderedFifoGenerationLimit.has_value()))
+        this->cancelPacedLoadValidation("pacing-policy-changed");
     const auto cadence = this->observeCadence(
         now, generatedImageAcquireBackoff
     );
@@ -2874,13 +2892,10 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advancePacedLoadValidation(
         // FIFO is deliberately released for the lower probe. An automatic
         // cap instead follows its lower multiplier. Allow the first owner's
         // turnover, but never measure a lower load through the old high cap.
-        const bool ownerChanged = paced.fifo
-            ? integerBaseCapGenerationLimit.has_value()
-            : orderedFifoGenerationLimit.has_value();
         const bool lowerOwnerReady = paced.fifo
             ? !orderedFifoGenerationLimit
             : integerBaseCapGenerationLimit == paced.previousLimit;
-        if (ownerChanged || (now > *paced.settlingUntil && !lowerOwnerReady)) {
+        if (now > *paced.settlingUntil && !lowerOwnerReady) {
             this->cancelPacedLoadValidation("pacing-policy-changed");
             return;
         }
@@ -2904,6 +2919,12 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advancePacedLoadValidation(
             this->state.cadence.smoothedIntervalSeconds > 0.0
                 ? 1.0 / this->state.cadence.smoothedIntervalSeconds : 0.0,
             paced.fifo ? "ordered-fifo" : "automatic-integer-cap");
+        return;
+    }
+    if (paced.discardTurnoverInterval) {
+        // The preceding fast interval delivered only a real frame. Exclude
+        // its return even when it crosses the fixed settling boundary.
+        paced.discardTurnoverInterval = false;
         return;
     }
     if (now <= *paced.settlingUntil)

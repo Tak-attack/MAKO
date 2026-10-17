@@ -54,6 +54,8 @@ For comparisons, collect a separate report after each run and note which setting
 
 The initial `presentation timing initialized` record identifies optional Renderer-owned `VK_EXT_present_timing` support on a non-bridge surface. `active=0` means initialization retained existing pacing; a later `presentation timing fallback` record means feedback or clock support became unavailable. This capability depends on the installed driver and WSI; MAKO does not update Gamescope.
 
+Application presentation-wait summaries retain the first timeout or error in each window as `first_failure_result`, `first_failure_present_id`, `first_failure_timeout_ns`, and `first_failure_duration_ms`. These fields identify that failed call; the window maximum may belong to a different successful call. Successful windows omit the fields, and older builds do not record them. MAKO forwards the application’s wait and result unchanged.
+
 ## 4. Restore your settings
 
 Restore the original launch settings and remove the two temporary diagnostics variables.

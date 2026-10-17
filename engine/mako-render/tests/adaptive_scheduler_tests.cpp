@@ -4145,6 +4145,129 @@ namespace {
         }
     }
 
+    void testPacingProbeSurvivesBoundedTurnoverBurst() {
+        for (const bool fifo : {false, true}) {
+            for (const size_t multiplier : {3U, 4U, 5U}) {
+                for (const auto burstDuration : {1ms, 50ms, 249ms, 250ms}) {
+                    for (const bool higherPays : {false, true}) {
+                        Harness harness(120, multiplier, true,
+                            AdaptiveRecoveryPolicy::OrderedSdr, false, 2s,
+                            120, false, true, true);
+                        promoteForPacedLoadTest(harness, multiplier, 100.0);
+                        harness.runAtFps(144.0 / multiplier, 16s);
+                        for (size_t frame = 0; frame < 150; ++frame) {
+                            pacedLoadFrame(harness, 120.0 / multiplier,
+                                multiplier - 1, fifo);
+                            if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                                break;
+                        }
+                        require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit ==
+                                multiplier - 2,
+                            "burst fixture did not start its lower-load comparison");
+                        const auto lowerFrame = [&](const double fps) {
+                            return fifo ? harness.frameAtFps(fps)
+                                : pacedLoadFrame(harness, fps, multiplier - 2, false);
+                        };
+                        const auto burstEnd = harness.now + burstDuration;
+                        while (harness.now < burstEnd) {
+                            require(lowerFrame(1000.0).empty(),
+                                "turnover burst manufactured generated work");
+                            require(harness.scheduler.snapshot().pacedLoadValidationPending,
+                                "excluded turnover burst cancelled the lower-load comparison");
+                        }
+                        const double lowerFps = (higherPays ? 108.0 : 120.0) /
+                            static_cast<double>(multiplier - 1);
+                        for (size_t frame = 0; frame < 10; ++frame)
+                            lowerFrame(lowerFps);
+                        require(harness.scheduler.snapshot().pacedLoadValidationPending,
+                            "turnover burst counted as a full measured lower-load sample");
+                        for (size_t frame = 0; frame < 150; ++frame) {
+                            lowerFrame(lowerFps);
+                            if (!harness.scheduler.snapshot().pacedLoadValidationPending)
+                                break;
+                        }
+                        require(!harness.scheduler.snapshot().pacedLoadValidationPending &&
+                                harness.scheduler.snapshot().validatedGenerationLimit ==
+                                    multiplier - (higherPays ? 1 : 2),
+                            "turnover exemption changed the measured workload decision");
+                        if (higherPays) {
+                            for (size_t frame = 0; frame < 200; ++frame)
+                                pacedLoadFrame(harness, 120.0 / multiplier,
+                                    multiplier - 1, fifo);
+                            require(harness.diagnostics.count("adaptive-paced-load-accepted") == 1 &&
+                                    harness.diagnostics.count("adaptive-paced-load-baseline-probe") == 1,
+                                "turnover burst restarted the completed comparison");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    void testPacingProbeTurnoverBurstCannotExtendSettling() {
+        for (const bool fifo : {false, true}) {
+            Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr,
+                false, 2s, 120, false, true, true);
+            promoteForPacedLoadTest(harness, 3, 100.0);
+            harness.runAtFps(48.0, 16s);
+            for (size_t frame = 0; frame < 100; ++frame) {
+                pacedLoadFrame(harness, 40.0, 2, fifo);
+                if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                    break;
+            }
+            require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit == 1,
+                "bounded-burst fixture did not start its lower-load comparison");
+            for (size_t frame = 0; frame < 251; ++frame) {
+                if (fifo) harness.frameAtFps(1000.0);
+                else pacedLoadFrame(harness, 1000.0, 1, false);
+            }
+            require(!harness.scheduler.snapshot().pacedLoadValidationPending &&
+                    !harness.scheduler.snapshot().efficiencyProbeGenerationLimit &&
+                    harness.scheduler.snapshot().validatedGenerationLimit == 2 &&
+                    !harness.diagnostics.contains("adaptive-paced-load-accepted"),
+                "persistent burst extended settling or validated stale lower-load evidence");
+        }
+    }
+
+    void testPacingProbeTurnoverPreservesInvalidation() {
+        for (const bool fifo : {false, true}) {
+            for (size_t interruption = 0; interruption < 4; ++interruption) {
+                Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr,
+                    false, 2s, 120, false, true, true);
+                promoteForPacedLoadTest(harness, 3, 100.0);
+                harness.runAtFps(48.0, 16s);
+                for (size_t frame = 0; frame < 100; ++frame) {
+                    pacedLoadFrame(harness, 40.0, 2, fifo);
+                    if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                        break;
+                }
+                const auto lowerFrame = [&](const double fps) {
+                    return fifo ? harness.frameAtFps(fps)
+                        : pacedLoadFrame(harness, fps, 1, false);
+                };
+                lowerFrame(1000.0);
+                require(harness.scheduler.snapshot().pacedLoadValidationPending,
+                    "invalidation fixture lost the turnover probe");
+                switch (interruption) {
+                case 0: pacedLoadFrame(harness, 1000.0, 1, !fifo); break;
+                case 1: harness.scheduler.resetTiming(harness.now); break;
+                case 2: harness.frameAtFps(1000.0, true); break;
+                case 3:
+                    for (size_t frame = 0; frame < 35; ++frame)
+                        lowerFrame(54.0);
+                    lowerFrame(1000.0); // A burst in measured data is not turnover.
+                    break;
+                }
+                require(!harness.scheduler.snapshot().pacedLoadValidationPending &&
+                        !harness.scheduler.snapshot().efficiencyProbeGenerationLimit &&
+                        harness.scheduler.snapshot().validatedGenerationLimit == 2 &&
+                        !harness.diagnostics.contains("adaptive-paced-load-accepted"),
+                    "turnover exemption hid a real interruption: " +
+                        std::to_string(interruption));
+            }
+        }
+    }
+
     void testFreshPacingProbeDiscardsInterruptedLowerEvidence() {
         for (const bool fifo : {false, true}) {
             for (size_t interruption = 0; interruption < 4; ++interruption) {
@@ -6753,6 +6876,9 @@ int main() {
         {"fixed-refresh handoff uses sustained scheduler exit", testFixedRefreshHandoffUsesSustainedSchedulerExit},
         {"planned pacing return preserves accepted lifetime", testPlannedPacingReturnKeepsValidatedLifetime},
         {"planned pacing return invalidates on real changes", testPlannedPacingReturnInvalidatesOnRealChanges},
+        {"pacing probes survive bounded turnover bursts", testPacingProbeSurvivesBoundedTurnoverBurst},
+        {"pacing probe turnover preserves invalidation", testPacingProbeTurnoverPreservesInvalidation},
+        {"pacing turnover bursts cannot extend settling", testPacingProbeTurnoverBurstCannotExtendSettling},
         {"fresh pacing probes discard interrupted lower evidence", testFreshPacingProbeDiscardsInterruptedLowerEvidence},
         {"handoff at baseline expiry starts fresh comparison", testHandoffAtBaselineExpiryStartsFreshComparison},
         {"delayed cap return starts another fresh comparison", testDelayedCapReturnStartsAnotherFreshComparison},

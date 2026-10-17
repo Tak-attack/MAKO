@@ -202,6 +202,12 @@ namespace mako::layer::present_diagnostics {
     /// These observations never authorize completion or change a timeout.
     class ApplicationPresentWait {
     public:
+        struct Failure {
+            VkResult result;
+            uint64_t presentId;
+            uint64_t timeout;
+            double durationMs;
+        };
         struct Window {
             size_t calls{};
             size_t successful{};
@@ -210,6 +216,7 @@ namespace mako::layer::present_diagnostics {
             size_t polls{};
             uint64_t firstPresentId{};
             uint64_t lastPresentId{};
+            std::optional<Failure> firstFailure;
             BridgePresentTiming::Samples duration;
         };
 
@@ -235,6 +242,9 @@ namespace mako::layer::present_diagnostics {
             window.lastPresentId = presentId;
             window.duration.add(std::chrono::duration<double, std::milli>(
                 finished - started).count());
+            if ((result == VK_TIMEOUT || result < 0) && !window.firstFailure)
+                window.firstFailure = Failure{result, presentId, timeout,
+                    std::chrono::duration<double, std::milli>(finished - started).count()};
             if (finished - *windowStarted < std::chrono::seconds(1))
                 return std::nullopt;
             windowStarted = finished;

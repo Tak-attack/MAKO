@@ -191,7 +191,15 @@ void recordApplicationPresentWait(const VkDevice device, const VkSwapchainKHR sw
          << " first_present_id=" << window->firstPresentId
          << " last_present_id=" << window->lastPresentId
          << " duration_mean_ms=" << window->duration.mean()
-         << " duration_max_ms=" << window->duration.maximum << '\n';
+         << " duration_max_ms=" << window->duration.maximum;
+    if (window->firstFailure) {
+        const auto& failure = *window->firstFailure;
+        line << " first_failure_result=" << failure.result
+             << " first_failure_present_id=" << failure.presentId
+             << " first_failure_timeout_ns=" << failure.timeout
+             << " first_failure_duration_ms=" << failure.durationMs;
+    }
+    line << '\n';
     std::cerr << line.str();
 }
 namespace {

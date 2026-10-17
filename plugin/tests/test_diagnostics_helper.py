@@ -67,7 +67,7 @@ MAKO Renderer: presentation timing fallback; owner=renderer; transport=VK_EXT_pr
 MAKO Renderer: present diagnostics: operation=gamescope-bridge-timing bridge=12 pid=4242 timestamp_source=compositor-reported requests=120 feedbacks=118 outstanding=2 unmatched=0 nonconsecutive_ids=0 repeated_timestamps=94 backwards_timestamps=0 late_latch_feedbacks=23
 MAKO Renderer: present diagnostics: operation=gamescope-bridge-timing bridge=13 pid=4242 timing_protocol=2 timestamp_kind=prediction requests=120 feedbacks=117 dropped=1 outstanding=2 invalid_stages=0 unavailable_stages=1 queue_ready_samples=116 queue_ready_mean_ms=2.5 compositor_hold_samples=116 compositor_hold_mean_ms=8 refresh_interval_ns=18446744073709551615
 MAKO Renderer: present diagnostics: operation=application-present-mode context=2 swapchain=1234 requested_present_mode=0 dynamic_override=1 effective_present_mode=2 ordered_transport=1 bridge=1 action=diagnostic-only
-MAKO Renderer: present diagnostics: operation=application-present-wait waiter=19 pid=4242 device=55 swapchain=1234 api=KHR2 calls=60 successful=59 timeouts=1 errors=0 polls=1 first_present_id=20 last_present_id=79 duration_mean_ms=8.2 duration_max_ms=21.5
+MAKO Renderer: present diagnostics: operation=application-present-wait waiter=19 pid=4242 device=55 swapchain=1234 api=KHR2 calls=60 successful=59 timeouts=1 errors=0 polls=1 first_present_id=20 last_present_id=79 duration_mean_ms=8.2 duration_max_ms=21.5 first_failure_result=2 first_failure_present_id=20 first_failure_timeout_ns=0 first_failure_duration_ms=0.02
 MAKO Renderer: present diagnostics: operation=application-acquire stream=20 pid=4242 device=55 swapchain=1234 api=KHR2 calls=45 entry_interval_samples=45 entry_interval_mean_ms=22.2 entry_interval_max_ms=72.2 duration_mean_ms=1.1 duration_max_ms=50.1 successful=45 timeouts=0 not_ready=0 errors=0 polls=0
 MAKO Renderer: present diagnostics: operation=application-queue-present stream=20 pid=4242 queue=66 swapchain=1234 api=KHR calls=45 entry_interval_samples=45 entry_interval_mean_ms=22.2 entry_interval_max_ms=72.2 duration_mean_ms=8.1 duration_max_ms=10 includes_intentional_pacing=1 configuration_update_samples=45 configuration_update_mean_ms=0.1 configuration_update_max_ms=0.5
 MAKO Renderer: present diagnostics: operation=runtime-health monitor=21 pid=4242 role=frame-generation session_ms=3600000 gpu_render_node=226:128 process_rss_bytes=123456 gpu_busy_percent=95 gpu_temperature_mc=65000 mako_backend_internal_bytes=987654
@@ -489,6 +489,7 @@ class DiagnosticsHelperTests(unittest.TestCase):
         self.assertIn("compositor_hold_mean_ms=8", result.stdout)
         self.assertIn("operation=application-present-mode", result.stdout)
         self.assertIn("operation=application-present-wait", result.stdout)
+        self.assertIn("first_failure_result=2 first_failure_present_id=20 first_failure_timeout_ns=0 first_failure_duration_ms=0.02", result.stdout)
         self.assertIn("spatial scaling surface bridge", result.stdout)
         self.assertIn("operation=bridge-failure", result.stdout)
         self.assertIn("reason=association-retired; result=-1000001004", result.stdout)
@@ -723,6 +724,7 @@ class DiagnosticsHelperTests(unittest.TestCase):
         self.assertIn("compositor_hold_mean_ms=8", result.stdout)
         self.assertIn("operation=application-present-mode", result.stdout)
         self.assertIn("operation=application-present-wait", result.stdout)
+        self.assertIn("first_failure_result=2 first_failure_present_id=20 first_failure_timeout_ns=0 first_failure_duration_ms=0.02", result.stdout)
         self.assertIn("fixed-cadence-collapse-probe-start", result.stdout)
         self.assertIn("fixed-cadence-collapse-probe-recovered", result.stdout)
         self.assertIn("fixed-cadence-collapse-recovery-verified", result.stdout)

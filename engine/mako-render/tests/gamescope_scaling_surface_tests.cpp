@@ -567,12 +567,25 @@ int main() {
             waited->firstPresentId == 100 && waited->lastPresentId == 102 &&
             waited->duration.mean() == 14 && waited->duration.maximum == 20,
         "wait telemetry must distinguish polling, timeout, success and failure");
+    expect(waited->firstFailure && waited->firstFailure->result == VK_TIMEOUT &&
+            waited->firstFailure->presentId == 100 &&
+            waited->firstFailure->timeout == 0 && waited->firstFailure->durationMs == 2,
+        "wait telemetry lost the first failure's actual call and result");
     expect(!waits.observe({}, {}, PresentWaitApi::Khr2, 1, 1, VK_SUCCESS,
             start + 3s, start + 3001ms), "a different API inherited a stale window");
     const auto replaced = waits.observe({}, {}, PresentWaitApi::Khr2, 2, 1, VK_SUCCESS,
         start + 4s, start + 4001ms);
-    expect(replaced && replaced->calls == 2 && replaced->firstPresentId == 1,
+    expect(replaced && replaced->calls == 2 && replaced->firstPresentId == 1 &&
+            !replaced->firstFailure,
         "a changed wait stream merged prior present IDs");
+    const auto failed = waits.observe({}, {}, PresentWaitApi::Khr2, 3, 100'000'000,
+        VK_ERROR_OUT_OF_DATE_KHR, start + 5s, start + 5100ms);
+    expect(failed && failed->firstFailure &&
+            failed->firstFailure->result == VK_ERROR_OUT_OF_DATE_KHR &&
+            failed->firstFailure->presentId == 3 &&
+            failed->firstFailure->timeout == 100'000'000 &&
+            failed->firstFailure->durationMs == 100,
+        "a startup error cannot be attributed to the window maximum alone");
     size_t forwardedWaits{};
     for (const auto expected : {VK_SUCCESS, VK_TIMEOUT, VK_ERROR_DEVICE_LOST}) {
         const auto actual = present_diagnostics::observeApplicationPresentWait(

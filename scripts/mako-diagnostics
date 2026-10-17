@@ -270,6 +270,7 @@ for preset in "${presets[@]}"; do
       ;;
     scaling)
       # Preserve full bridge records, including protocol/stage/drop fields and legacy VRR margins.
+      # Keep the complete wait record, including first_failure_* call identity.
       add_pattern "$renderer_prefix present diagnostics: operation=(gamescope-bridge-timing|application-present-mode|application-present-wait)"
       add_pattern "$renderer_prefix (swapchain colour pipeline|swapchain creation failed|swapchain presentation failed)"
       add_pattern "$renderer_prefix Gamescope application HDR feedback"
@@ -293,6 +294,7 @@ for preset in "${presets[@]}"; do
       add_pattern "$renderer_prefix present diagnostics: operation=(adaptive-rescue-|adaptive-auto-base-cap-|adaptive-paced-load-)"
       add_pattern "$renderer_prefix present diagnostics: operation=adaptive-load-shed .*reason=paced-unpaid-real-frame-cost"
       # Preserve full bridge records, including protocol/stage/drop fields and legacy VRR margins.
+      # Keep the complete wait record, including first_failure_* call identity.
       add_pattern "$renderer_prefix present diagnostics: operation=(gamescope-bridge-timing|application-present-mode|application-present-wait)"
       add_pattern "$renderer_prefix present diagnostics: operation=(gamescope-focus|lower-present-stall-|adaptive-recovery-(recreation-|in-place-))"
       add_pattern "$renderer_prefix (backend-memory|renderer-memory) operation="

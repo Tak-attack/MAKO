@@ -654,6 +654,7 @@ namespace mako::layer {
                     bool fifo{false};
                     bool refreshBaseline{false};
                     bool lowerLoadProbe{false};
+                    bool discardTurnoverInterval{false};
                     double pacedBaseFps{0.0};
                     double pacedOutputFps{0.0};
                     bool deliveryObserved{false};
@@ -668,6 +669,7 @@ namespace mako::layer {
 
                     void reset() { *this = {}; }
                     void resetSamples() {
+                        this->discardTurnoverInterval = false;
                         this->deliveryObserved = false;
                         this->deliveredOutputs = 0;
                         this->sampleSeconds = 0.0;
