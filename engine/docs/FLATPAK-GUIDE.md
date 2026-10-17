@@ -95,7 +95,7 @@ flatpak override --user --env=MAKO_DISABLE_HDR_EXPOSURE=0 "$appid"
 flatpak override --user --env=DXVK_HDR=1 "$appid"
 ```
 
-Restart the app, then enable HDR inside the game. This requires an HDR-capable display and compositor; keep Gamescope WSI disabled. To return to SDR, close the app and restore the overrides:
+Restart the app, then enable HDR inside the game. This requires an HDR-capable display in a Gamescope session; keep Gamescope WSI disabled. See [HDR setup](CONFIGURATION.md#hdr) for the supported path. To return to SDR, close the app and restore the overrides:
 
 ```bash
 flatpak override --user --env=MAKO_DISABLE_HDR_EXPOSURE=1 "$appid"

@@ -2,7 +2,7 @@
 
 This directory owns MAKO's public product website. It has a Vinext preview/build for local Sites-compatible development and a static Vite build for GitHub Pages.
 
-Run `npm ci`, then `npm run dev` for the local preview. Run `npm run build` to validate the Vinext production build and `npm run build:pages` to create the GitHub Pages artifact under `dist-pages/`. Both builds validate the website's GPL declaration, deployed third-party notices, and visible notices link through `npm run check:legal`. The Pages build also runs `npm run check:seo`, which requires canonical and social metadata, structured data, crawler files, and server-rendered page content in the static artifact.
+With Node.js 22.13.0 or newer, run `npm ci`, then `npm run dev` for the local preview. Run `npm run build` to validate the Vinext production build and `npm run build:pages` to create the GitHub Pages artifact under `dist-pages/`. Both builds validate the website's GPL declaration, deployed third-party notices, and visible notices link through `npm run check:legal`. The Pages build also runs `npm run check:seo`, which requires canonical and social metadata, structured data, crawler files, and server-rendered page content in the static artifact.
 
 `app/site-metadata.ts` owns the canonical URL, search title, description, keywords, social image, and structured data shared by the Vinext and GitHub Pages builds. The Pages Vite plugin injects those values and pre-renders the React page before browser hydration. Keep crawler-owned files in `public/robots.txt` and `public/sitemap.xml`; never patch generated `dist-pages/` output.
 

@@ -23,7 +23,7 @@ Install:
 
 - Build tools such as `git` and `curl`
 - A C++ compiler that supports C++20 or later
-- CMake (version 3.10 or higher)
+- CMake 3.15 or newer for the commands below, which use [`cmake --install`](https://cmake.org/cmake/help/v3.15/release/3.15.html#command-line); the optional forced-FP16 build requires 3.22.1 or newer
 - Ninja (recommended; other CMake generators may work)
 - Vulkan headers and loader development files
 - X11 and XCB headers (`libx11`, `libxcb`, and `xorgproto` on Arch/SteamOS)

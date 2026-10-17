@@ -15,6 +15,8 @@ Use mpv's Vulkan renderer for video Frame Generation. MAKO changes displayed fra
 
 Frame Generation and LS1 need Lossless Scaling's default Steam version and a valid DLL path. MAKO Scaler works without it.
 
+The Flatpak examples below select mpv’s `waylandvk` context and require a Wayland session, including Gamescope. On X11, omit `gpu-context=waylandvk` or `--gpu-context=waylandvk` and let mpv select its Vulkan context automatically. See [mpv’s context options](https://mpv.io/manual/stable/#options-gpu-context).
+
 ## Open videos normally
 
 For Flathub mpv, add `mpv-bin` under **Profile Matching > Matched Processes**. Add these settings to `~/.var/app/io.mpv.Mpv/config/mpv/mpv.conf`:
@@ -66,7 +68,7 @@ MAKO_PROFILE=Video ~/.local/bin/mako-launch mpv \
   /absolute/path/to/video.mp4
 ```
 
-For native mpv, add `--gpu-context=waylandvk` only if `mpv --gpu-context=help` lists it.
+For native mpv in a Wayland session, add `--gpu-context=waylandvk` only if `mpv --gpu-context=help` lists it.
 
 ## Scaling and limitations
 

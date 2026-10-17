@@ -21,19 +21,26 @@ Performance is the focus of MAKO 4.6 Tempest. **Faster Frame Generation, lower G
 
 **About these results:** We tested Frame Generation against v4.5.0 using the native Renderer on an AMD Steam Machine. The speed figures show how quickly MAKO can create extra frames; your in-game FPS improvement will depend on the game, hardware and settings. Memory figures cover only MAKO’s own GPU memory. The Scaling and Shader improvements reduce CPU work.
 
+### Steadier frame pacing
+
+- **Adaptive and FIFO stability:** The matching Renderer preserves proven Adaptive workloads after brief image-availability misses and retains qualified Smooth Cadence pacing through short cadence dips. Sustained slowdowns and unsuccessful higher-multiplier trials still trigger the existing safeguards.
+- **More reliable multiplier checks:** Adaptive checks the real-frame cost after pacing settles and refreshes older comparisons when needed. Brief bursts of queued frames no longer repeatedly cancel and restart these checks. When both workloads reach the target, MAKO prefers the lower multiplier.
+- **Better use of frame-cap waits:** Eligible capped Fixed and Adaptive paths coordinate frame preparation with output timing, including supported Scaling and bridge paths, avoiding consecutive pacing waits while preserving your configured cap.
+- **Gamescope timing compatibility:** The matching Renderer improves bridge feedback handling and presentation deadlines, and uses newer Gamescope or optional Vulkan timing information when available. Bridge and non-bridge paths retain fallbacks for the installed compositor and driver; the update does not require replacing SteamOS's Gamescope.
+
 ### Customize shaders per game
 
 Select **Customize shaders** in MAKO Decky to fine-tune selected bundled and compatible custom effects. Adjust shader parameters with sliders, toggles, choices, and colour controls, or use **Reset shader to defaults** to start again with the selected effect.
 
 Your adjustments save with the selected profile and are shared across its AC and battery modes. Changes apply live when Shaders was enabled at game launch; rebuilding an effect may cause a brief hitch. The editor opens beside the game, and **Hide controls** collapses it for a clearer view while comparing results.
 
-Focused controls stay clear of the editor border and scrollbar. Unavailable shader actions are skipped during controller navigation.
+Palettes such as Nostalgia's **Custom palette** now use colour swatches, with sliders and exact-value fields for the selected colour. Sliders follow the shader author's step size with consistent controller increments, and numeric fields hide floating-point display noise without changing stored values or saving untouched fields.
+
+Controller navigation keeps focused controls visible when entering settings tabs or leaving the effects list. Collapsing the list reveals the next focused action without restoring stale scroll positions. Unavailable shader actions are skipped, and closing the shader editor returns to the selected MAKO section in Decky's Quick Access panel.
 
 ### Supporting improvements
 
 - **Shared MangoHud layouts:** Profiles with MangoHud enabled can use an optional `~/.config/mako-render/mangohud.conf`, shared with the standalone Renderer launcher. Creating or removing the file takes effect on the next game launch without resaving profiles. Keep the usual `mako-run %command%` launch option. Requires host-installed MangoHud; Flatpak games and simultaneous Shaders remain unsupported.
 - **Native FPS above the Adaptive target:** With **Fractional Adaptive** and **Automatic** Real Frame Priority, sustained native FPS can exceed **Target FPS** without generation when **Base FPS Cap** is off or at least the target. Manual caps remain enforced.
-- **Adaptive stability:** The matching Renderer avoids unnecessary resets of a proven Adaptive workload after brief image-availability misses during ordered presentation. Smooth Cadence requires sustained delivery before accepting a lower multiplier, while unsuccessful higher-multiplier trials retain their backoff.
-- **Gamescope frame pacing:** The matching Renderer keeps scaling feedback flowing while the game or driver is idle, corrects VRR timing handling, and avoids unnecessary delays after presentation waits.
 - **More complete translations:** Performance, HDR, scaling and Remote Play controls now use more consistent translated labels and explanations across MAKO Decky and the configuration app. Thanks to [Tak-attack](https://github.com/Tak-attack) for the Japanese improvements in [PR #91](https://github.com/eugeniosegala/MAKO/pull/91).
-- **Better support reports:** With diagnostics enabled, MAKO Decky retains ten launch sessions instead of five. Reports preserve Wayland protocol errors and multi-line failure details even in Steam’s timestamped logs, and MAKO Wiz’s links open the correct guides from GitHub issue comments.
+- **Better support reports:** With diagnostics enabled, MAKO Decky retains ten launch sessions instead of five. Reports preserve Wayland protocol errors and multi-line failure details even in Steam’s timestamped logs, identify failed presentation waits and available timing capabilities, and keep MAKO Wiz’s guide links usable from GitHub issue comments.

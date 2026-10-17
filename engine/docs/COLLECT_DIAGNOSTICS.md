@@ -50,11 +50,9 @@ For a slowdown after a long session, replace `--lines 5000` with `--lines 200000
 
 Collect from the original session log, not an older filtered report, which may have omitted error details. The report does not include the separate Gamescope system journal; support may request it if the game log is insufficient.
 
-For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution. For VRR comparisons, record Steam’s VRR setting and the installed Gamescope version for each run. Bridge records identify the negotiated timing protocol; newer Gamescope can separate frame readiness, compositor waiting and explicit drops. Reported display timestamps remain predictions, so these logs alone cannot prove physical scanout cadence.
+For comparisons, collect a separate report after each run and note which settings changed. Use the same scene and game settings where possible. For HDR sharpening comparisons, also note the game resolution and display resolution. For VRR comparisons, record the VRR setting, display refresh rate, desktop or Gaming Mode session, and Gamescope version if used.
 
-The initial `presentation timing initialized` record identifies optional Renderer-owned `VK_EXT_present_timing` support on a non-bridge surface. `active=0` means initialization retained existing pacing; a later `presentation timing fallback` record means feedback or clock support became unavailable. This capability depends on the installed driver and WSI; MAKO does not update Gamescope.
-
-Application presentation-wait summaries retain the first timeout or error in each window as `first_failure_result`, `first_failure_present_id`, `first_failure_timeout_ns`, and `first_failure_duration_ms`. These fields identify that failed call; the window maximum may belong to a different successful call. Successful windows omit the fields, and older builds do not record them. MAKO forwards the application’s wait and result unchanged.
+For timing-field meanings and the limits of log-based comparisons, see [Interpreting presentation records](WSI-ISOLATION.md#interpreting-presentation-records).
 
 ## 4. Restore your settings
 
