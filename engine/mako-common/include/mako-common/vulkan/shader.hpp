@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -23,10 +24,13 @@ namespace vk {
         /// @param storageImages number of storage images
         /// @param buffers number of buffers
         /// @param samplers number of samplers
+        /// @param independentCode optional second module with disjoint writes,
+        /// identical layout, immutable shared inputs and no other side effects
         /// @throws ls::vulkan_error on failure
         Shader(const vk::Vulkan& vk, const std::vector<uint8_t>& code,
             size_t sampledImages, size_t storageImages,
-            size_t buffers, size_t samplers);
+            size_t buffers, size_t samplers,
+            std::span<const uint8_t> independentCode = {});
 
         /// create a Vulkan shader directly from aligned SPIR-V words without
         /// constructing a process-startup byte vector
@@ -44,11 +48,16 @@ namespace vk {
         /// get the pipeline
         /// @returns the pipeline
         [[nodiscard]] const auto& pipeline() const { return *this->pipeline_; }
+        /// Optional second dispatch, covered by the same external dependencies.
+        [[nodiscard]] VkPipeline independentPipeline() const {
+            return this->independentPipeline_ ? **this->independentPipeline_ : VK_NULL_HANDLE;
+        }
     private:
         ls::owned_ptr<VkShaderModule> shaderModule;
         ls::owned_ptr<VkDescriptorSetLayout> descriptorLayout;
 
         ls::owned_ptr<VkPipelineLayout> pipelineLayout;
         ls::owned_ptr<VkPipeline> pipeline_;
+        std::optional<ls::owned_ptr<VkPipeline>> independentPipeline_;
     };
 }

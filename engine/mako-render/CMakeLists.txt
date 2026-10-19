@@ -192,7 +192,7 @@ if(BUILD_TESTING)
     mako_register_portable_policy_test(mako-spatial-command-recording-tests spatial-command-recording)
 
     add_dependencies(mako-portable-policy-test-binaries
-        mako-external-fd-tests mako-descriptor-pool-tests)
+        mako-external-fd-tests mako-descriptor-pool-tests mako-shader-pipeline-tests)
 
     add_library(mako-launch-preload-fixture SHARED
         "../scripts/test-launch-preload.cpp")

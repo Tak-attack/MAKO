@@ -2,6 +2,7 @@
 
 #include "shader_registry.hpp"
 #include "spirv_image_format.hpp"
+#include "spirv_output_split.hpp"
 #include "../shaders/color_conversion_spirv.hpp"
 #include "model_resource_validation.hpp"
 #include "lsfg_shader_set.hpp"
@@ -22,6 +23,24 @@ using namespace mako;
 using namespace mako::backend;
 
 namespace {
+    bool splitOutputPipelinesSupported(const vk::Vulkan& vk) {
+        VkPhysicalDeviceProperties properties{};
+        vk.fi().GetPhysicalDeviceProperties(vk.physdev(), &properties);
+        if (properties.vendorID != 0x1002 || properties.apiVersion < VK_API_VERSION_1_2)
+            return false;
+        VkPhysicalDeviceDriverProperties driver{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
+        };
+        VkPhysicalDeviceProperties2 extended{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &driver,
+        };
+        vk.fi().GetPhysicalDeviceProperties2(vk.physdev(), &extended);
+        // Register allocation and dead-code elimination are compiler-specific.
+        // Other drivers keep the original path until separately qualified.
+        return driver.driverID == VK_DRIVER_ID_MESA_RADV;
+    }
+
     /// get the source code for a shader
     const std::vector<uint8_t>& getShaderSource(uint32_t id, bool perf,
             const DllResourceArchive& archive,
@@ -43,8 +62,20 @@ namespace {
     [[nodiscard]] vk::Shader makeShader(
             const vk::Vulkan& vk, const uint32_t id, const bool perf,
             const DllResourceArchive& archive,
-            const LsfgShaderSet& selection) {
+            const LsfgShaderSet& selection, const bool splitOutputs) {
         const auto& contract = shaderSpec(id, perf).contract;
+        // These five Quality convolutions have four independent outputs. Their
+        // chain owners bind disjoint RGBA scratch banks, retaining the original
+        // dependency before and after the pair of dispatches.
+        if (splitOutputs && !perf && selection.fp16 && !selection.translated &&
+                (id == 270 || id == 260 || id == 261 || id == 264 || id == 265)) {
+            if (auto split = detail::splitIndependentImageWrites(
+                    getShaderSource(id, perf, archive, selection))) {
+                return vk::Shader(vk, split->at(0), contract.sampledImages,
+                    contract.storageImages, contract.uniformBuffers,
+                    contract.samplers, split->at(1));
+            }
+        }
         return vk::Shader(
             vk, getShaderSource(id, perf, archive, selection),
             contract.sampledImages, contract.storageImages,
@@ -57,6 +88,8 @@ namespace {
 ShaderRegistry backend::buildShaderRegistry(const vk::Vulkan& vk, bool fp16,
         const DllResourceArchive& archive, const std::filesystem::path& dll) {
     const auto selection = loadLsfgShaderSet(archive, dll, fp16);
+    const bool splitOutputs = selection.fp16 && !selection.translated &&
+        splitOutputPipelinesSupported(vk);
     if (selection.convertedFp16Stages)
         std::clog << "MAKO Renderer: LSFG experimental_fp16=forced; quality=unqualified; "
             << "converted_stages=" << selection.convertedFp16Stages << '\n';
@@ -69,7 +102,7 @@ ShaderRegistry backend::buildShaderRegistry(const vk::Vulkan& vk, bool fp16,
     detail::patchStorageImageFormat(generate_data_packed, 11); // Rgb10A2
 
     // load all other shaders
-#define SHADER(id) makeShader(vk, id, PERF, archive, selection)
+#define SHADER(id) makeShader(vk, id, PERF, archive, selection, splitOutputs)
 
     return {
 #define PERF false

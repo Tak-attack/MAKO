@@ -112,6 +112,13 @@ void CommandBuffer::dispatchAfterBarrier(const vk::Vulkan& vk,
         0, VK_NULL_HANDLE
     );
     vk.df().CmdDispatch(*this->commandBuffer, x, y, z);
+    // The optional module writes a disjoint subset of the stage's images.
+    // Its layout is identical, so descriptor bindings and outer barriers cover
+    // both dispatches without an extra image dependency or queue submission.
+    if (const auto pipeline = shader.independentPipeline(); pipeline != VK_NULL_HANDLE) {
+        vk.df().CmdBindPipeline(*this->commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+        vk.df().CmdDispatch(*this->commandBuffer, x, y, z);
+    }
 }
 
 void CommandBuffer::blitImage(const vk::Vulkan& vk,

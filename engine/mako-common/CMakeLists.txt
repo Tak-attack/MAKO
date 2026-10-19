@@ -33,6 +33,11 @@ target_include_directories(mako-common SYSTEM
     PRIVATE thirdparty/include)
 
 if(BUILD_TESTING)
+    add_executable(mako-shader-pipeline-tests "tests/shader_pipeline_tests.cpp")
+    target_link_libraries(mako-shader-pipeline-tests PRIVATE mako-common)
+    add_test(NAME shader-pipeline-ownership COMMAND mako-shader-pipeline-tests)
+    set_tests_properties(shader-pipeline-ownership PROPERTIES LABELS "portable-policy")
+
     if(UNIX)
         add_test(NAME launcher-exclusions-freshness
             COMMAND "${MAKO_PYTHON3_EXECUTABLE}"

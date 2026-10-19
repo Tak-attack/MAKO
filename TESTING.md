@@ -109,6 +109,8 @@ HDR bridge and `gamescope-feedback-reader` fixtures cover built-in/external outp
 
 `external-fd-ownership` checks transfer-only images without views and preserves export/cleanup and views for other usages. `descriptor-pool-capacity` covers sparse/empty layouts, exact capacity, destruction and creation failure. Both run in the portable sanitizer lane.
 
+`backend-output-split` verifies that the optional native FP16 convolution split preserves all calculations, partitions all four image writes exactly once and removes unused output-handle loads, with rejection coverage for malformed inputs, output reads, aliasing, mutable memory, subgroup-dependent inputs and unfamiliar graphs. `shader-pipeline-ownership` uses fake Vulkan entry points to cover shared layouts, one outer dependency, unchanged dispatch extents, module retirement, moves and cleanup after either pipeline creation fails; it runs in the portable sanitizer lane. The backend parser test also supports a focused ASan/UBSan build. Hardware qualification needs the complete quality and synchronization suites, independent temporal output comparisons, and paired full-Flow 1440p/4K performance evidence.
+
 `backend-frame-color-policy` covers the reduced HDR10 motion budget, its quarter-resolution floor, and exact Flow Scale preservation for full HDR, SDR and scRGB. The backend reports requested and actual motion dimensions at context creation. Gym’s HDR quality probe validates those fields alongside full-resolution output artifacts; compare against the previous reduced mode at identical requested Flow Scale, with both FP16 and FP32. Live precision changes must restore the original grid when disabled and resume generation across window and shader transitions.
 
 ## Selecting MAKO Gym coverage

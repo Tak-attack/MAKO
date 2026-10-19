@@ -5,6 +5,7 @@ set(BACKEND_SOURCES
     "src/extraction/dxbc_translation.cpp"
     "src/extraction/ls1_shader_set.cpp"
     "src/extraction/spirv_image_format.cpp"
+    "src/extraction/spirv_output_split.cpp"
     "src/extraction/spirv_fp16.cpp"
     "src/extraction/lsfg_shader_set.cpp"
     "src/extraction/model_resource_validation.cpp"
@@ -65,6 +66,15 @@ if(MAKO_EXPERIMENTAL_LSFG_FP16)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(mako-backend-output-split-tests
+        "tests/spirv_output_split_tests.cpp"
+        "src/extraction/spirv_output_split.cpp"
+        "src/extraction/model_resource_validation.cpp")
+    target_include_directories(mako-backend-output-split-tests PRIVATE src include)
+    target_link_libraries(mako-backend-output-split-tests PRIVATE mako-common)
+    add_test(NAME backend-output-split COMMAND mako-backend-output-split-tests)
+    set_tests_properties(backend-output-split PROPERTIES LABELS "portable-policy")
+
     add_executable(mako-frame-color-policy-tests "tests/frame_color_policy_tests.cpp")
     target_include_directories(mako-frame-color-policy-tests PRIVATE src include)
     add_test(NAME backend-frame-color-policy COMMAND mako-frame-color-policy-tests)

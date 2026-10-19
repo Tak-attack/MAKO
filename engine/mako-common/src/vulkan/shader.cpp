@@ -175,7 +175,7 @@ namespace {
 
 Shader::Shader(const vk::Vulkan& vk, const std::vector<uint8_t>& code,
         size_t sampledImages, size_t storageImages,
-        size_t buffers, size_t samplers) :
+        size_t buffers, size_t samplers, const std::span<const uint8_t> independentCode) :
     shaderModule(createShaderModule(vk,
         code.data(), code.size()
     )),
@@ -193,6 +193,10 @@ Shader::Shader(const vk::Vulkan& vk, const std::vector<uint8_t>& code,
     // Pipelines own the compiled executable; the input module is needed only
     // until pipeline creation returns, including for later context reuse.
     this->shaderModule = {};
+    if (!independentCode.empty()) {
+        auto module = createShaderModule(vk, independentCode.data(), independentCode.size());
+        this->independentPipeline_.emplace(createComputePipeline(vk, *module, *this->pipelineLayout));
+    }
 }
 
 Shader::Shader(const vk::Vulkan& vk, const std::span<const uint32_t> code,
