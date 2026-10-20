@@ -12,9 +12,9 @@
 
 Tempest improves Frame Generation speed, GPU memory use and frame pacing, with per-game shader tuning, shared MangoHud layouts and clearer diagnostics.
 
-<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/tempest-benchmarks.png" alt="MAKO 4.5 and 4.6 compared on AMD Steam Machine: paired grey and blue bars show generated frames per second, GPU milliseconds per generated frame, and private FG buffer allocations in MiB; the 800p 2× memory controls are unchanged" width="100%">
+<img src="https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/tempest-benchmarks.png" alt="MAKO 4.5 and 4.6 compared on AMD Steam Machine: paired slate and cyan bars normalize each 4.5 baseline to 100%, with original FPS, GPU milliseconds and private buffer MiB values plus percentage changes; the 800p 2× memory controls are unchanged" width="100%">
 
-_Native source-build comparison on AMD Steam Machine (NAVI33/RADV). Synthetic results; game FPS and Steam Deck gains were not measured. Buffer memory excludes model weights, shared images, driver memory and game VRAM. [Full measurements and settings](https://raw.githubusercontent.com/eugeniosegala/MAKO/refs/heads/main/assets/tempest-benchmarks-detail.png)._
+_Native source-build comparison on AMD Steam Machine (NAVI33/RADV). Synthetic results; game FPS and Steam Deck gains were not measured. Buffer memory excludes model weights, shared images, driver memory and game VRAM._
 
 - **Faster Frame Generation:** Lower CPU and GPU overhead benefits Fixed and Adaptive with FP16 or FP32. The chart above compares Quality and Lighter throughput and GPU time with v4.5.0. In-game gains depend on the game, hardware and settings.
 - **More efficient FP16 Quality:** Supported native FP16 Quality models use a leaner compute path on AMD’s RADV driver, preserving model weights, precision and Flow Scale without adding image buffers. It applies to Fixed and Adaptive, bridge and non-bridge, with VRR on or off. Enable **Allow FP16** and leave **Lighter FG Model** and **Ultra Performance** off. Steam Deck and other AMD/RADV handhelds can use this path; their performance gains have not yet been measured.
