@@ -630,20 +630,34 @@ class Plugin:
 
     async def _stop_flatpak_vrr_monitor(self):
         monitor = getattr(self, "_flatpak_vrr_monitor", None)
-        self._flatpak_vrr_monitor = None
         if monitor is None or monitor.returncode is not None:
+            self._flatpak_vrr_monitor = None
             return
         try:
             monitor.terminate()
-            await asyncio.wait_for(monitor.wait(), timeout=6)
         except ProcessLookupError:
             pass
+        try:
+            # Decky allows five seconds for plugin shutdown. Leave time for
+            # reaping and uninstall cleanup, including when SIGTERM is ignored.
+            await asyncio.wait_for(monitor.wait(), timeout=2)
         except asyncio.TimeoutError:
             try:
                 monitor.kill()
             except ProcessLookupError:
                 pass
-            await monitor.wait()
+            try:
+                await asyncio.wait_for(monitor.wait(), timeout=1)
+            except asyncio.TimeoutError:
+                # Keep ownership so a later install cannot start a duplicate
+                # discovery process before the child watcher observes its exit.
+                decky.logger.warning(
+                    "MAKO Decky: Flatpak VRR discovery did not exit within the "
+                    "shutdown deadline; retaining monitor ownership"
+                )
+                return
+        if self._flatpak_vrr_monitor is monitor:
+            self._flatpak_vrr_monitor = None
 
     async def _main(self):
         """

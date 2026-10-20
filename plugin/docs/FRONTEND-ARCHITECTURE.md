@@ -18,6 +18,8 @@ MAKO Decky's panel composes independently owned state and view modules. Keep pro
 
 `ModelWarning.tsx` owns the single Lossless Scaling warning, with status-dependent bullets and a full-width action below the explanation. `ScalingControl.tsx` retains scaling controls and surface guidance without duplicating DLL/model warnings.
 
+`StatusDisplay.tsx` keeps the Lossless Scaling and Renderer status rows readable when supplied status text is empty or whitespace: ready rows use localized installed labels, and unresolved rows use localized checking labels. Non-empty progress, failure, and detection messages remain authoritative. These essential labels stay visible when R1 hides optional information, including after reopening the panel.
+
 `runtimeScalingUtils.ts` selects Live Status's scaling owner using the Renderer’s applied Scaling flag and active spatial work. An internal HDR display-size resize does not turn on Scaling or create a scaling-pending notice. Requested settings remain separate so enabling or disabling Scaling can still report a pending restart without misreporting the running feature.
 
 ## Settings navigation

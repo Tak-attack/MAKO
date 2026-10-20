@@ -1163,6 +1163,73 @@ test.each(["welcome", "development"])(
   },
 );
 
+test.each(["", " \n\t"])(
+  "blank installation status keeps useful labels through refreshes and R1 toggles (%j)",
+  (blank) => {
+    const panel = (
+      ready: boolean,
+      dllDetectionStatus = blank,
+      installationStatus = blank,
+    ) => (
+      <InfoVisibility>
+        <StatusDisplay
+          dllDetected={ready}
+          dllDetectionStatus={dllDetectionStatus}
+          isInstalled={ready}
+          installationStatus={installationStatus}
+        />
+      </InfoVisibility>
+    );
+    const expectVisible = (...labels: string[]) => {
+      for (const label of labels) {
+        expect(isDisplayed(screen.getByText(label))).toBe(true);
+      }
+    };
+    const checking = ["Checking Lossless Scaling…", "Checking MAKO Renderer…"];
+    const installed = ["Lossless Scaling installed", "MAKO Renderer installed"];
+    const { rerender, unmount } = render(panel(true));
+    expectVisible(...installed);
+    const ribbon = screen.getByRole("button", { name: "Hide info" });
+    ribbon.focus();
+    pressButton(ribbon);
+    expect(screen.getByRole("button", { name: "Show info" })).toBeTruthy();
+    expectVisible(...installed);
+
+    rerender(panel(true, installed[0], "Updating MAKO Renderer..."));
+    expectVisible(installed[0], "Updating MAKO Renderer...");
+    expect(screen.queryByText(installed[1])).toBeNull();
+    rerender(
+      panel(
+        true,
+        "Unable to check Lossless Scaling.",
+        "Installation failed: offline",
+      ),
+    );
+    expectVisible(
+      "Unable to check Lossless Scaling.",
+      "Installation failed: offline",
+    );
+    expect(screen.queryByText(installed[0])).toBeNull();
+    expect(screen.queryByText(installed[1])).toBeNull();
+
+    rerender(panel(false));
+    expectVisible(...checking);
+    expect(screen.queryByText(installed[0])).toBeNull();
+    expect(screen.queryByText(installed[1])).toBeNull();
+    rerender(panel(true));
+    expectVisible(...installed);
+    expect(localStorage.getItem("mako-info-hidden")).toBe("true");
+    unmount();
+
+    render(panel(true));
+    expect(screen.getByRole("button", { name: "Show info" })).toBeTruthy();
+    expectVisible(...installed);
+    fireEvent.click(screen.getByRole("button", { name: "Show info" }));
+    expect(screen.getByRole("button", { name: "Hide info" })).toBeTruthy();
+    expectVisible(...installed);
+  },
+);
+
 test("a new model failure appears while info is hidden, without restoring welcome controls", () => {
   localStorage.setItem("mako-info-hidden", "true");
   const panel = (failed: boolean) => (

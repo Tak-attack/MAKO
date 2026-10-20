@@ -1,6 +1,7 @@
 """Regression tests for the Decky plugin lifecycle."""
 
 import asyncio
+import signal
 import sys
 from types import SimpleNamespace
 import unittest
@@ -131,6 +132,104 @@ class PluginLifecycleTests(unittest.TestCase):
                     await plugin._stop_flatpak_vrr_monitor()
                     process.terminate.assert_called_once()
                     process.kill.assert_not_called()
+        asyncio.run(exercise())
+
+    def test_unresponsive_monitor_stops_before_loader_shutdown_deadline(self):
+        async def exercise(shutdown):
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-u", "-c",
+                "import signal,time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "print('ready'); time.sleep(30)",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            plugin = Plugin.__new__(Plugin)
+            plugin._flatpak_vrr_monitor = process
+            plugin.remote_play_service = SimpleNamespace(
+                restore_before_uninstall=Mock(),
+            )
+            plugin.installation_service = SimpleNamespace(
+                cleanup_on_uninstall=Mock(),
+            )
+            try:
+                self.assertEqual(await process.stdout.readline(), b"ready\n")
+                # Leave margin inside Decky's observed five-second deadline.
+                await asyncio.wait_for(getattr(plugin, shutdown)(), timeout=4.5)
+                self.assertEqual(process.returncode, -signal.SIGKILL)
+                self.assertIsNone(plugin._flatpak_vrr_monitor)
+                if shutdown == "_uninstall":
+                    plugin.remote_play_service.restore_before_uninstall.assert_called_once()
+                    plugin.installation_service.cleanup_on_uninstall.assert_called_once()
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+
+        for shutdown in ("_unload", "_uninstall"):
+            with self.subTest(shutdown=shutdown):
+                asyncio.run(exercise(shutdown))
+
+    def test_monitor_reap_timeout_is_bounded_and_prevents_duplicate_discovery(self):
+        async def exercise():
+            async def never_reaped():
+                await asyncio.Event().wait()
+
+            process = Mock(returncode=None, wait=AsyncMock(side_effect=never_reaped))
+            plugin = Plugin.__new__(Plugin)
+            plugin._flatpak_vrr_monitor = process
+            with patch("py_modules.mako_plugin.plugin.decky.logger") as logger:
+                await asyncio.wait_for(plugin._stop_flatpak_vrr_monitor(), timeout=4.5)
+                logger.warning.assert_called()
+            process.terminate.assert_called_once()
+            process.kill.assert_called_once()
+            self.assertIs(plugin._flatpak_vrr_monitor, process)
+            with patch("asyncio.create_subprocess_exec", AsyncMock()) as spawn:
+                await plugin._start_flatpak_vrr_monitor()
+                spawn.assert_not_awaited()
+            process.returncode = -signal.SIGKILL
+            await plugin._stop_flatpak_vrr_monitor()
+            self.assertIsNone(plugin._flatpak_vrr_monitor)
+
+        asyncio.run(exercise())
+
+    def test_monitor_exit_racing_with_termination_is_reaped(self):
+        async def exercise():
+            process = Mock(returncode=None, wait=AsyncMock(return_value=0))
+            process.terminate.side_effect = ProcessLookupError
+            plugin = Plugin.__new__(Plugin)
+            plugin._flatpak_vrr_monitor = process
+            await plugin._stop_flatpak_vrr_monitor()
+            process.wait.assert_awaited_once()
+            process.kill.assert_not_called()
+            self.assertIsNone(plugin._flatpak_vrr_monitor)
+
+        asyncio.run(exercise())
+
+    def test_monitor_stop_preserves_a_replacement_started_after_exit(self):
+        async def exercise():
+            waiting = asyncio.Event()
+            reaped = asyncio.Event()
+
+            async def wait():
+                waiting.set()
+                await reaped.wait()
+                return 0
+
+            process = Mock(returncode=None, wait=AsyncMock(side_effect=wait))
+            replacement = Mock(returncode=None)
+            plugin = Plugin.__new__(Plugin)
+            plugin._flatpak_vrr_monitor = process
+            stopping = asyncio.create_task(plugin._stop_flatpak_vrr_monitor())
+            await waiting.wait()
+            process.returncode = 0
+            plugin._flatpak_vrr_monitor = replacement
+            reaped.set()
+            await stopping
+            self.assertIs(plugin._flatpak_vrr_monitor, replacement)
+            replacement.terminate.assert_not_called()
+            replacement.kill.assert_not_called()
+
         asyncio.run(exercise())
 
 
