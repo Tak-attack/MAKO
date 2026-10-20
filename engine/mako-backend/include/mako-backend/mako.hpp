@@ -39,8 +39,8 @@ namespace mako::backend {
     /// GPU spans include commands/barriers; CPU submit times can overlap GPU work.
     struct FrameProfile {
         double cpuPreviousWaitUs{};
-        double cpuPrepassSubmitUs{};
-        double cpuGenerationSubmitUs{};
+        double cpuPrepassSubmitUs{}; // Separate prepass; zero for a combined single-output submission.
+        double cpuGenerationSubmitUs{}; // Includes preprocessing for a combined single-output submission.
         double gpuPrepassUs{};
         double gpuInputConversionUs{};
         double gpuMotionEstimationUs{};

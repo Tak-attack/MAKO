@@ -109,6 +109,17 @@ namespace vk {
             VkFence fence = VK_NULL_HANDLE,
             VkQueue queue = VK_NULL_HANDLE) const;
 
+        /// Submit a nonempty sequence under one synchronization boundary.
+        /// Commands must contain the dependencies required between them.
+        static void submitCommands(const vk::Vulkan& vk,
+            std::span<const VkCommandBuffer> commands,
+            std::span<const VkSemaphore> waitSemaphores,
+            VkSemaphore waitTimelineSemaphore, uint64_t waitValue,
+            std::span<const VkSemaphore> signalSemaphores,
+            VkSemaphore signalTimelineSemaphore, uint64_t signalValue,
+            VkFence fence = VK_NULL_HANDLE,
+            VkQueue queue = VK_NULL_HANDLE);
+
         /// submit the command buffer instantly
         /// @param vk the vulkan instance
         /// @throws ls::vulkan_error on failure

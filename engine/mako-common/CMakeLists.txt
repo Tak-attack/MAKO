@@ -109,8 +109,10 @@ if(BUILD_TESTING)
         "tests/command_buffer_submit_storage_tests.cpp")
     target_include_directories(mako-command-buffer-submit-storage-tests
         PRIVATE src)
+    target_link_libraries(mako-command-buffer-submit-storage-tests PRIVATE mako-common)
     add_test(NAME command-buffer-submit-storage
         COMMAND mako-command-buffer-submit-storage-tests)
+    set_tests_properties(command-buffer-submit-storage PROPERTIES LABELS "portable-policy")
 
     add_executable(mako-image-quality-tests
         "tests/image_quality_tests.cpp")

@@ -166,10 +166,12 @@ namespace mako::backend {
         std::unique_ptr<FrameProfilingState> profiling;
         using RecordedCommands = std::array<std::optional<vk::CommandBuffer>, commandPhaseCount>;
         std::vector<RecordedCommands> cmdbufs;
+        std::optional<vk::CommandBuffer> prepassDependency;
         vk::Fence cmdbufFence;
         std::vector<float> constantBufferTimestamps;
 
         void prepareWork();
+        const vk::CommandBuffer& recordPrepass();
         void schedulePrepass(VkFence completionFence);
 
         Ctx ctx;
@@ -489,7 +491,7 @@ namespace {
             throw backend::error("Unable to import timeline semaphore", e);
         }
     }
-    /// create prepass semaphores
+    /// create prepass semaphore
     vk::TimelineSemaphore createPrepassSemaphore(const vk::Vulkan& vk) {
         try {
             return{vk, 0};
@@ -958,7 +960,7 @@ void Context::prepareWork() {
     }
 }
 
-void Context::schedulePrepass(const VkFence completionFence) {
+const vk::CommandBuffer& Context::recordPrepass() {
     auto& recorded = this->cmdbufs.at(0).at(this->fidx % commandPhaseCount);
     if (!recorded) {
         vk::CommandBuffer cmdbuf(ctx.vk);
@@ -997,7 +999,11 @@ void Context::schedulePrepass(const VkFence completionFence) {
         cmdbuf.end(ctx.vk);
         recorded.emplace(std::move(cmdbuf));
     }
-    const auto& cmdbuf = *recorded;
+    return *recorded;
+}
+
+void Context::schedulePrepass(const VkFence completionFence) {
+    const auto& cmdbuf = this->recordPrepass();
     // Preserve the completed fence while allocation/recording can still fail.
     // From the first submit onward, retain the context even if a later submit
     // fails before the final fence can be signalled.
@@ -1026,6 +1032,10 @@ void Context::scheduleFrames(std::span<const float> timestamps) {
         : this->destImages.size();
     if (generatedFrameCount > this->destImages.size())
         throw backend::error("Too many interpolation timestamps for this context");
+    if (generatedFrameCount == 0) {
+        this->scheduleFrameHistory();
+        return;
+    }
 
     float previousTimestamp = 0.0F;
     if (explicitTimestamps) {
@@ -1096,22 +1106,54 @@ void Context::scheduleFrames(std::span<const float> timestamps) {
         }
     }
 
-    this->schedulePrepass(VK_NULL_HANDLE);
-
-    // schedule main passes
-    const auto start = this->profiling ? ProfileClock::now() : ProfileClock::time_point{};
-    for (size_t i = 0; i < generatedFrameCount; i++) {
-        const auto& cmdbuf = *this->cmdbufs.at(i + 1).at(this->fidx % commandPhaseCount);
-        cmdbuf.submit(this->ctx.vk,
-            {}, this->prepassSemaphore.handle(), this->idx - 1,
-            {}, this->syncSemaphore.handle(), this->idx + i,
-            i == generatedFrameCount - 1 ? this->cmdbufFence.handle() : VK_NULL_HANDLE
-        );
+    if (generatedFrameCount == 1) {
+        const auto& prepass = this->recordPrepass();
+        if (!this->prepassDependency) {
+            // Keep this dependency separate from the phase recordings so the
+            // multiple-output path retains its existing barriers and overlap.
+            vk::CommandBuffer dependency(ctx.vk);
+            dependency.begin(ctx.vk, 0);
+            const VkMemoryBarrier barrier{
+                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            };
+            ctx.vk.get().df().CmdPipelineBarrier(dependency.handle(),
+                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                0, 1, &barrier, 0, nullptr, 0, nullptr);
+            dependency.end(ctx.vk);
+            this->prepassDependency.emplace(std::move(dependency));
+        }
+        const std::array commands{
+            prepass.handle(), this->prepassDependency->handle(),
+            this->cmdbufs.at(1).at(this->fidx % commandPhaseCount)->handle(),
+        };
+        // Finish fallible recording before resetting the completion fence.
+        this->cmdbufFence.reset(this->ctx.vk);
+        this->workScheduled = true;
+        const auto start = this->profiling ? ProfileClock::now() : ProfileClock::time_point{};
+        vk::CommandBuffer::submitCommands(this->ctx.vk, commands,
+            {}, this->syncSemaphore.handle(), this->idx,
+            {}, this->syncSemaphore.handle(), this->idx + 1, this->cmdbufFence.handle());
+        if (this->profiling) {
+            this->profiling->timings.cpuPrepassSubmitUs = 0.0;
+            this->profiling->timings.cpuGenerationSubmitUs = profileMicroseconds(start);
+        }
+        this->idx += 2;
+    } else {
+        this->schedulePrepass(VK_NULL_HANDLE);
+        const auto start = this->profiling ? ProfileClock::now() : ProfileClock::time_point{};
+        for (size_t i = 0; i < generatedFrameCount; i++) {
+            const auto& cmdbuf = *this->cmdbufs.at(i + 1).at(this->fidx % commandPhaseCount);
+            cmdbuf.submit(this->ctx.vk,
+                {}, this->prepassSemaphore.handle(), this->idx - 1,
+                {}, this->syncSemaphore.handle(), this->idx + i,
+                i == generatedFrameCount - 1 ? this->cmdbufFence.handle() : VK_NULL_HANDLE);
+        }
+        if (this->profiling)
+            this->profiling->timings.cpuGenerationSubmitUs = profileMicroseconds(start);
+        this->idx += generatedFrameCount;
     }
-    if (this->profiling)
-        this->profiling->timings.cpuGenerationSubmitUs = profileMicroseconds(start);
-
-    this->idx += generatedFrameCount;
     this->fidx++;
 }
 
