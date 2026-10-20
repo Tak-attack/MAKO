@@ -362,6 +362,8 @@ VkResult Swapchain::presentGeneratedFrames(
         );
         auto& commandBuffer = pass.commandBuffer;
         commandBuffer.begin(invocation.vk);
+        vk::acquireExternalImage(invocation.vk, commandBuffer.handle(), destinationImage.handle(),
+            VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
         if (this->spatialScaler &&
                 this->spatialFramePipelinePlacement ==
                     SpatialFramePipelinePlacement::PostFrameGeneration) {
@@ -374,7 +376,7 @@ VkResult Swapchain::presentGeneratedFrames(
                 barrierHelper(destinationImage.handle(),
                     VK_ACCESS_NONE,
                     VK_ACCESS_TRANSFER_READ_BIT,
-                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_IMAGE_LAYOUT_GENERAL,
                     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
                 ),
                 barrierHelper(acquiredSwapchainImage,

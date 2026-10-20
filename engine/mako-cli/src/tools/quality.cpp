@@ -5,6 +5,7 @@
 #include "profile_statistics.hpp"
 #include "mako-common/vulkan/timestamp_query_pool.hpp"
 #include "image_transfer.hpp"
+#include "mako-common/vulkan/external_image.hpp"
 #include "temporal_sequence.hpp"
 #include "mako-backend/mako.hpp"
 #include "mako-common/configuration/config.hpp"
@@ -236,6 +237,9 @@ namespace {
         };
         const vk::CommandBuffer command{vk};
         command.begin(vk);
+        if (image.external())
+            vk::acquireExternalImage(vk, command.handle(), image.handle(),
+                VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
         const auto toTransfer = imageBarrier(
             image.handle(), sourceAccess, VK_ACCESS_TRANSFER_READ_BIT,
             oldLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL

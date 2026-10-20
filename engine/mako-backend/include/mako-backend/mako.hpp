@@ -118,9 +118,19 @@ namespace mako::backend {
         /// is ready, signal the syncFd with one increment (with the first trigger being 1).
         /// Each generated frame will increment the semaphore by one:
         /// - Application signals 1 -> Start generating with (curr, next) source images
-        /// - Library signals 1 -> First frame between (curr, next) is ready
-        /// - Library signals N -> N-th frame between (curr, next) is ready
-        /// - Application signals N+1 -> Start generating with (next, curr) source images
+        /// - Library signals 2 -> First frame between (curr, next) is ready
+        /// - Library signals N+1 -> N-th frame between (curr, next) is ready
+        /// - Application signals N+2 -> Start generating with (next, curr) source images
+        ///
+        /// Context creation initializes image layouts; upload sources afterwards.
+        /// Before signalling the input timeline, release uploaded sources to
+        /// VK_QUEUE_FAMILY_EXTERNAL in GENERAL. The backend acquires both sources
+        /// and releases them in GENERAL at batch completion (also for history).
+        /// Acquire each generated output from EXTERNAL in GENERAL after its
+        /// timeline wait, then perform any caller-owned layout transition.
+        /// Source uploads and generated outputs fully overwrite their images:
+        /// UNDEFINED transitions discard prior contents/ownership on reuse.
+        /// Complete all previous reads before permitting that overwrite.
         ///
         /// Takes ownership of every supplied descriptor on entry, including when
         /// construction fails before an import. Pass distinct owned descriptors;

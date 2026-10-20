@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "spatial_scaler.hpp"
+#include "mako-common/vulkan/external_image.hpp"
 #include "color_pipeline.hpp"
 
 #include "mako-backend/dll_inspection.hpp"
@@ -1185,6 +1186,13 @@ void SpatialScaler::record(const vk::Vulkan& vk,
         applicationImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1, &presentationCopy, VK_FILTER_NEAREST
     );
+
+    if (frameGenerationSource != VK_NULL_HANDLE)
+        vk::releaseExternalImage(vk, handle, frameGenerationSource,
+            VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            directFrameGenerationOutput ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                                        : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     const auto applicationBarrier = imageBarrier(
         applicationImage, VK_ACCESS_TRANSFER_WRITE_BIT,

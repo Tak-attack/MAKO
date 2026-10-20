@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "helpers/temporal_phases.hpp"
+#include "helpers/black_image.hpp"
 #include "helpers/frame_color_policy.hpp"
 #include "mako-backend/mako.hpp"
 #include "extraction/dll_reader.hpp"
@@ -15,6 +16,7 @@
 #include "mako-common/vulkan/buffer.hpp"
 #include "mako-common/vulkan/command_buffer.hpp"
 #include "mako-common/vulkan/fence.hpp"
+#include "mako-common/vulkan/external_image.hpp"
 #include "mako-common/vulkan/image.hpp"
 #include "mako-common/vulkan/timeline_semaphore.hpp"
 #include "mako-common/vulkan/timestamp_query_pool.hpp"
@@ -63,9 +65,9 @@ using namespace mako::backend;
 namespace mako::backend {
     struct FrameProfilingState {
         FrameProfilingState(const vk::Vulkan& vk, const size_t outputs) :
-            // The shared pool is pair-sized. Round up when three boundaries
-            // per stage leave an odd count; readback excludes that spare slot.
-            queries(vk, static_cast<uint32_t>(((3 + outputs * 3 + 1) / 2) * 2)) {}
+            // Three prepass boundaries, batch completion, and three per output.
+            // Round up for the pair-sized pool; readback excludes the spare slot.
+            queries(vk, static_cast<uint32_t>(((4 + outputs * 3 + 1) / 2) * 2)) {}
         vk::TimestampQueryPool queries;
         FrameProfile timings;
         size_t generatedCount{};
@@ -167,11 +169,13 @@ namespace mako::backend {
         using RecordedCommands = std::array<std::optional<vk::CommandBuffer>, commandPhaseCount>;
         std::vector<RecordedCommands> cmdbufs;
         std::optional<vk::CommandBuffer> prepassDependency;
+        std::optional<vk::CommandBuffer> sourceRelease;
         vk::Fence cmdbufFence;
         std::vector<float> constantBufferTimestamps;
 
         void prepareWork();
         const vk::CommandBuffer& recordPrepass();
+        const vk::CommandBuffer& recordSourceRelease();
         void schedulePrepass(VkFence completionFence);
 
         Ctx ctx;
@@ -477,7 +481,8 @@ namespace {
     vk::Image createBlackImage(const vk::Vulkan& vk) {
         try {
             return{vk,
-                { .width = 4, .height = 4 }
+                { .width = 4, .height = 4 }, VK_FORMAT_R8G8B8A8_UNORM,
+                backend::blackImageUsage
             };
         } catch (const std::exception& e) {
             throw backend::error("Unable to create black image", e);
@@ -777,7 +782,6 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
 
     // initialize all images
     std::vector<VkImage> images{};
-    images.push_back(this->blackImage.handle());
     images.push_back(this->sourceImages.first.handle());
     images.push_back(this->sourceImages.second.handle());
     for (const auto& image : this->destImages)
@@ -831,6 +835,12 @@ ContextImpl::ContextImpl(const InstanceImpl& instance,
     const vk::CommandBuffer cmdbuf{ctx.vk};
     cmdbuf.begin(ctx.vk);
     cmdbuf.insertBarriers(ctx.vk, barriers);
+    backend::initializeBlackImage(ctx.vk.get().df(), cmdbuf.handle(), this->blackImage.handle());
+    // The exporter may overwrite either source before the first scheduled
+    // frame. Leave both aliases in the documented external GENERAL state.
+    for (const auto image : {this->sourceImages.first.handle(), this->sourceImages.second.handle()})
+        vk::releaseExternalImage(ctx.vk, cmdbuf.handle(), image, 0,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
     cmdbuf.end(ctx.vk);
     cmdbuf.submit(ctx.vk); // wait for completion
 
@@ -887,7 +897,7 @@ FrameProfile Context::readFrameProfile() const {
     if (!this->profiling || !this->workScheduled || this->profiling->generatedCount == 0)
         throw backend::error("No generated batch is available for frame profiling");
     const auto& state = *this->profiling;
-    const auto ticks = state.queries.timestamps(static_cast<uint32_t>(3 + state.generatedCount * 3));
+    const auto ticks = state.queries.timestamps(static_cast<uint32_t>(4 + state.generatedCount * 3));
     auto result = state.timings;
     result.gpuPrepassUs = state.queries.elapsedMicroseconds(ticks.at(0), ticks.at(2));
     result.gpuInputConversionUs = this->sourceColorConversion
@@ -898,14 +908,14 @@ FrameProfile Context::readFrameProfile() const {
     result.gpuSynthesisUs.reserve(state.generatedCount);
     result.gpuOutputConversionUs.reserve(state.generatedCount);
     for (size_t i = 0; i < state.generatedCount; ++i) {
-        const size_t begin = 3 + i * 3;
+        const size_t begin = 4 + i * 3;
         result.gpuGeneratedUs.push_back(state.queries.elapsedMicroseconds(ticks.at(begin), ticks.at(begin + 2)));
         result.gpuSynthesisUs.push_back(state.queries.elapsedMicroseconds(
             ticks.at(begin), ticks.at(begin + (this->destColorConversion ? 1 : 2))));
         result.gpuOutputConversionUs.push_back(this->destColorConversion
             ? state.queries.elapsedMicroseconds(ticks.at(begin + 1), ticks.at(begin + 2)) : 0.0);
     }
-    result.gpuSpanUs = state.queries.elapsedMicroseconds(ticks.front(), ticks.back());
+    result.gpuSpanUs = state.queries.elapsedMicroseconds(ticks.front(), ticks.at(3));
     result.timestampValidBits = state.queries.timestampValidBits();
     result.timestampPeriodNs = state.queries.timestampPeriodNanoseconds();
     return result;
@@ -971,6 +981,14 @@ const vk::CommandBuffer& Context::recordPrepass() {
             this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0);
         }
 
+        const std::array sourceAcquires{
+            vk::externalImageAcquire(this->sourceImages.first.handle(), ctx.vk.get().queueFamilyIndex(), VK_ACCESS_SHADER_READ_BIT),
+            vk::externalImageAcquire(this->sourceImages.second.handle(), ctx.vk.get().queueFamilyIndex(), VK_ACCESS_SHADER_READ_BIT),
+        };
+        ctx.vk.get().df().CmdPipelineBarrier(cmdbuf.handle(),
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(sourceAcquires.size()), sourceAcquires.data());
+
         if (this->sourceColorConversion)
             this->sourceColorConversion->render(ctx.vk, cmdbuf, this->fidx);
         if (this->profiling)
@@ -1002,15 +1020,37 @@ const vk::CommandBuffer& Context::recordPrepass() {
     return *recorded;
 }
 
+const vk::CommandBuffer& Context::recordSourceRelease() {
+    if (!this->sourceRelease) {
+        vk::CommandBuffer command(ctx.vk);
+        command.begin(ctx.vk, 0);
+        const std::array releases{
+            vk::externalImageRelease(this->sourceImages.first.handle(), ctx.vk.get().queueFamilyIndex(), VK_ACCESS_SHADER_READ_BIT),
+            vk::externalImageRelease(this->sourceImages.second.handle(), ctx.vk.get().queueFamilyIndex(), VK_ACCESS_SHADER_READ_BIT),
+        };
+        ctx.vk.get().df().CmdPipelineBarrier(command.handle(),
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(releases.size()), releases.data());
+        // Include the final ownership handoff in the profiled batch span.
+        if (this->profiling)
+            this->profiling->queries.write(command.handle(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 3);
+        command.end(ctx.vk);
+        this->sourceRelease.emplace(std::move(command));
+    }
+    return *this->sourceRelease;
+}
+
 void Context::schedulePrepass(const VkFence completionFence) {
     const auto& cmdbuf = this->recordPrepass();
+    const std::array commands{cmdbuf.handle(), this->recordSourceRelease().handle()};
     // Preserve the completed fence while allocation/recording can still fail.
     // From the first submit onward, retain the context even if a later submit
     // fails before the final fence can be signalled.
     this->cmdbufFence.reset(this->ctx.vk);
     this->workScheduled = true;
     const auto start = this->profiling ? ProfileClock::now() : ProfileClock::time_point{};
-    cmdbuf.submit(this->ctx.vk,
+    vk::CommandBuffer::submitCommands(this->ctx.vk,
+        std::span{commands}.first(completionFence != VK_NULL_HANDLE ? 2 : 1),
         {}, this->syncSemaphore.handle(), this->idx,
         {}, this->prepassSemaphore.handle(), this->idx,
         completionFence
@@ -1074,6 +1114,7 @@ void Context::scheduleFrames(std::span<const float> timestamps) {
 
     // Finish fallible allocation/recording before submitting any work. A cold
     // cache failure must not leave a prepass without its completion fence.
+    const auto& sourceReleaseCommand = this->recordSourceRelease();
     for (size_t i = 0; i < generatedFrameCount; i++) {
         auto& recorded = this->cmdbufs.at(i + 1).at(this->fidx % commandPhaseCount);
         if (!recorded) {
@@ -1081,7 +1122,23 @@ void Context::scheduleFrames(std::span<const float> timestamps) {
             cmdbuf.begin(ctx.vk, 0);
 
             if (this->profiling)
-                this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, static_cast<uint32_t>(3 + i * 3));
+                this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, static_cast<uint32_t>(4 + i * 3));
+
+            // Every generated output is fully overwritten. Discarding its old
+            // contents permits taking ownership without a consumer release.
+            const VkImageMemoryBarrier discard{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = this->destImages.at(i).handle(),
+                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+            };
+            ctx.vk.get().df().CmdPipelineBarrier(cmdbuf.handle(),
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &discard);
 
             const auto& pass = this->passes.at(i);
             for (size_t j = 0; j < 7; j++) {
@@ -1094,12 +1151,15 @@ void Context::scheduleFrames(std::span<const float> timestamps) {
             }
             pass.generate->render(ctx.vk, cmdbuf, this->fidx);
             if (this->profiling)
-                this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, static_cast<uint32_t>(4 + i * 3));
+                this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, static_cast<uint32_t>(5 + i * 3));
             if (this->destColorConversion)
                 this->destColorConversion->render(ctx.vk, cmdbuf, i);
 
+            vk::releaseExternalImage(ctx.vk, cmdbuf.handle(), this->destImages.at(i).handle(),
+                VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
             if (this->profiling)
-                this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, static_cast<uint32_t>(5 + i * 3));
+                this->profiling->queries.write(cmdbuf.handle(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, static_cast<uint32_t>(6 + i * 3));
 
             cmdbuf.end(ctx.vk);
             recorded.emplace(std::move(cmdbuf));
@@ -1127,6 +1187,7 @@ void Context::scheduleFrames(std::span<const float> timestamps) {
         const std::array commands{
             prepass.handle(), this->prepassDependency->handle(),
             this->cmdbufs.at(1).at(this->fidx % commandPhaseCount)->handle(),
+            sourceReleaseCommand.handle(),
         };
         // Finish fallible recording before resetting the completion fence.
         this->cmdbufFence.reset(this->ctx.vk);
@@ -1145,7 +1206,9 @@ void Context::scheduleFrames(std::span<const float> timestamps) {
         const auto start = this->profiling ? ProfileClock::now() : ProfileClock::time_point{};
         for (size_t i = 0; i < generatedFrameCount; i++) {
             const auto& cmdbuf = *this->cmdbufs.at(i + 1).at(this->fidx % commandPhaseCount);
-            cmdbuf.submit(this->ctx.vk,
+            const std::array commands{cmdbuf.handle(), sourceReleaseCommand.handle()};
+            vk::CommandBuffer::submitCommands(this->ctx.vk,
+                std::span{commands}.first(i == generatedFrameCount - 1 ? 2 : 1),
                 {}, this->prepassSemaphore.handle(), this->idx - 1,
                 {}, this->syncSemaphore.handle(), this->idx + i,
                 i == generatedFrameCount - 1 ? this->cmdbufFence.handle() : VK_NULL_HANDLE);

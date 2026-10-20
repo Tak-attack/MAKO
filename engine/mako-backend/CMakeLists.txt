@@ -66,6 +66,12 @@ if(MAKO_EXPERIMENTAL_LSFG_FP16)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(mako-black-image-tests "tests/black_image_tests.cpp")
+    target_include_directories(mako-black-image-tests PRIVATE src)
+    target_link_libraries(mako-black-image-tests PRIVATE mako-common)
+    add_test(NAME backend-black-image COMMAND mako-black-image-tests)
+    set_tests_properties(backend-black-image PROPERTIES LABELS "portable-policy")
+
     add_executable(mako-backend-output-split-tests
         "tests/spirv_output_split_tests.cpp"
         "src/extraction/spirv_output_split.cpp"

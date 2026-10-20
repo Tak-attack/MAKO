@@ -7,6 +7,7 @@
 #include "mako-common/vulkan/descriptor_set.hpp"
 #include "mako-common/vulkan/fence.hpp"
 #include "mako-common/vulkan/image.hpp"
+#include "mako-common/vulkan/external_image.hpp"
 #include "mako-common/vulkan/shader.hpp"
 #include "mako-common/vulkan/vulkan.hpp"
 #include "command_buffer_submit_storage.hpp"
@@ -176,7 +177,7 @@ void CommandBuffer::copyBufferToImage(const vk::Vulkan& vk,
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_NONE,
         .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .oldLayout = image.external() ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL,
         .newLayout = VK_IMAGE_LAYOUT_GENERAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -211,10 +212,16 @@ void CommandBuffer::copyBufferToImage(const vk::Vulkan& vk,
         buffer.handle(), image.handle(),
         VK_IMAGE_LAYOUT_GENERAL, 1, &region
     );
+    if (image.external())
+        releaseExternalImage(vk, *this->commandBuffer, image.handle(),
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 }
 
 void CommandBuffer::copyImageToBuffer(const vk::Vulkan& vk,
         const vk::Image& image, const vk::Buffer& buffer) const {
+    if (image.external())
+        acquireExternalImage(vk, *this->commandBuffer, image.handle(),
+            VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
     const VkImageMemoryBarrier barrier{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,

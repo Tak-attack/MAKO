@@ -3,6 +3,7 @@
 #include "mako-common/helpers/errors.hpp"
 #include "mako-common/vulkan/buffer.hpp"
 #include "mako-common/vulkan/command_buffer.hpp"
+#include "mako-common/vulkan/external_image.hpp"
 namespace mako::cli::images {
     [[nodiscard]] VkImageMemoryBarrier imageBarrier(
             const VkImage image, const VkAccessFlags sourceAccess,
@@ -64,14 +65,17 @@ namespace mako::cli::images {
             command.handle(), staging.handle(), image.handle(),
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region
         );
-        const auto toGeneral = imageBarrier(
+        const auto toGeneral = image.external()
+            ? vk::externalImageRelease(image.handle(), vk.queueFamilyIndex(),
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+            : imageBarrier(
             image.handle(), VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_IMAGE_LAYOUT_GENERAL
         );
         vk.df().CmdPipelineBarrier(
             command.handle(), VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+            image.external() ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
             0, nullptr, 0, nullptr, 1, &toGeneral
         );
         command.end(vk);

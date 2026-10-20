@@ -65,14 +65,14 @@ namespace mako::layer {
             VkImageLayout applicationLayout =
                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) const;
 
-        /// Reconstruct a source-sized private FG output directly into a
-        /// presentation-sized WSI image. The source stays transfer-readable;
+        /// Reconstruct a source-sized private FG output after the caller's
+        /// external GENERAL acquire. The source becomes transfer-readable;
         /// the destination is returned in presentation layout.
         void recordSourceToPresentation(const vk::Vulkan& vk,
             const vk::CommandBuffer& commandBuffer,
             VkImage sourceImage, VkImage presentationImage,
             VkImageLayout sourceLayout =
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
             VkImageLayout presentationLayout =
                 VK_IMAGE_LAYOUT_UNDEFINED) const;
 

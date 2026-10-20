@@ -312,6 +312,8 @@ void Swapchain::submitSourceCopy(const PresentInvocation& invocation,
         ),
     };
     const std::array postBarriers{
+        vk::externalImageRelease(sourceImage.handle(), invocation.vk.queueFamilyIndex(),
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL),
         barrierHelper(swapchainImage,
             VK_ACCESS_TRANSFER_READ_BIT,
             VK_ACCESS_MEMORY_READ_BIT,

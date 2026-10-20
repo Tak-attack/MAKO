@@ -2,6 +2,9 @@
 
 #include "mako-common/helpers/file_descriptors.hpp"
 #include "mako-common/vulkan/image.hpp"
+#include "mako-common/vulkan/buffer.hpp"
+#include "mako-common/vulkan/command_buffer.hpp"
+#include "mako-common/vulkan/external_image.hpp"
 #include "mako-common/vulkan/semaphore.hpp"
 #include "mako-common/vulkan/timeline_semaphore.hpp"
 
@@ -32,6 +35,13 @@ namespace {
     }
     enum class Failure { None, Image, MemoryType, Allocate, Bind, View, Export,
         Semaphore, SemaphoreImport };
+    struct RecordedBarrier {
+        VkPipelineStageFlags source, destination;
+        VkImageMemoryBarrier image;
+    };
+    std::vector<RecordedBarrier> recordedBarriers;
+    std::vector<size_t> copyPositions;
+    std::array<uint8_t, 4096> mappedBuffer{};
     struct Driver {
         Failure failure{Failure::None};
         int failImageIndex{0};
@@ -69,7 +79,8 @@ namespace {
         fi.GetPhysicalDeviceMemoryProperties = [](VkPhysicalDevice, VkPhysicalDeviceMemoryProperties* props) {
             *props = {};
             props->memoryTypeCount = driver.fails(Failure::MemoryType) ? 0 : 1;
-            props->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+            props->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         };
         vk::VulkanDeviceFuncs df{};
         df.GetDeviceQueue = [](VkDevice, uint32_t, uint32_t, VkQueue* queue) { *queue = handle<VkQueue>(); };
@@ -111,6 +122,29 @@ namespace {
             }
             ++driver.exports; *fd = descriptor(); return VK_SUCCESS;
         };
+        df.CreateBuffer = [](VkDevice, const VkBufferCreateInfo*, const VkAllocationCallbacks*, VkBuffer* buffer) {
+            *buffer = handle<VkBuffer>(); return VK_SUCCESS;
+        };
+        df.DestroyBuffer = [](VkDevice, VkBuffer, const VkAllocationCallbacks*) {};
+        df.GetBufferMemoryRequirements = [](VkDevice, VkBuffer, VkMemoryRequirements* reqs) { *reqs = {4096, 256, 1}; };
+        df.BindBufferMemory = [](VkDevice, VkBuffer, VkDeviceMemory, VkDeviceSize) { return VK_SUCCESS; };
+        df.MapMemory = [](VkDevice, VkDeviceMemory, VkDeviceSize, VkDeviceSize, VkMemoryMapFlags, void** data) {
+            *data = mappedBuffer.data(); return VK_SUCCESS;
+        };
+        df.UnmapMemory = [](VkDevice, VkDeviceMemory) {};
+        df.AllocateCommandBuffers = [](VkDevice, const VkCommandBufferAllocateInfo*, VkCommandBuffer* command) {
+            *command = handle<VkCommandBuffer>(); return VK_SUCCESS;
+        };
+        df.FreeCommandBuffers = [](VkDevice, VkCommandPool, uint32_t, const VkCommandBuffer*) {};
+        df.CmdPipelineBarrier = [](VkCommandBuffer, VkPipelineStageFlags source, VkPipelineStageFlags destination,
+                VkDependencyFlags, uint32_t, const VkMemoryBarrier*, uint32_t, const VkBufferMemoryBarrier*,
+                uint32_t count, const VkImageMemoryBarrier* images) {
+            for (uint32_t i = 0; i < count; ++i) recordedBarriers.push_back({source, destination, images[i]});
+        };
+        df.CmdCopyBufferToImage = [](VkCommandBuffer, VkBuffer, VkImage, VkImageLayout,
+                uint32_t, const VkBufferImageCopy*) { copyPositions.push_back(recordedBarriers.size()); };
+        df.CmdCopyImageToBuffer = [](VkCommandBuffer, VkImage, VkImageLayout, VkBuffer,
+                uint32_t, const VkBufferImageCopy*) { copyPositions.push_back(recordedBarriers.size()); };
         df.CreateSemaphore = [](VkDevice, const VkSemaphoreCreateInfo*, const VkAllocationCallbacks*, VkSemaphore* semaphore) {
             if (driver.failure == Failure::Semaphore) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
             ++driver.semaphores; *semaphore = handle<VkSemaphore>(); return VK_SUCCESS;
@@ -162,6 +196,8 @@ namespace {
                     for (int i = 0; i < 6; ++i)
                         images.emplace_back(vk, VkExtent2D{32, 32}, VK_FORMAT_R8G8B8A8_UNORM,
                             VK_IMAGE_USAGE_SAMPLED_BIT, incoming.take());
+                    for (const auto& image : images)
+                        require(image.external(), "imported image lost external-memory identity");
                     const vk::TimelineSemaphore semaphore{vk, 0, incoming.take()};
                 } catch (const std::exception&) { failed = true; }
                 require(failed == (stage != Failure::None), "import failure was not exercised");
@@ -195,6 +231,66 @@ namespace {
             catch (const std::exception&) { failed = true; }
             require(failed == (stage != Failure::None), "semaphore failure was not exercised");
             if (failed) require(!isOpen(fd), "binary semaphore failure leaked its descriptor");
+            driver.verify();
+        }
+    }
+
+    void testExternalImageCopies(const vk::Vulkan& vk) {
+        for (const bool external : {false, true}) {
+            driver = {};
+            {
+                int fd = -1;
+                ls::FileDescriptorScope exported{{&fd, 1}};
+                const vk::Image image(vk, {32, 32}, VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                    std::nullopt, external ? std::optional<int*>{&fd} : std::nullopt);
+                require(image.external() == external, "image lost external-memory identity");
+                const vk::Buffer buffer(vk, mappedBuffer);
+                const vk::CommandBuffer command(vk);
+                recordedBarriers.clear();
+                copyPositions.clear();
+                command.copyBufferToImage(vk, buffer, image);
+                require(copyPositions == std::vector<size_t>{1}, "upload release must follow the copy");
+                require(recordedBarriers.front().image.oldLayout ==
+                    (external ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL),
+                    "external uploads must discard prior ownership; internal uploads retain layout");
+                require(recordedBarriers.size() == (external ? 2 : 1), "unexpected upload handoff count");
+                if (external) {
+                    const auto& release = recordedBarriers.back();
+                    require(release.image.srcQueueFamilyIndex == vk.queueFamilyIndex() &&
+                        release.image.dstQueueFamilyIndex == VK_QUEUE_FAMILY_EXTERNAL &&
+                        release.image.newLayout == VK_IMAGE_LAYOUT_GENERAL &&
+                        release.image.srcAccessMask == VK_ACCESS_TRANSFER_WRITE_BIT &&
+                        release.source == VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        "upload did not publish writes to the external GENERAL boundary");
+                }
+                recordedBarriers.clear();
+                copyPositions.clear();
+                command.copyImageToBuffer(vk, image, buffer);
+                require(copyPositions == std::vector<size_t>{external ? 2U : 1U},
+                    "readback must acquire external ownership before the copy");
+                if (external) {
+                    const auto& acquire = recordedBarriers.front();
+                    require(acquire.image.srcQueueFamilyIndex == VK_QUEUE_FAMILY_EXTERNAL &&
+                        acquire.image.dstQueueFamilyIndex == vk.queueFamilyIndex() &&
+                        acquire.image.oldLayout == VK_IMAGE_LAYOUT_GENERAL &&
+                        acquire.image.newLayout == VK_IMAGE_LAYOUT_GENERAL &&
+                        acquire.image.dstAccessMask == VK_ACCESS_TRANSFER_READ_BIT &&
+                        acquire.destination == VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        "readback did not acquire published pixels in GENERAL");
+                } else {
+                    for (const auto& barrier : recordedBarriers)
+                        require(barrier.image.srcQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED &&
+                            barrier.image.dstQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED,
+                            "private image unexpectedly crossed an ownership boundary");
+                }
+                for (const auto& barrier : recordedBarriers)
+                    require(barrier.image.image == image.handle() &&
+                        barrier.image.subresourceRange.aspectMask == VK_IMAGE_ASPECT_COLOR_BIT &&
+                        barrier.image.subresourceRange.levelCount == 1 &&
+                        barrier.image.subresourceRange.layerCount == 1,
+                        "handoff does not cover the copied image");
+            }
             driver.verify();
         }
     }
@@ -241,6 +337,7 @@ int main() {
         testScopeHandoffAndRejection();
         testBinarySemaphore(vk);
         testTransferOnlyImages(vk);
+        testExternalImageCopies(vk);
     } catch (const std::exception& error) {
         std::cerr << "External FD ownership test failed: " << error.what() << '\n';
         return 1;

@@ -51,6 +51,8 @@ namespace vk {
         /// get the extent of the image
         /// @return the extent of the image
         [[nodiscard]] VkExtent2D getExtent() const { return this->extent; }
+        /// Whether this image imports or exports memory across instances.
+        [[nodiscard]] bool external() const { return this->externalMemory; }
     private:
         std::shared_ptr<void> pooledMemory;
         ls::owned_ptr<VkDeviceMemory> memory;
@@ -58,5 +60,6 @@ namespace vk {
         ls::owned_ptr<VkImageView> view;
 
         VkExtent2D extent{};
+        bool externalMemory{};
     };
 }

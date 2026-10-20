@@ -180,7 +180,7 @@ Image::Image(const vk::Vulkan& vk,
             std::optional<int> importFd,
             std::optional<int*> exportFd,
             std::shared_ptr<ImageMemoryPool> internalPool) :
-        extent(extent) {
+        extent(extent), externalMemory(importFd.has_value() || exportFd.has_value()) {
     const int incomingFd = importFd.value_or(-1);
     ls::FileDescriptorScope imported{{&incomingFd, 1}};
     if (internalPool && (importFd || exportFd))

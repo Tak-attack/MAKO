@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "mako-common/vulkan/external_image.hpp"
+
 #include "present_diagnostics.hpp"
 
 #include <algorithm>
