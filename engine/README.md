@@ -10,7 +10,7 @@ LSFG and LS1 require a lawful, user-supplied <a href="https://store.steampowered
 
 ## Downloads
 
-Download packages from the <a href="https://github.com/eugeniosegala/MAKO/releases/tag/render-v4.5.0" target="_blank" rel="noopener noreferrer">latest MAKO Renderer release</a>:
+Download packages from the <a href="https://github.com/eugeniosegala/MAKO/releases/tag/render-v4.6.0" target="_blank" rel="noopener noreferrer">latest MAKO Renderer release</a>:
 
 | Release file | Use it for |
 | --- | --- |
