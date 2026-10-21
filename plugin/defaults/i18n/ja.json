@@ -108,7 +108,7 @@
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD": "リフレッシュレートしきい値",
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD_DESC": "フレーム生成を一時停止する最大リフレッシュレートを選択します。",
   "CONFIG_GPU_HEADROOM": "GPU 余力",
-  "CONFIG_GPU_HEADROOM_DESC": "フレーム生成中に実 FPS を下げ、GPU に余裕を持たせます。対応する AMD GPU の使用率データが必要です。入力遅延が増える場合があります。",
+  "CONFIG_GPU_HEADROOM_DESC": "フレーム生成中に実 FPS を下げ、GPU に余裕を持たせます。AMD GPU の使用率データが必要です。カクつきの軽減が期待できますが、入力遅延やフレーム間隔のばらつきが増える場合があります。",
   "CONFIG_GPU_HEADROOM_RESERVE": "確保する GPU 余力",
   "CONFIG_GPU_HEADROOM_TRADEOFF": "10% では GPU 使用率約 90% を目指します。アダプティブモードは生成フレームを追加でき、固定モードは出力 FPS が下がる場合があります。動的ケイデンスリカバリーは無効になります。",
   "CONFIG_ULTRA_PERFORMANCE": "ウルトラパフォーマンス（再起動）",

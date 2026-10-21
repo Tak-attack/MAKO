@@ -110,7 +110,7 @@ export function PerformanceConfigurationGroup({
           label={t("CONFIG_GPU_HEADROOM", "GPU Headroom")}
           description={t(
             "CONFIG_GPU_HEADROOM_DESC",
-            "Reduces real FPS during Frame Generation to free GPU capacity. Requires supported AMD GPU readings. May increase input latency.",
+            "Reduces real FPS during Frame Generation to free GPU capacity. Requires AMD GPU readings. May reduce stutter, but add input lag or uneven pacing.",
           )}
           checked={config.gpu_headroom_percent > 0}
           onChange={(enabled) =>

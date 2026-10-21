@@ -108,7 +108,7 @@
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD": "Refresh Rate Threshold",
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD_DESC": "Choose the highest refresh rate where frame generation should remain paused.",
   "CONFIG_GPU_HEADROOM": "GPU Headroom",
-  "CONFIG_GPU_HEADROOM_DESC": "Reduces real FPS during Frame Generation to free GPU capacity. Requires supported AMD GPU readings. May increase input latency.",
+  "CONFIG_GPU_HEADROOM_DESC": "Reduces real FPS during Frame Generation to free GPU capacity. Requires AMD GPU readings. May reduce stutter, but add input lag or uneven pacing.",
   "CONFIG_GPU_HEADROOM_RESERVE": "Reserved GPU capacity",
   "CONFIG_GPU_HEADROOM_TRADEOFF": "10% targets about 90% GPU usage. Adaptive can add generated frames; Fixed may lower output FPS. Disables Dynamic Cadence Recovery.",
   "CONFIG_ULTRA_PERFORMANCE": "Ultra Performance (Restart)",

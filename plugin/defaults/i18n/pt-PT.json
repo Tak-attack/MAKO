@@ -108,7 +108,7 @@
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD": "Limite da taxa de atualização",
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD_DESC": "Escolha a taxa de atualização mais alta em que a geração de fotogramas deve permanecer pausada.",
   "CONFIG_GPU_HEADROOM": "Margem da GPU",
-  "CONFIG_GPU_HEADROOM_DESC": "Reduz os FPS reais durante a geração de fotogramas para libertar capacidade da GPU. Requer leituras de GPUs AMD compatíveis. Pode aumentar a latência de entrada.",
+  "CONFIG_GPU_HEADROOM_DESC": "Reduz os FPS reais na geração de fotogramas para aliviar a GPU. Requer leituras da GPU AMD. Pode reduzir soluços, mas aumentar a latência de entrada ou tornar a cadência irregular.",
   "CONFIG_GPU_HEADROOM_RESERVE": "Capacidade reservada da GPU",
   "CONFIG_GPU_HEADROOM_TRADEOFF": "10% procura cerca de 90% de utilização da GPU. O modo adaptativo pode adicionar fotogramas gerados; o fixo pode reduzir os FPS de saída. Desativa a recuperação de cadência dinâmica.",
   "CONFIG_ULTRA_PERFORMANCE": "Desempenho ultra (Reiniciar)",

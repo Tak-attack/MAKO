@@ -108,7 +108,7 @@
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD": "주사율 임계값",
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD_DESC": "프레임 생성을 일시 중지할 최대 주사율을 선택합니다.",
   "CONFIG_GPU_HEADROOM": "GPU 여유 확보",
-  "CONFIG_GPU_HEADROOM_DESC": "프레임 생성 중 실제 FPS를 낮춰 GPU 처리 성능에 여유를 둡니다. 지원되는 AMD GPU 측정값이 필요합니다. 입력 지연이 늘어날 수 있습니다.",
+  "CONFIG_GPU_HEADROOM_DESC": "프레임 생성 중 실제 FPS를 낮춰 GPU에 여유를 둡니다. AMD GPU 측정값이 필요합니다. 끊김이 줄 수 있지만 입력 지연이나 불규칙한 프레임 간격이 생길 수 있습니다.",
   "CONFIG_GPU_HEADROOM_RESERVE": "확보할 GPU 여유 비율",
   "CONFIG_GPU_HEADROOM_TRADEOFF": "10%는 GPU 사용률 약 90%를 목표로 합니다. 적응형 모드는 생성 프레임을 추가할 수 있으며, 고정 모드는 출력 FPS가 낮아질 수 있습니다. 동적 케이던스 복구는 비활성화됩니다.",
   "CONFIG_ULTRA_PERFORMANCE": "울트라 성능 (재시작)",

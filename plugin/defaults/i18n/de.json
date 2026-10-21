@@ -108,7 +108,7 @@
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD": "Schwellenwert der Bildwiederholrate",
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD_DESC": "Wählen Sie die höchste Bildwiederholrate, bei der die Bilderzeugung pausiert bleiben soll.",
   "CONFIG_GPU_HEADROOM": "GPU-Reserve",
-  "CONFIG_GPU_HEADROOM_DESC": "Senkt die echten FPS bei aktiver Bilderzeugung, um GPU-Kapazität freizuhalten. Erfordert unterstützte AMD-GPU-Messwerte. Kann die Eingabelatenz erhöhen.",
+  "CONFIG_GPU_HEADROOM_DESC": "Senkt die echten FPS bei aktiver Bilderzeugung, um GPU-Kapazität freizuhalten. Benötigt AMD-GPU-Messwerte. Kann Ruckler verringern, aber die Eingabelatenz erhöhen oder unregelmäßige Bildintervalle verursachen.",
   "CONFIG_GPU_HEADROOM_RESERVE": "Reservierte GPU-Kapazität",
   "CONFIG_GPU_HEADROOM_TRADEOFF": "10 % zielt auf etwa 90 % GPU-Auslastung ab. Adaptiv können generierte Bilder hinzukommen; im festen Modus können die Ausgabe-FPS sinken. Deaktiviert die dynamische Rhythmuskorrektur.",
   "CONFIG_ULTRA_PERFORMANCE": "Höchstleistung (Neustart)",

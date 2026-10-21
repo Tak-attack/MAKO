@@ -108,7 +108,7 @@
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD": "刷新率阈值",
   "CONFIG_FRAME_GENERATION_REFRESH_THRESHOLD_DESC": "选择帧生成应保持暂停的最高刷新率。",
   "CONFIG_GPU_HEADROOM": "GPU 余量",
-  "CONFIG_GPU_HEADROOM_DESC": "在帧生成期间降低真实帧率，为 GPU 腾出余量。需要受支持的 AMD GPU 使用率数据。可能增加输入延迟。",
+  "CONFIG_GPU_HEADROOM_DESC": "在帧生成期间降低真实帧率，为 GPU 腾出余量。需要 AMD GPU 使用率数据。可能减少卡顿，但也可能增加输入延迟或使帧间隔不均匀。",
   "CONFIG_GPU_HEADROOM_RESERVE": "预留 GPU 算力",
   "CONFIG_GPU_HEADROOM_TRADEOFF": "设为 10% 时，目标 GPU 使用率约为 90%。自适应模式可增加生成帧；固定模式可能降低输出 FPS。动态节奏恢复将被禁用。",
   "CONFIG_ULTRA_PERFORMANCE": "极致性能（重启）",
