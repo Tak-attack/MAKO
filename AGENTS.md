@@ -108,6 +108,7 @@ Start with the root `README.md`, then read `engine/README.md` or `plugin/README.
 | Understand validation coverage | `TESTING.md` | `justfile`, `.github/workflows/tests.yml` |
 | Format Markdown or enable the commit hook | `AGENTS.md` | `just format-markdown`, `just check-markdown-format`, `just install-hooks` |
 | Review non-skill Markdown for clarity, duplication, and accuracy | `AGENTS.md` | `.agents/skills/mako-refactor-docs/SKILL.md` (`$mako-refactor-docs`) |
+| Review and reclaim disposable MAKO storage after approval | `AGENTS.md` | `.agents/skills/mako-cleanup/SKILL.md` (`$mako-cleanup`) |
 | Update the README contributor gallery | `CONTRIBUTING.md` | `just update-contributors`, `just check-contributors` |
 | Change native installation or rollback | `INSTALLATION-TRANSACTIONS.md` | `plugin/py_modules/mako_plugin/installation.py`, `plugin/py_modules/mako_plugin/managed_files.py`, `engine/scripts/mako-installer` |
 | Build Renderer from source or restore SteamOS build tools | `engine/docs/BUILDING-FROM-SOURCE.md` | `engine/CMakeLists.txt`, `engine/scripts/install-steamos-build-tools.sh`, `engine/scripts/build-steamos-dev.sh` |

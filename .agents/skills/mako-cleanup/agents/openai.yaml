@@ -1,0 +1,4 @@
+interface:
+  display_name: "MAKO cleanup"
+  short_description: "Review MAKO disk use and clean after confirmation"
+  default_prompt: "Use $mako-cleanup to report reclaimable MAKO storage, preserve build caches and tooling, and ask me before deleting anything."
