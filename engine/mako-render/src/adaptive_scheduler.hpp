@@ -201,13 +201,20 @@ namespace mako::layer {
 
         // The presentation owner supplies its existing queue horizon. Native
         // probes capture it once; the scheduler never queries the transport.
+        // An active Headroom source cap bounds reachable lower-load output;
+        // zero leaves ordinary workload qualification unchanged.
         [[nodiscard]] AdaptiveFramePlan planFrame(TimePoint now,
             bool generatedImageAcquireBackoff,
             std::optional<size_t> orderedFifoGenerationLimit = std::nullopt,
             std::optional<size_t> integerBaseCapGenerationLimit = std::nullopt,
-            std::optional<TimePoint> queuedPresentationDeadline = std::nullopt);
+            std::optional<TimePoint> queuedPresentationDeadline = std::nullopt,
+            double headroomSourceCapFps = 0.0);
 
         void resetTiming(TimePoint now);
+        // A released Headroom cap is fresh evidence that the old paced source
+        // rate may be self-limiting. Request one existing lower-load trial;
+        // acceptance still requires sustained target-rate delivery.
+        void requestHeadroomRecovery(TimePoint now, double restoredSourceFps);
         void updateDynamicCadenceProbeInterval(
             TimePoint now, std::chrono::milliseconds interval);
         void beginStabilization(TimePoint now, std::string_view reason);
@@ -323,7 +330,7 @@ namespace mako::layer {
             double desiredOutputsPerRealFrame,
             size_t maximumGeneratedFrameCount);
         inline void advanceEfficiencyProbe(TimePoint now, double baseFps,
-            double rawIntervalSeconds);
+            double rawIntervalSeconds, double headroomSourceCapFps);
         [[nodiscard]] inline size_t selectGeneratedFrameCount(
             double desiredOutputsPerRealFrame,
             double rawIntervalSeconds,
@@ -761,6 +768,8 @@ namespace mako::layer {
             } stableCadence;
 
             struct EfficiencyProbe {
+                std::optional<TimePoint> headroomRequestUntil;
+                size_t headroomTestLimit{};
                 std::optional<TimePoint> eligibleSince;
                 std::optional<TimePoint> evaluationAt;
                 // A rejected lower load remains rejected through cadence
@@ -795,6 +804,7 @@ namespace mako::layer {
 
                 void reset() {
                     this->resetEvaluation();
+                    this->headroomRequestUntil.reset();
                     this->retryAt.fill(std::nullopt);
                 }
             } efficiencyProbe;

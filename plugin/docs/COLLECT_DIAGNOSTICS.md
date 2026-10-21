@@ -62,3 +62,9 @@ Restore the saved Launch Options and any changed Target, or remove the two diagn
 ## 5. Send the report
 
 Review `MAKO-diagnostics.txt` and remove personal information. Upload it through the [diagnostic form](https://docs.google.com/forms/d/e/1FAIpQLScSd9qgkYCq3Kbbc3_52k4_82iTmEqt3_FxOqGuxQ6FsjutgA/viewform), choosing **MAKO Decky (Decky Loader plugin)**. Answer **Unknown** when unsure. Do not post the log publicly or attach `Lossless.dll`.
+
+## GPU Headroom evidence
+
+Reports retain Headroom cap changes and any Adaptive efficiency trial cancelled because the cap made its output target unreachable. A cancellation restores the proven workload and is not a presentation failure.
+
+Compare the same scene with GPU Headroom Off and On. Collect a report after each run and note the reserve, Fixed/Adaptive mode, multiplier ceiling and any game FPS cap. Brief utilization spikes can still reach 100%; the readings cover the whole GPU and do not measure per-game GPU time or power. See [presentation records](../../engine/docs/WSI-ISOLATION.md#interpreting-presentation-records) for the retained fields and controller states.

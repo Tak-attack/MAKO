@@ -2,6 +2,8 @@
 
 This document owns MAKO's transitional compatibility and cleanup policy. It is not a general backlog. Add an entry when a change temporarily accepts, imports, rewrites, or rejects an older persisted representation and remove the entry when the compatibility code is removed.
 
+GPU Headroom adds optional `gpu_headroom_percent` (default `0`) to version-2 profiles and schema-5 runtime profile snapshots, and `gpu_headroom_state` to schema-5 context records. Decky accepts older records with reserve `0` and state `unavailable`; it must not infer support from a saved toggle. Keep these absent-field defaults until supported older Renderer installations can no longer produce schema-5 records. Configuration round-trip, runtime-reader and RPC contract tests cover the compatibility boundary. No wrapper or persisted-value migration is needed.
+
 The persisted `allow_fp16` boolean remains the canonical global precision choice; upgrades preserve both true and false values. The corrected runtime applies false even under Ultra Performance and across LSFG and MAKO Scaler, and reports unavailable true requests rather than silently selecting FP32. LS1 always uses FP32 independently of this setting. No stored-value rewrite is needed or performed.
 
 Optional AC/battery profile tables extend Renderer configuration version 2 without rewriting existing profiles. Profiles without these tables retain their previous behavior; opting in clones the existing native settings and opting out restores the retained base. No legacy-value migration is required. Older editors may discard these optional tables, so the configuration guides require matching current components.

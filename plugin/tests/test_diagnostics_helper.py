@@ -71,6 +71,8 @@ MAKO Renderer: present diagnostics: operation=application-present-wait waiter=19
 MAKO Renderer: present diagnostics: operation=application-acquire stream=20 pid=4242 device=55 swapchain=1234 api=KHR2 calls=45 entry_interval_samples=45 entry_interval_mean_ms=22.2 entry_interval_max_ms=72.2 duration_mean_ms=1.1 duration_max_ms=50.1 successful=45 timeouts=0 not_ready=0 errors=0 polls=0
 MAKO Renderer: present diagnostics: operation=application-queue-present stream=20 pid=4242 queue=66 swapchain=1234 api=KHR calls=45 entry_interval_samples=45 entry_interval_mean_ms=22.2 entry_interval_max_ms=72.2 duration_mean_ms=8.1 duration_max_ms=10 includes_intentional_pacing=1 configuration_update_samples=45 configuration_update_mean_ms=0.1 configuration_update_max_ms=0.5
 MAKO Renderer: present diagnostics: operation=runtime-health monitor=21 pid=4242 role=frame-generation session_ms=3600000 gpu_render_node=226:128 process_rss_bytes=123456 gpu_busy_percent=95 gpu_temperature_mc=65000 mako_backend_internal_bytes=987654
+MAKO Renderer: present diagnostics: operation=gpu-headroom context=1 state=limiting reserve_percent=10 target_utilization_percent=90 measured_utilization_percent=94 source_cap_fps=38 source_floor_fps=30
+MAKO Renderer: present diagnostics: operation=adaptive-efficiency-probe-cancelled context=1 generated_limit=1 baseline_base_fps=40 current_base_fps=40 projected_output_fps=80 reason=gpu-headroom-source-cap
 MAKO Renderer: present diagnostics: operation=runtime-health-unavailable reason=device-monitor-limit
 MAKO Renderer: present diagnostics: operation=present-phase-summary context=1 pid=4242 tid=4243 sample_end_monotonic_ms=3600000 calls=45 total_mean_ms=2 total_max_ms=4 render_fence_mean_ms=0.2 render_fence_max_ms=1
 MAKO Renderer: spatial scaling surface virtualized: source=854x532; presentation=1280x800; policy_revision=4; query_generation=9
@@ -263,6 +265,9 @@ class DiagnosticsHelperTests(unittest.TestCase):
                     self.assertIn("session_ms=3600000", result.stdout)
                     self.assertIn("operation=runtime-health-unavailable", result.stdout)
                     self.assertIn("operation=present-phase-summary", result.stdout)
+                    self.assertIn("operation=gpu-headroom", result.stdout)
+                    self.assertIn("operation=adaptive-efficiency-probe-cancelled", result.stdout)
+                    self.assertIn("reason=gpu-headroom-source-cap", result.stdout)
 
     def test_recent_trace_preserves_initial_and_latest_context(self):
         records = [

@@ -307,6 +307,7 @@ Swapchain::Swapchain(const vk::Vulkan& vk, backend::Instance* backend,
                   << " adaptive=" << this->profile.adaptive
                   << " target_fps=" << this->profile.target_fps
                   << " multiplier=" << this->profile.multiplier
+                  << " gpu_headroom_percent=" << this->profile.gpu_headroom_percent
                   << " base_fps_cap=" << this->profile.base_fps_cap
                   << " adaptive_auto_base_fps_cap="
                   << this->profile.adaptive_auto_base_fps_cap

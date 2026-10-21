@@ -63,6 +63,7 @@ namespace {
             left.frame_generation_refresh_threshold ==
                 right.frame_generation_refresh_threshold &&
             left.base_fps_cap == right.base_fps_cap &&
+            left.gpu_headroom_percent == right.gpu_headroom_percent &&
             left.adaptive == right.adaptive &&
             left.adaptive_auto_base_fps_cap ==
                 right.adaptive_auto_base_fps_cap &&
@@ -84,6 +85,54 @@ namespace {
             left.power_profiles.size() == right.power_profiles.size() &&
             std::equal(left.power_profiles.begin(), left.power_profiles.end(),
                 right.power_profiles.begin(), sameGameConf);
+    }
+
+    void testGpuHeadroom(const std::filesystem::path& directory) {
+        const auto path = directory / "headroom.toml";
+        for (const auto reserve : ls::GameConfLimits::gpuHeadroomPercentPresets) {
+            ls::ConfigFile config;
+            ls::GameConf profile;
+            profile.name = "headroom";
+            profile.gpu_headroom_percent = reserve;
+            auto handheld = profile;
+            handheld.name = "handheld";
+            handheld.gpu_headroom_percent = 20;
+            auto docked = profile;
+            docked.name = "docked";
+            docked.gpu_headroom_percent = 5;
+            profile.power_profiles = {handheld, docked};
+            config.profiles() = {profile};
+            config.write(path);
+            const ls::ConfigFile loaded(path);
+            expect(loaded.profiles().size() == 1 &&
+                    loaded.profiles().front().gpu_headroom_percent == reserve &&
+                    loaded.profiles().front().power_profiles.size() == 2 &&
+                    loaded.profiles().front().power_profiles.front().gpu_headroom_percent == 20 &&
+                    loaded.profiles().front().power_profiles.back().gpu_headroom_percent == 5,
+                "Headroom survives profile and power-profile persistence");
+        }
+        for (const auto value : {"-5", "21", "7", "5.5", "true", "'10'", "4294967306"}) {
+            writeText(path, "version = 2\n[[profile]]\nname = 'invalid'\ngpu_headroom_percent = " + std::string(value) + "\n");
+            bool rejected = false;
+            try { const ls::ConfigFile invalid(path); } catch (const std::exception&) { rejected = true; }
+            expect(rejected, "Invalid TOML headroom must not silently enable a different reserve");
+        }
+        setenv("MAKO_ENV", "1", 1);
+        setenv("MAKO_GPU_HEADROOM_PERCENT", "15", 1);
+        expect(ls::WatchedConfig{}.get().profiles().front().gpu_headroom_percent == 15,
+            "Environment supports GPU Headroom");
+        setenv("MAKO_DYNAMIC_CADENCE_RECOVERY", "1", 1);
+        expect(ls::WatchedConfig{}.get().profiles().front().gpu_headroom_percent == 0,
+            "Dynamic Cadence Recovery remains exclusive with headroom");
+        unsetenv("MAKO_DYNAMIC_CADENCE_RECOVERY");
+        for (const auto value : {"-5", "7", "5.5", "10junk", "4294967306"}) {
+            setenv("MAKO_GPU_HEADROOM_PERCENT", value, 1);
+            bool rejected = false;
+            try { const ls::WatchedConfig invalid; } catch (const std::exception&) { rejected = true; }
+            expect(rejected, "Malformed or overflowing environment reserve is rejected");
+        }
+        unsetenv("MAKO_GPU_HEADROOM_PERCENT");
+        unsetenv("MAKO_ENV");
     }
 
     void testOptionalLosslessScaling(const std::filesystem::path& directory) {
@@ -349,6 +398,7 @@ int main() {
     std::filesystem::create_directories(directory);
 
     unsetenv("MAKO_ENV");
+    testGpuHeadroom(directory);
     testOptionalLosslessScaling(directory);
     testPowerProfiles(directory);
 

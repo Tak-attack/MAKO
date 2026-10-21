@@ -806,6 +806,13 @@ ConfigurationUpdateResult Root::update(const bool forceConfigurationPoll) {
         this->active_profile = std::move(*runtimeProfile);
     else
         this->active_profile = std::nullopt;
+    for (const auto& device : this->gpuLoadDevices) {
+        try {
+            device.monitor->setEnabled(this->active_profile &&
+                this->active_profile->frame_generation_enabled &&
+                this->active_profile->gpu_headroom_percent > 0);
+        } catch (...) { device.monitor->setEnabled(false); }
+    }
     this->publishSurfaceScalingPolicy();
 
     const auto currentProfileName = this->active_profile
@@ -1581,23 +1588,8 @@ Root::modifySurfaceCapabilities(
     };
 }
 
-void Root::startRuntimeHealth(const vk::Vulkan& vk) noexcept {
-    if (!present_diagnostics::enabled())
-        return;
-    try {
-        const auto accounting = vk.deviceMemoryAccounting();
-        if (this->healthMonitors.contains(accounting.get()))
-            return;
-        // Bound threads and retained counters even if a game continually
-        // creates devices. Swapchain recreation on one device reuses its monitor.
-        if (this->healthMonitors.size() >= 4) {
-            if (!this->healthMonitorLimitReported) {
-                this->healthMonitorLimitReported = true;
-                std::cerr << "MAKO Renderer: present diagnostics: operation=runtime-health-unavailable"
-                             " reason=device-monitor-limit\n";
-            }
-            return;
-        }
+namespace {
+    present_diagnostics::RuntimeHealthPaths healthPathsForDevice(const vk::Vulkan& vk) {
         present_diagnostics::RuntimeHealthPaths paths;
         if (vk.fi().GetPhysicalDeviceProperties2 && physicalDeviceSupportsExtension(
                 vk.fi(), vk.physdev(), VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME)) {
@@ -1616,6 +1608,44 @@ void Root::startRuntimeHealth(const vk::Vulkan& vk) noexcept {
                     static_cast<uint32_t>(drm.renderMajor), static_cast<uint32_t>(drm.renderMinor)};
             }
         }
+        return paths;
+    }
+}
+
+std::shared_ptr<present_diagnostics::GpuLoadMonitor> Root::gpuLoadForDevice(const vk::Vulkan& vk) noexcept {
+    try {
+        const auto accounting = vk.deviceMemoryAccounting();
+        for (const auto& device : this->gpuLoadDevices)
+            if (device.accounting == accounting)
+                return device.monitor;
+        if (this->gpuLoadDevices.size() >= 4)
+            return {};
+        auto monitor = std::make_shared<present_diagnostics::GpuLoadMonitor>(healthPathsForDevice(vk));
+        monitor->setEnabled(this->active_profile && this->active_profile->gpu_headroom_percent > 0 &&
+            this->active_profile->frame_generation_enabled);
+        this->gpuLoadDevices.push_back({accounting, monitor});
+        return monitor;
+    } catch (...) { return {}; }
+}
+
+void Root::startRuntimeHealth(const vk::Vulkan& vk) noexcept {
+    if (!present_diagnostics::enabled())
+        return;
+    try {
+        const auto accounting = vk.deviceMemoryAccounting();
+        if (this->healthMonitors.contains(accounting.get()))
+            return;
+        // Bound threads and retained counters even if a game continually
+        // creates devices. Swapchain recreation on one device reuses its monitor.
+        if (this->healthMonitors.size() >= 4) {
+            if (!this->healthMonitorLimitReported) {
+                this->healthMonitorLimitReported = true;
+                std::cerr << "MAKO Renderer: present diagnostics: operation=runtime-health-unavailable"
+                             " reason=device-monitor-limit\n";
+            }
+            return;
+        }
+        const auto paths = healthPathsForDevice(vk);
         const auto monitor = present_diagnostics::allocateContextId();
         const auto device = reinterpret_cast<uintptr_t>(vk.dev());
         const long ticks = sysconf(_SC_CLK_TCK);

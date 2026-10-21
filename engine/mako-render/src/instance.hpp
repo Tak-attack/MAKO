@@ -179,11 +179,17 @@ namespace mako::layer {
         /// @param swapchain swapchain handle
         /// @return swapchain context
         /// @throws ls::error if not found
-        [[nodiscard]] Swapchain& getSwapchainContext(VkSwapchainKHR swapchain) {
+        [[nodiscard]] Swapchain& getSwapchainContext(
+                VkSwapchainKHR swapchain, const vk::Vulkan& vk) {
             const auto& it = this->swapchains.find(swapchain);
             if (it == this->swapchains.end())
                 throw ls::error("swapchain context not found");
 
+            // Resolve telemetry only on the first enabled presentation. A
+            // default-Off game needs neither a monitor allocation nor a DRM
+            // device query, while a live toggle can use this same context.
+            if (it->second.needsGpuLoadMonitor())
+                it->second.setGpuLoadMonitor(this->gpuLoadForDevice(vk));
             return it->second;
         }
         /// Remove a context from live configuration updates while preserving
@@ -195,6 +201,7 @@ namespace mako::layer {
         void removeSwapchainContext(VkSwapchainKHR swapchain);
     private:
         void startRuntimeHealth(const vk::Vulkan& vk) noexcept;
+        std::shared_ptr<present_diagnostics::GpuLoadMonitor> gpuLoadForDevice(const vk::Vulkan& vk) noexcept;
         void publishSurfaceScalingPolicy() noexcept;
         [[nodiscard]] SpatialScalingPolicySnapshot
         surfaceScalingPolicySnapshot() const noexcept;
@@ -233,6 +240,11 @@ namespace mako::layer {
         std::mutex surfaceScalingPolicyPublishMutex;
         std::atomic<uint64_t> surfaceScalingPolicySequence{0};
         std::atomic<uint64_t> surfaceScalingPolicy{0};
+        struct GpuLoadDevice {
+            std::shared_ptr<const vk::DeviceMemoryAccounting> accounting;
+            std::shared_ptr<present_diagnostics::GpuLoadMonitor> monitor;
+        };
+        std::vector<GpuLoadDevice> gpuLoadDevices;
         bool healthMonitorLimitReported{false};
         // Destroy workers first. Counter keys stay alive in their worker, so
         // recreated devices cannot reuse a stale monitor/GPU association.

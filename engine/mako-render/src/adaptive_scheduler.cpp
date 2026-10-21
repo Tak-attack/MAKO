@@ -314,6 +314,25 @@ AdaptiveScheduler::AdaptiveScheduler(AdaptiveSchedulerConfig config,
     }
 }
 
+void AdaptiveScheduler::requestHeadroomRecovery(const TimePoint now, const double restoredSourceFps) {
+    const auto retainedLimit = this->validatedGenerationLimit();
+    if (this->config.recoveryPolicy == AdaptiveRecoveryPolicy::OrderedSdr &&
+            retainedLimit > 1 && std::isfinite(restoredSourceFps) && restoredSourceFps > 0 &&
+            !this->state.efficiencyProbe.evaluationAt) {
+        // The old uncapped source rate selects a candidate, never acceptance.
+        // This can test 2x directly after a 5x episode; delivery still has to
+        // prove the target rather than retaining several lower-rung delays.
+        const double candidate = std::ceil(static_cast<double>(this->config.targetFps) *
+            adaptiveEfficiencyProbeMinimumTargetRatio / restoredSourceFps) - 1.0;
+        // A ceiling measured in the old heavy scene can underestimate the
+        // recovered source. Still allow one adjacent trial in that case;
+        // current sustained delivery, not the old ceiling, decides acceptance.
+        this->state.efficiencyProbe.headroomTestLimit = static_cast<size_t>(
+            std::clamp(candidate, 1.0, static_cast<double>(retainedLimit - 1)));
+        this->state.efficiencyProbe.headroomRequestUntil = now + std::chrono::seconds(2);
+    }
+}
+
 void AdaptiveScheduler::updateDynamicCadenceProbeInterval(
         const TimePoint now, const std::chrono::milliseconds interval) {
     if (interval < ls::dynamicCadenceProbeIntervalDuration(
@@ -1353,14 +1372,35 @@ AdaptiveScheduler::advanceStableCadence(
 
 MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
         const TimePoint now, const double baseFps,
-        const double rawIntervalSeconds) {
+        const double rawIntervalSeconds, const double headroomSourceCapFps) {
     auto& probe = this->state.efficiencyProbe;
     const double targetFps = static_cast<double>(this->config.targetFps);
+    if (probe.headroomRequestUntil && now > *probe.headroomRequestUntil)
+        probe.headroomRequestUntil.reset();
 
     // The applied-pacing comparison owns the same lower-load probe while it
     // collects a continuous delivered sample rather than an EWMA endpoint.
     if (this->state.ramp.pacedLoad.lowerLoadProbe)
         return;
+
+    const auto headroomBlocksTarget = [&](const size_t generatedLimit) {
+        return headroomSourceCapFps > 0.0 && std::isfinite(headroomSourceCapFps) &&
+            headroomSourceCapFps * static_cast<double>(generatedLimit + 1) <
+                targetFps * adaptiveEfficiencyProbeMinimumTargetRatio;
+    };
+    if (probe.evaluationAt && headroomBlocksTarget(probe.testedLimit)) {
+        // A live cap can make an already-running trial impossible. Restore
+        // the retained workload without recording a failed GPU experiment or
+        // poisoning its retry history with an intentional source restriction.
+        this->diagnostics->stableCadence("adaptive-efficiency-probe-cancelled",
+            probe.testedLimit, probe.baselineBaseFps, baseFps,
+            "gpu-headroom-source-cap");
+        probe.resetEvaluation();
+        this->state.outputPlanner.resetTargetClock();
+        this->state.ramp.pacingResumePending =
+            this->state.ramp.observedPacingLimit.has_value();
+        return;
+    }
 
     if (probe.evaluationAt) {
         if (probe.sampling) {
@@ -1481,11 +1521,19 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
         return;
     }
 
+    const bool headroomRecovery = probe.headroomRequestUntil.has_value();
+    const size_t currentLimit = this->state.stableCadence.limit.value_or(
+        this->state.outputPlanner.generationLimit);
+    const size_t candidateLimit = currentLimit > 1
+        ? (headroomRecovery ? std::min(probe.headroomTestLimit, currentLimit - 1)
+            : currentLimit - 1)
+        : 0;
     const bool eligible =
         this->config.recoveryPolicy == AdaptiveRecoveryPolicy::OrderedSdr &&
         !this->state.ramp.pacedLoad.until &&
-        this->state.stableCadence.limit &&
-        *this->state.stableCadence.limit > 1 &&
+        (this->state.stableCadence.limit || headroomRecovery) &&
+        currentLimit > 1 &&
+        !headroomBlocksTarget(candidateLimit) &&
         !this->state.stableCadence.evaluationAt &&
         !this->state.stableCadence.outsideRangeSince &&
         !this->state.ramp.evaluationAt &&
@@ -1501,9 +1549,8 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
             probe.resetEvaluation();
         return;
     }
-    const size_t currentLimit = *this->state.stableCadence.limit;
     auto& retryAt = probe.retryAt[currentLimit - 2];
-    if (retryAt && now < *retryAt) {
+    if (!headroomRecovery && retryAt && now < *retryAt) {
         probe.eligibleSince.reset();
         return;
     }
@@ -1515,14 +1562,15 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
         probe.eligibleSince.reset();
         return;
     }
-    if (!probe.eligibleSince) {
+    if (!headroomRecovery && !probe.eligibleSince) {
         probe.eligibleSince = now;
         return;
     }
-    if (now - *probe.eligibleSince < adaptiveEfficiencyProbeHoldDuration)
+    if (!headroomRecovery && now - *probe.eligibleSince < adaptiveEfficiencyProbeHoldDuration)
         return;
 
-    probe.testedLimit = currentLimit - 1;
+    probe.headroomRequestUntil.reset();
+    probe.testedLimit = candidateLimit;
     probe.baselineBaseFps = baseFps;
     probe.evaluationAt = now + adaptiveEfficiencyProbeEvaluationDuration;
     probe.eligibleSince.reset();
@@ -1536,7 +1584,7 @@ MAKO_ADAPTIVE_STAGE_INLINE void AdaptiveScheduler::advanceEfficiencyProbe(
         probe.testedLimit,
         probe.baselineBaseFps,
         baseFps,
-        "lower-generated-load"
+        headroomRecovery ? "gpu-headroom-released" : "lower-generated-load"
     );
 }
 
@@ -2007,7 +2055,8 @@ AdaptiveFramePlan AdaptiveScheduler::planFrame(
         const bool generatedImageAcquireBackoff,
         const std::optional<size_t> orderedFifoGenerationLimit,
         const std::optional<size_t> integerBaseCapGenerationLimit,
-        const std::optional<TimePoint> queuedPresentationDeadline) {
+        const std::optional<TimePoint> queuedPresentationDeadline,
+        const double headroomSourceCapFps) {
     this->state.ramp.pacedLoadRollbackLimit.reset();
     // Wall time alone cannot qualify a lower workload. An intentional native
     // probe pauses the delivered-work clock; any other missing observation
@@ -2095,7 +2144,8 @@ AdaptiveFramePlan AdaptiveScheduler::planFrame(
     if (!stableCadence.planningReady)
         return stableCadence.terminalPlan;
 
-    this->advanceEfficiencyProbe(now, baseFps, cadence.rawIntervalSeconds);
+    this->advanceEfficiencyProbe(now, baseFps, cadence.rawIntervalSeconds,
+        headroomSourceCapFps);
 
     // A VRR-only presentation handoff can let ordered FIFO pace a full
     // validated higher rung. Recheck the scheduler after its frame stages:
@@ -2287,6 +2337,9 @@ void AdaptiveScheduler::resetTiming(
     // reaches the target. Keep its original deadline through stalls and
     // warm-up; a new scheduler or confirmed native recovery clears it.
     this->state.efficiencyProbe.resetEvaluation();
+    // A pending Headroom hint belongs to the source history just invalidated,
+    // unlike the retained backoff for a previously rejected workload.
+    this->state.efficiencyProbe.headroomRequestUntil.reset();
     this->state.pacingWindow.reset();
 }
 

@@ -257,6 +257,7 @@ export interface RuntimeProfileSnapshot {
   hdr_quality: "quality" | "balanced" | "performance";
   frame_generation_refresh_threshold: number;
   base_fps_cap: number;
+  gpu_headroom_percent: number;
   adaptive: boolean;
   adaptive_auto_base_fps_cap: boolean;
   adaptive_fractional_real_frame_priority: string;
@@ -320,6 +321,7 @@ export interface RuntimeContextState {
   pending: RuntimePendingState;
   applied_generated_capacity: number;
   frame_generation_active: boolean;
+  gpu_headroom_state: string;
   spatial_scaling: RuntimeSpatialScalingState;
   requested: RuntimeProfileSnapshot;
   applied: RuntimeProfileSnapshot;

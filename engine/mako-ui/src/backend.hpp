@@ -94,6 +94,8 @@ namespace mako::ui {
         Q_PROPERTY(float scaling_sharpness READ getScalingSharpness WRITE scalingSharpnessUpdated NOTIFY refreshUI)
         Q_PROPERTY(QString hdr_quality READ getHdrQuality WRITE hdrQualityUpdated NOTIFY refreshUI)
         Q_PROPERTY(uint frame_generation_refresh_threshold READ getFrameGenerationRefreshThreshold WRITE frameGenerationRefreshThresholdUpdated NOTIFY refreshUI)
+        Q_PROPERTY(uint gpu_headroom_percent READ getGpuHeadroomPercent WRITE gpuHeadroomPercentUpdated NOTIFY refreshUI)
+        Q_PROPERTY(QVariantList gpu_headroom_presets READ getGpuHeadroomPresets CONSTANT)
         Q_PROPERTY(uint base_fps_cap READ getBaseFPSCap WRITE baseFPSCapUpdated NOTIFY refreshUI)
         Q_PROPERTY(bool adaptive READ getAdaptive WRITE adaptiveUpdated NOTIFY refreshUI)
         Q_PROPERTY(bool fractional_adaptive READ getFractionalAdaptive WRITE fractionalAdaptiveUpdated NOTIFY refreshUI)
@@ -404,6 +406,16 @@ namespace mako::ui {
                 ls::GameConfDefaults::frameGenerationRefreshThreshold
             )
             return conf.frame_generation_refresh_threshold;
+        }
+        [[nodiscard]] QVariantList getGpuHeadroomPresets() const {
+            QVariantList values;
+            for (const auto value : ls::GameConfLimits::gpuHeadroomPercentPresets)
+                values.append(value);
+            return values;
+        }
+        [[nodiscard]] uint getGpuHeadroomPercent() const {
+            VALIDATE_AND_GET_PROFILE(ls::GameConfDefaults::gpuHeadroomPercent)
+            return conf.gpu_headroom_percent;
         }
         [[nodiscard]] uint getBaseFPSCap() const {
             VALIDATE_AND_GET_PROFILE(ls::GameConfDefaults::baseFpsCap)
@@ -810,6 +822,15 @@ namespace mako::ui {
             );
             MARK_DIRTY()
         }
+        void gpuHeadroomPercentUpdated(uint value) {
+            VALIDATE_AND_GET_PROFILE()
+            if (value > 20 || value % 5 != 0)
+                return;
+            conf.gpu_headroom_percent = value;
+            if (value > 0)
+                conf.dynamic_cadence_recovery = false;
+            MARK_DIRTY()
+        }
         void baseFPSCapUpdated(uint base_fps_cap) {
             VALIDATE_AND_GET_PROFILE()
             conf.base_fps_cap = std::min(
@@ -885,6 +906,7 @@ namespace mako::ui {
                 conf.adaptive_fractional_real_frame_priority =
                     ls::AdaptiveFractionalRealFramePriority::Auto;
                 conf.base_fps_cap = 0;
+                conf.gpu_headroom_percent = 0;
             }
             MARK_DIRTY()
         }

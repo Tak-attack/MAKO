@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -292,6 +293,7 @@ namespace {
         AdaptiveScheduler scheduler;
         TimePoint now{};
         std::optional<TimePoint> queuedPresentationDeadline;
+        double headroomSourceCapFps{};
 
         Harness(const uint32_t targetFps, const size_t maximumMultiplier,
                 const bool stableCadence = false,
@@ -343,7 +345,8 @@ namespace {
                 const bool reportDelivery = true) {
             this->now += interval;
             const auto plan = this->scheduler.planFrame(this->now, acquireBackoff,
-                std::nullopt, std::nullopt, this->queuedPresentationDeadline);
+                std::nullopt, std::nullopt, this->queuedPresentationDeadline,
+                this->headroomSourceCapFps);
             // Ordinary workload simulations deliver their plan. Fault tests
             // opt out before supplying their own missing/partial observation.
             if (reportDelivery)
@@ -371,7 +374,8 @@ namespace {
                 return {};
             }
             auto plan = this->scheduler.planFrame(this->now, false,
-                std::nullopt, std::nullopt, this->queuedPresentationDeadline);
+                std::nullopt, std::nullopt, this->queuedPresentationDeadline,
+                this->headroomSourceCapFps);
             if (delivered)
                 this->scheduler.reportGeneratedFrameDelivery({
                     plan.size(), *delivered ? plan.size() : 0,
@@ -4506,6 +4510,182 @@ namespace {
             "a target-deficit source invented an integer pacing experiment");
     }
 
+    void testHeadroomReleaseRechecksFractionalGeneratedLoad() {
+        for (const size_t multiplier : {size_t{3}, size_t{5}}) {
+            for (const bool sourceCanRecover : {false, true}) {
+                Harness harness(90, multiplier, false, AdaptiveRecoveryPolicy::OrderedSdr);
+                harness.start();
+                harness.runAtFps(100.0 / multiplier, 30s);
+                require(harness.scheduler.validatedGenerationLimit() == multiplier - 1 &&
+                        !harness.diagnostics.contains("adaptive-efficiency-probe"),
+                    "precondition: Fractional must retain its qualified higher load without unsolicited trials");
+                harness.scheduler.requestHeadroomRecovery(harness.now, 45);
+                auto plan = harness.frameAtFps(100.0 / multiplier);
+                require(plan.size() == 1 && harness.diagnostics.contains("adaptive-efficiency-probe"),
+                    "released Headroom cap did not test the existing cheaper workload");
+                for (size_t frame = 0; frame < 180; ++frame)
+                    plan = harness.frameAtFps(sourceCanRecover && plan.size() == 1 ? 45.0 : 100.0 / multiplier);
+                require(harness.diagnostics.count("adaptive-efficiency-probe") == 1,
+                    "one Headroom release became repeated lower-load probes");
+                require(harness.scheduler.validatedGenerationLimit() == (sourceCanRecover ? 1 : multiplier - 1),
+                    "Headroom recovery did not retain exactly the workload proven by sustained output");
+                require(harness.diagnostics.contains(sourceCanRecover
+                        ? "adaptive-efficiency-probe-accepted" : "adaptive-efficiency-probe-rejected"),
+                    "Headroom recovery did not preserve the existing accept/rollback contract");
+            }
+        }
+    }
+
+    void testHeadroomReleaseHandlesLowAndInvalidSourceEvidence() {
+        for (const double sourceCeiling : {20.0, 21.5}) {
+            for (const bool sourceCanRecover : {false, true}) {
+                Harness harness(90, 5, false, AdaptiveRecoveryPolicy::OrderedSdr);
+                harness.start();
+                harness.runAtFps(20.0, 30s);
+                require(harness.scheduler.validatedGenerationLimit() == 4,
+                    "precondition: heavy gameplay qualified 5x before Headroom release");
+                harness.scheduler.requestHeadroomRecovery(harness.now, sourceCeiling);
+                auto plan = harness.frameAtFps(20.0);
+                require(plan.size() == 3 && harness.diagnostics.contains("adaptive-efficiency-probe"),
+                    "a heavy scene's low source ceiling must not prevent a bounded adjacent recovery trial");
+                // The lighter scene can sustain the target at the lower
+                // workload. Observe this release trial before ordinary
+                // efficiency probing becomes eligible several seconds later.
+                for (size_t frame = 0; frame < 60; ++frame)
+                    plan = harness.frameAtFps(sourceCanRecover && plan.size() <= 3 ? 25.0 : 20.0);
+                require(harness.diagnostics.count("adaptive-efficiency-probe") == 1 &&
+                        harness.scheduler.validatedGenerationLimit() == (sourceCanRecover ? 3 : 4),
+                    "low-ceiling recovery must retain only a workload proven by current delivery");
+                require(harness.diagnostics.contains(sourceCanRecover
+                        ? "adaptive-efficiency-probe-accepted" : "adaptive-efficiency-probe-rejected"),
+                    "low-ceiling recovery must preserve the bounded accept/rollback contract");
+            }
+        }
+        for (const double sourceCeiling : {0.0, -1.0,
+                std::numeric_limits<double>::infinity(),
+                std::numeric_limits<double>::quiet_NaN()}) {
+            Harness harness(90, 5, false, AdaptiveRecoveryPolicy::OrderedSdr);
+            harness.start();
+            harness.runAtFps(20.0, 30s);
+            require(harness.scheduler.validatedGenerationLimit() == 4,
+                "precondition: the slow source needs its qualified 5x workload");
+            harness.scheduler.requestHeadroomRecovery(harness.now, sourceCeiling);
+            harness.runAtFps(20.0, 3s);
+            require(!harness.diagnostics.contains("adaptive-efficiency-probe") &&
+                    harness.scheduler.validatedGenerationLimit() == 4,
+                "invalid source evidence must not request a Headroom recovery trial");
+        }
+    }
+
+    void testHeadroomRecoveryDoesNotSurviveHistoryReset() {
+        Harness harness(90, 5, false, AdaptiveRecoveryPolicy::OrderedSdr);
+        harness.start();
+        harness.runAtFps(20.0, 30s);
+        require(harness.scheduler.validatedGenerationLimit() == 4,
+            "precondition: history reset starts from a qualified higher workload");
+        harness.scheduler.requestHeadroomRecovery(harness.now, 45);
+        harness.scheduler.beginHistoryWarmup(2, false);
+        for (size_t frame = 0; frame < 2; ++frame) {
+            harness.now += 50ms;
+            harness.scheduler.consumeHistoryWarmupFrame(harness.now);
+        }
+        harness.runAtFps(20.0, 3s);
+        require(!harness.diagnostics.contains("adaptive-efficiency-probe"),
+            "fresh source history must invalidate a pending Headroom trial from the old scene");
+        harness.scheduler.requestHeadroomRecovery(harness.now - 3s, 45);
+        harness.runAtFps(20.0, 3s);
+        require(!harness.diagnostics.contains("adaptive-efficiency-probe"),
+            "expired Headroom hints must not trigger a delayed workload trial");
+        harness.scheduler.requestHeadroomRecovery(harness.now, 45);
+        require(harness.frameAtFps(20).size() == 1 &&
+                harness.diagnostics.count("adaptive-efficiency-probe") == 1,
+            "invalidating stale hints must still allow a later fresh release trial");
+    }
+
+    void testHeadroomCapDefersImpossibleEfficiencyProbe() {
+        for (const uint32_t target : {90U, 120U, 144U}) {
+            for (const size_t multiplier : {3U, 4U, 5U}) {
+                const double sourceFps = static_cast<double>(target) / multiplier;
+                if (sourceFps < 20.0)
+                    continue;
+                Harness harness(target, multiplier, true, AdaptiveRecoveryPolicy::OrderedSdr);
+                harness.headroomSourceCapFps = sourceFps;
+                harness.start();
+                harness.runAtFps(sourceFps, 45s);
+                require(harness.scheduler.validatedGenerationLimit() == multiplier - 1 &&
+                        harness.scheduler.snapshot().stableCadenceLimit == multiplier - 1,
+                    "Headroom-capped fixture did not qualify the target-rate workload");
+                require(!harness.diagnostics.contains("adaptive-efficiency-probe"),
+                    "active Headroom cap allowed a downshift that cannot reach target");
+
+                // The same scene can recover when Headroom releases its cap.
+                // A skipped trial must not create rejection history or prevent
+                // the existing release hint from testing a useful lower load.
+                harness.headroomSourceCapFps = 0.0;
+                const double recoveredFps = static_cast<double>(target) / (multiplier - 1);
+                harness.scheduler.requestHeadroomRecovery(harness.now, recoveredFps);
+                auto plan = harness.frameAtFps(sourceFps);
+                require(plan.size() == multiplier - 2,
+                    "Headroom cap release did not permit a useful downshift");
+                harness.runAtFps(recoveredFps, 2s);
+                require(harness.scheduler.validatedGenerationLimit() == multiplier - 2 &&
+                        harness.diagnostics.contains("adaptive-efficiency-probe-accepted"),
+                    "Headroom cap release could not retain a proven lower workload");
+            }
+        }
+    }
+
+    void testHeadroomCapCancelsImpossibleActiveEfficiencyProbe() {
+        for (const bool sampling : {false, true}) {
+            Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr);
+            harness.start();
+            for (size_t frame = 0; frame < 2400; ++frame) {
+                harness.frameAtFps(40.0);
+                if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                    break;
+            }
+            require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit == 1,
+                "cap-change fixture did not start a lower-load trial");
+            if (sampling)
+                harness.runAtFps(60.0, 300ms);
+            harness.headroomSourceCapFps = 40.0;
+            const auto plan = harness.frameAtFps(40.0);
+            require(plan.size() == 2 &&
+                    !harness.scheduler.snapshot().efficiencyProbeGenerationLimit &&
+                    harness.scheduler.validatedGenerationLimit() == 2,
+                "tightened Headroom cap did not restore the proven workload immediately");
+            require(harness.diagnostics.contains("adaptive-efficiency-probe-cancelled") &&
+                    !harness.diagnostics.contains("adaptive-efficiency-probe-rejected"),
+                "intentional Headroom cap was recorded as a workload failure");
+            harness.headroomSourceCapFps = 0.0;
+            harness.scheduler.requestHeadroomRecovery(harness.now, 60.0);
+            harness.frameAtFps(40.0);
+            harness.runAtFps(60.0, 2s);
+            require(harness.scheduler.validatedGenerationLimit() == 1,
+                "cancelled Headroom trial prevented later target-preserving recovery");
+        }
+    }
+
+    void testHeadroomCapAllowsReachableEfficiencyProbe() {
+        for (const double cap : {60.0, 0.0, -1.0,
+                std::numeric_limits<double>::infinity(),
+                std::numeric_limits<double>::quiet_NaN()}) {
+            Harness harness(120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr);
+            harness.headroomSourceCapFps = cap;
+            harness.start();
+            for (size_t frame = 0; frame < 2400; ++frame) {
+                harness.frameAtFps(40.0);
+                if (harness.scheduler.snapshot().efficiencyProbeGenerationLimit)
+                    break;
+            }
+            require(harness.scheduler.snapshot().efficiencyProbeGenerationLimit == 1,
+                "nonbinding or invalid Headroom cap blocked an ordinary downshift");
+            harness.runAtFps(60.0, 2s);
+            require(harness.scheduler.validatedGenerationLimit() == 1,
+                "reachable downshift could not retain a proven lower workload");
+        }
+    }
+
     void testSmoothCadenceDownshiftsWhenLowerLoadPreservesTarget() {
         Harness harness(
             120, 3, true, AdaptiveRecoveryPolicy::OrderedSdr
@@ -6886,6 +7066,12 @@ int main() {
         {"delayed Fractional handoff uses fresh probe", testDelayedFractionalHandoffUsesFreshProbe},
         {"accepted Fractional cadence checks VRR pacing cost", testAcceptedFractionalCadenceChecksVrrPacingCost},
         {"unreachable integer pacing does not delay higher loads", testUnreachableIntegerPacingDoesNotDelayHigherWorkloads},
+        {"Headroom release rechecks Fractional generated load", testHeadroomReleaseRechecksFractionalGeneratedLoad},
+        {"Headroom release handles low and invalid source evidence", testHeadroomReleaseHandlesLowAndInvalidSourceEvidence},
+        {"Headroom recovery expires with source history", testHeadroomRecoveryDoesNotSurviveHistoryReset},
+        {"Headroom cap defers impossible downshifts", testHeadroomCapDefersImpossibleEfficiencyProbe},
+        {"Headroom cap cancels impossible active downshifts", testHeadroomCapCancelsImpossibleActiveEfficiencyProbe},
+        {"Headroom cap permits reachable downshifts", testHeadroomCapAllowsReachableEfficiencyProbe},
         {"Smooth Cadence accepts target-preserving downshift", testSmoothCadenceDownshiftsWhenLowerLoadPreservesTarget},
         {"Smooth Cadence downshift requires sustained target", testSmoothCadenceDownshiftRequiresSustainedTarget},
         {"Smooth Cadence downshift requires complete delivery", testSmoothCadenceDownshiftNeedsCompleteSampleDelivery},

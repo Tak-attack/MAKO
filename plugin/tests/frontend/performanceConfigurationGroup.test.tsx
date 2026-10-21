@@ -6,6 +6,19 @@ vi.mock("@decky/ui", () => ({
   PanelSectionRow: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
+  DropdownItem: ({ label, selectedOption, rgOptions, onChange }: any) => (
+    <select
+      aria-label={label}
+      value={selectedOption}
+      onChange={(e) => onChange({ data: Number(e.target.value) })}
+    >
+      {rgOptions.map((option: any) => (
+        <option key={option.data} value={option.data}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  ),
   SliderField: ({
     label,
     disabled,
@@ -78,6 +91,50 @@ import { getDefaults } from "../../src/config/configSchema";
 afterEach(cleanup);
 
 describe("Performance Settings", () => {
+  test("headroom is opt-in, presets are bounded, and enabling it clears competing recovery", () => {
+    window.SP_REACT = React;
+    const onConfigUpdate = vi.fn(async () => undefined);
+    const onConfigChange = vi.fn(async () => undefined);
+    const config = getDefaults();
+    const view = render(
+      <PerformanceConfigurationGroup
+        config={config}
+        onConfigChange={onConfigChange}
+        onConfigUpdate={onConfigUpdate}
+      />,
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "Reserved GPU capacity" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByText("GPU Headroom"));
+    expect(onConfigUpdate).toHaveBeenCalledWith({
+      gpu_headroom_percent: 10,
+      dynamic_cadence_recovery: false,
+    });
+    view.rerender(
+      <PerformanceConfigurationGroup
+        config={{ ...config, gpu_headroom_percent: 10 }}
+        onConfigChange={onConfigChange}
+        onConfigUpdate={onConfigUpdate}
+      />,
+    );
+    const options = screen.getByRole("combobox", {
+      name: "Reserved GPU capacity",
+    });
+    expect(
+      [...options.querySelectorAll("option")].map((o) => o.textContent),
+    ).toEqual(["5%", "10%", "15%", "20%"]);
+    fireEvent.change(options, { target: { value: "20" } });
+    expect(onConfigUpdate).toHaveBeenLastCalledWith({
+      gpu_headroom_percent: 20,
+      dynamic_cadence_recovery: false,
+    });
+    fireEvent.click(screen.getByText("GPU Headroom"));
+    expect(onConfigUpdate).toHaveBeenLastCalledWith({
+      gpu_headroom_percent: 0,
+    });
+  });
+
   test("groups Ultra Performance, Flow Scale, and FP16 without duplicating the lighter model", () => {
     window.SP_REACT = React;
     const onConfigChange = vi.fn(async () => undefined);

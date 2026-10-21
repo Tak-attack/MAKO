@@ -949,6 +949,24 @@ void testBridgeStagedReadiness() {
 }
 
 int main() {
+    {
+        mako::layer::RealFramePacer pacer;
+        using Clock = mako::layer::RealFramePacer::Clock;
+        const auto origin = Clock::time_point{} + std::chrono::hours(100000);
+        expect(pacer.schedule(origin, 40) == origin, "initial cap does not wait");
+        const auto arrival = origin + std::chrono::milliseconds(2);
+        const auto changed = pacer.schedule(arrival, 38, true);
+        const auto interval = std::chrono::duration<double>(changed - origin).count();
+        expect(interval > .026 && interval < .027,
+            "small governor rate change preserves the outstanding source boundary");
+        const auto restored = pacer.schedule(changed + std::chrono::milliseconds(2), 40, true);
+        const auto restoredInterval = std::chrono::duration<double>(restored - changed).count();
+        expect(restoredInterval > .024 && restoredInterval < .026,
+            "governor relaxation preserves source cadence without a free frame");
+        expect(pacer.schedule(restored, 0, true) == restored,
+            "disabling a governed cap releases the source immediately");
+    }
+
     testLongSessionDeadlineBounds();
     testFractionalUsesExistingSourceDeadline();
     testFixedUsesExistingSourceDeadline();

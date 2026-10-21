@@ -1593,6 +1593,7 @@ describe("Configuration controls", () => {
 
     expect(onConfigUpdate).toHaveBeenCalledWith({
       dynamic_cadence_recovery: true,
+      gpu_headroom_percent: 0,
       adaptive_auto_base_fps_cap: false,
       adaptive_fractional_real_frame_priority: "auto",
       base_fps_cap: 0,

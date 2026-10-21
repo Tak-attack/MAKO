@@ -76,10 +76,19 @@ Enable Scaling before launching. Set Steam's **Game Resolution** to the display 
 | --- | --- |
 | **Ultra Performance (Restart)** | Uses 70% Flow Scale, the lighter FG model, and LS1 Performance when scaling is enabled. |
 | **Flow Scale** | 25–100% motion-estimation resolution; lower saves GPU work at a quality cost. Ultra Performance fixes it at 70%. |
+| **GPU Headroom** | Live, Frame Generation-only control that reduces real FPS to target spare GPU capacity; see below. Off by default. |
 | **Lighter FG Model** | Reduces GPU work, with potentially more artifacts; forced on by Ultra Performance. |
 | **Allow FP16 (Restart)** | Global precision: FP16 for supported Frame Generation models and MAKO Scaler; off uses FP32. LS1 always uses FP32. |
 | **Lossless.dll Path (Restart)** | Global override; leave empty for automatic detection. |
 | **GPU (Restart)** | Selects a GPU; multi-GPU Frame Generation is unsupported. |
+
+### GPU Headroom
+
+Enable **GPU Headroom** under **Performance** and choose a 5%, 10%, 15% or 20% reserve. Enabling it selects 10%, targeting roughly 90% utilization of the game's GPU, including the compositor and other applications. The toggle and reserve apply live while Frame Generation is active. Off removes its additional cap and stops its utilization sampling.
+
+MAKO smooths readings and gradually reduces real FPS when usage stays high. Adaptive can use more generated frames within its qualified multiplier ceiling; Fixed keeps its multiplier, so output FPS can fall too. Adaptive is preferable when you want to regain real FPS as scenes become lighter. Brief spikes can still reach 100%, and the reserve is not a power or temperature limit.
+
+Supported AMD telemetry must be readable for the game's GPU; Gamescope is optional. Missing readings restore ordinary pacing. Existing caps and a minimum real-frame rate limit how much load MAKO can remove. GPU Headroom does not independently control scaling or shaders. It is mutually exclusive with Dynamic Cadence Recovery, and each power profile can save its own reserve. See the [setting reference](CONFIGURATION-REFERENCE.md#gpu-headroom) for floors and compatibility limits.
 
 ### Qt Shaders and compatibility controls
 
@@ -106,7 +115,7 @@ If the editor requests an update, install the matching Renderer. Custom effects 
 Under **Compatibility**, keep defaults unless a game needs a change:
 
 - **Auto-disable Frame Generation by Refresh Rate / Refresh Rate Threshold:** pauses generation and Adaptive caps at or below the chosen Gamescope refresh; a manual Base FPS Cap remains.
-- **Dynamic Cadence Recovery:** off by default. Rechecks games that change native FPS by briefly reducing generated work; these checks can lower output FPS or cause hitches under sustained GPU load. Clears base caps and resets Real Frame Priority. Enabling a cap or changing priority turns Recovery off.
+- **Dynamic Cadence Recovery:** off by default. Rechecks games that change native FPS by briefly reducing generated work; these checks can lower output FPS or cause hitches under sustained GPU load. Clears base caps and GPU Headroom, and resets Real Frame Priority. Enabling a cap or GPU Headroom, or changing priority, turns Recovery off.
 - **Cadence Probe Interval:** 0.1–3 seconds between recovery checks; default 2 seconds. Shorter intervals react sooner but can hitch more often.
 - **Game Swapchain Images (Restart):** may help games that fail to start, with less generated-frame headroom.
 

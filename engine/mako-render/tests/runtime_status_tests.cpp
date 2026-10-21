@@ -42,6 +42,13 @@ namespace {
 }
 
 int main() {
+    mako::layer::RuntimeStatusRecord headroomStatus;
+    headroomStatus.appliedProfile.gpu_headroom_percent = 15;
+    headroomStatus.gpuHeadroomState = "frame-rate-floor";
+    const auto headroomJson = mako::layer::runtimeStatusJson(headroomStatus, 1, 2, 3, "frame-generation", 4);
+    expect(headroomJson.find("\"gpu_headroom_percent\":15") != std::string::npos &&
+        headroomJson.find("\"gpu_headroom_state\":\"frame-rate-floor\"") != std::string::npos,
+        "Headroom configuration and operational limitation must be distinct in runtime status");
     ls::GameConf applied;
     applied.name = "game \"profile\"";
     applied.multiplier = 2;

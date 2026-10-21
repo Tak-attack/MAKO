@@ -226,6 +226,7 @@ class RuntimeProfileSnapshot(TypedDict):
     hdr_quality: str
     frame_generation_refresh_threshold: int
     base_fps_cap: int
+    gpu_headroom_percent: int
     adaptive: bool
     adaptive_auto_base_fps_cap: bool
     adaptive_fractional_real_frame_priority: str
@@ -295,6 +296,7 @@ class RuntimeContextState(TypedDict):
     pending: RuntimePendingState
     applied_generated_capacity: int
     frame_generation_active: bool
+    gpu_headroom_state: str
     spatial_scaling: RuntimeSpatialScalingState
     requested: RuntimeProfileSnapshot
     applied: RuntimeProfileSnapshot

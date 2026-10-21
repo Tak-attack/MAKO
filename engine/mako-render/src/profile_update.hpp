@@ -33,6 +33,7 @@ namespace mako::layer {
         bool generationModeChanged{false};
         bool fixedMultiplierChanged{false};
         bool baseFpsCapChanged{false};
+        bool gpuHeadroomChanged{false};
         bool dynamicCadenceProbeIntervalChanged{false};
         bool spatialScalingChanged{false};
         bool spatialScalingDormantUpdate{false};
@@ -91,7 +92,7 @@ namespace mako::layer {
         return decision.generationPolicyChanged ||
             decision.generationModeChanged ||
             decision.fixedMultiplierChanged ||
-            decision.baseFpsCapChanged;
+            decision.baseFpsCapChanged || decision.gpuHeadroomChanged;
     }
 
     [[nodiscard]] inline std::chrono::milliseconds
@@ -449,7 +450,8 @@ namespace mako::layer {
                         (profile.target_fps < *gamescopeRefreshHz ||
                          (compositorOutputTiming &&
                           profile.target_fps == *gamescopeRefreshHz))));
-        return !profile.dynamic_cadence_recovery && profile.base_fps_cap > 0 &&
+        return !profile.dynamic_cadence_recovery &&
+            (profile.base_fps_cap > 0 || profile.gpu_headroom_percent > 0) &&
             profile.multiplier >= ls::GameConfLimits::minimumMultiplier &&
             profile.multiplier <= ls::GameConfLimits::maximumMultiplier &&
             gamescopeRefreshHz &&
@@ -826,8 +828,11 @@ namespace mako::layer {
     /// explicit priorities and Steady retain their existing output policy.
     [[nodiscard]] inline GamescopeBridgeOutputPolicy gamescopeBridgeOutputPolicy(
             const ls::GameConf& profile, const std::optional<uint32_t> refreshHz,
-            const AdaptiveSchedulerSnapshot& scheduler = {}) {
-        const double baseFpsCap = effectiveBaseFpsCap(profile, refreshHz);
+            const AdaptiveSchedulerSnapshot& scheduler = {},
+            const double gpuHeadroomCap = 0.0) {
+        double baseFpsCap = effectiveBaseFpsCap(profile, refreshHz);
+        if (gpuHeadroomCap > 0.0)
+            baseFpsCap = baseFpsCap > 0.0 ? std::min(baseFpsCap, gpuHeadroomCap) : gpuHeadroomCap;
         const bool nativeAutomatic = fractionalNativePresentationEligible(profile) &&
             scheduler.phase == AdaptiveSchedulerPhase::NearTargetNative &&
             scheduler.generationLimit == 0;
@@ -1055,6 +1060,9 @@ namespace mako::layer {
         const bool baseFpsCapChanged =
             effectiveBaseFpsCap(current, displayRefreshHz) !=
                 effectiveBaseFpsCap(applied, displayRefreshHz);
+        const bool gpuHeadroomChanged = current.gpu_headroom_percent != applied.gpu_headroom_percent &&
+            (effectiveFrameGenerationEnabled(current, displayRefreshHz) ||
+             effectiveFrameGenerationEnabled(applied, displayRefreshHz));
         const bool dynamicCadenceProbeIntervalChanged =
             current.dynamic_cadence_probe_interval_seconds !=
                 applied.dynamic_cadence_probe_interval_seconds &&
@@ -1085,7 +1093,7 @@ namespace mako::layer {
             refreshRateThresholdChanged ||
                 generationPolicyChanged ||
                 generationModeChanged || fixedMultiplierChanged ||
-                baseFpsCapChanged || dynamicCadenceProbeIntervalChanged ||
+                baseFpsCapChanged || gpuHeadroomChanged || dynamicCadenceProbeIntervalChanged ||
                 current.hdr_quality != applied.hdr_quality ||
                 spatialScalingLiveRebuild || frameGenerationPrivateRebuild;
 
@@ -1107,6 +1115,7 @@ namespace mako::layer {
                 .generationModeChanged = generationModeChanged,
                 .fixedMultiplierChanged = fixedMultiplierChanged,
                 .baseFpsCapChanged = baseFpsCapChanged,
+                .gpuHeadroomChanged = gpuHeadroomChanged,
                 .dynamicCadenceProbeIntervalChanged =
                     dynamicCadenceProbeIntervalChanged,
                 .spatialScalingChanged = spatialScalingChanged,

@@ -215,6 +215,13 @@ if(BUILD_TESTING)
     add_test(NAME runtime-health COMMAND mako-runtime-health-tests)
     mako_register_portable_policy_test(mako-runtime-health-tests runtime-health)
 
+    add_executable(mako-gpu-headroom-tests
+        "tests/gpu_headroom_tests.cpp" "src/runtime_health.cpp")
+    target_link_libraries(mako-gpu-headroom-tests PRIVATE mako-common Threads::Threads)
+    target_include_directories(mako-gpu-headroom-tests PRIVATE "src")
+    add_test(NAME gpu-headroom COMMAND mako-gpu-headroom-tests)
+    mako_register_portable_policy_test(mako-gpu-headroom-tests gpu-headroom)
+
     add_executable(mako-device-selection-tests
         "tests/device_selection_tests.cpp")
     target_include_directories(mako-device-selection-tests

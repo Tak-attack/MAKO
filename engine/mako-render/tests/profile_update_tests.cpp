@@ -43,6 +43,33 @@ namespace {
 
 int main() {
     {
+        ls::GameConf fixed;
+        fixed.multiplier = 2;
+        auto enabled = fixed;
+        enabled.gpu_headroom_percent = 10;
+        auto plan = planProfileUpdate(fixed, enabled, 2, true);
+        expect(plan.decision.gpuHeadroomChanged && plan.decision.action == ProfileUpdateAction::ApplyLive &&
+            !plan.decision.frameGenerationPrivateRebuild && !plan.decision.generationPolicyChanged,
+            "Headroom is live without private resource or scheduler replacement");
+        expect(profileUpdateInvalidatesTransientGenerationRecovery(plan.decision),
+            "Headroom toggle starts a new source pacing episode");
+        expect(baseCapPacesOutputs(enabled, 35, true, 90),
+            "Fixed headroom participates in existing evenly spaced output preparation");
+        expect(gamescopeBridgeOutputPolicy(enabled, 90, {}, 35).outputFps == 70,
+            "Owned output clocks follow Fixed headroom's actual source cap");
+        enabled.adaptive = true;
+        enabled.target_fps = 90;
+        expect(gamescopeBridgeOutputPolicy(enabled, 90, {}, 35).outputFps == 90,
+            "Adaptive retains its generated output target");
+        fixed.frame_generation_enabled = false;
+        enabled = fixed;
+        enabled.gpu_headroom_percent = 20;
+        plan = planProfileUpdate(fixed, enabled, 2, true);
+        expect(!plan.decision.gpuHeadroomChanged && plan.appliedProfile.gpu_headroom_percent == 20,
+            "Headroom is saved dormant with Frame Generation disabled");
+    }
+
+    {
         using Q = ls::HdrQuality;
         struct QualityTransition {
             Q from;

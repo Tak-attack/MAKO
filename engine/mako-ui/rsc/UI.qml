@@ -600,23 +600,6 @@ ApplicationWindow {
                     }
 
                     GroupEntry {
-                        title: t.flowScale
-                        description: t.flowScaleDesc
-                        visible: backend.frame_generation_provisioned
-                        enabled: !backend.ultra_performance
-
-                        FlowSlider {
-                            Layout.fillWidth: true
-
-                            from: backend.minimum_flow_scale
-                            to: backend.maximum_flow_scale
-
-                            value: backend.flow_scale
-                            onUpdate: value => backend.flow_scale = value
-                        }
-                    }
-
-                    GroupEntry {
                         title: t.gpu
                         description: t.gpuDesc
                         visible: backend.frame_generation_provisioned
@@ -998,6 +981,45 @@ ApplicationWindow {
 
                             checked: backend.ultra_performance
                             onToggled: backend.ultra_performance = checked
+                        }
+                    }
+
+                    GroupEntry {
+                        title: t.flowScale
+                        description: t.flowScaleDesc
+                        visible: backend.frame_generation_provisioned
+                        enabled: !backend.ultra_performance
+
+                        FlowSlider {
+                            Layout.fillWidth: true
+
+                            from: backend.minimum_flow_scale
+                            to: backend.maximum_flow_scale
+
+                            value: backend.flow_scale
+                            onUpdate: value => backend.flow_scale = value
+                        }
+                    }
+
+                    GroupEntry {
+                        title: t.gpuHeadroom
+                        description: t.gpuHeadroomDesc
+                        CheckBox {
+                            Layout.alignment: Qt.AlignRight
+                            checked: backend.gpu_headroom_percent > 0
+                            onToggled: backend.gpu_headroom_percent = checked ? 10 : 0
+                        }
+                    }
+                    GroupEntry {
+                        title: t.gpuHeadroomReserve
+                        description: t.gpuHeadroomTradeoff
+                        visible: backend.gpu_headroom_percent > 0
+                        ComboBox {
+                            Layout.fillWidth: true
+                            property var values: backend.gpu_headroom_presets.slice(1)
+                            model: values.map(value => value + "%")
+                            currentIndex: values.indexOf(backend.gpu_headroom_percent)
+                            onActivated: index => backend.gpu_headroom_percent = values[index]
                         }
                     }
 

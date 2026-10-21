@@ -3081,7 +3081,7 @@ namespace {
                     )
                     : std::span<const VkSemaphore>{};
 
-                auto& context = layer_info->root.getSwapchainContext(swapchain);
+                auto& context = layer_info->root.getSwapchainContext(swapchain, it->second);
                 presentingContextId = context.diagnosticsId();
                 result = context.present(it->second,
                     queue, swapchain,

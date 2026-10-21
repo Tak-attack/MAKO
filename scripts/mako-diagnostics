@@ -249,7 +249,7 @@ live_recreation_record="$renderer_prefix present diagnostics: operation=(generat
 add_pattern "$live_recreation_record"
 # Periodic health and collection failures are useful for every failure mode,
 # including memory/thermal degradation outside frame-generation presets.
-add_pattern "$renderer_prefix present diagnostics: operation=(runtime-health|present-phase-summary)"
+add_pattern "$renderer_prefix present diagnostics: operation=(runtime-health|present-phase-summary|gpu-headroom|adaptive-efficiency-probe-cancelled)"
 
 for preset in "${presets[@]}"; do
   case "$preset" in

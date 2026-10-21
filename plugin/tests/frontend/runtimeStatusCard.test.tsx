@@ -29,6 +29,58 @@ import { EMPTY_RUNTIME_SCALING_UI_STATE } from "../../src/utils/runtimeScalingUt
 afterEach(cleanup);
 
 describe("authoritative live status", () => {
+  test("reports unavailable headroom and capacity floors without claiming a hard cap", () => {
+    window.SP_REACT = React;
+    const state = {
+      ...EMPTY_RUNTIME_SCALING_UI_STATE,
+      hasContext: true,
+      frameGenerationEnabled: true,
+      gpuHeadroomPercent: 15,
+      gpuHeadroomState: "telemetry-unavailable",
+    };
+    const view = render(<RuntimeStatusCard runtimeState={state} />);
+    expect(screen.getByText(/waiting for supported GPU readings/)).toBeTruthy();
+    for (const gpuHeadroomState of [
+      "unavailable",
+      "telemetry-unavailable",
+      "frame-rate-floor",
+    ]) {
+      view.rerender(
+        <RuntimeStatusCard
+          activeConfig={{ ...getDefaults(), gpu_headroom_percent: 15 }}
+          runtimeState={{
+            ...state,
+            frameGenerationEnabled: false,
+            gpuHeadroomState,
+          }}
+        />,
+      );
+      expect(screen.queryByText(/GPU Headroom/)).toBeNull();
+    }
+    view.rerender(
+      <RuntimeStatusCard
+        runtimeState={{ ...state, gpuHeadroomState: "frame-rate-floor" }}
+      />,
+    );
+    expect(screen.queryByText(/waiting for supported GPU readings/)).toBeNull();
+    expect(screen.getByText(/reached the real-frame floor/)).toBeTruthy();
+    view.rerender(
+      <RuntimeStatusCard runtimeState={{ ...state, gpuHeadroomPercent: 0 }} />,
+    );
+    expect(screen.queryByText(/GPU Headroom/)).toBeNull();
+    view.rerender(
+      <RuntimeStatusCard
+        activeConfig={{ ...getDefaults(), gpu_headroom_percent: 15 }}
+        runtimeState={{
+          ...state,
+          gpuHeadroomPercent: 0,
+          gpuHeadroomState: "unavailable",
+        }}
+      />,
+    );
+    expect(screen.getByText(/waiting for supported GPU readings/)).toBeTruthy();
+  });
+
   test("shows applied Frame Generation and scaling despite disabled saved settings", () => {
     window.SP_REACT = React;
     const { container } = render(

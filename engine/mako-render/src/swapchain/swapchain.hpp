@@ -18,6 +18,7 @@
 #include "presentation_policy.hpp"
 #include "present_diagnostics.hpp"
 #include "runtime_status.hpp"
+#include "runtime_health.hpp"
 #include "runtime_transition.hpp"
 #include "spatial_scaler.hpp"
 #include "spatial_scaling_policy.hpp"
@@ -147,6 +148,17 @@ namespace mako::layer {
             GamescopePresentationFeedback gamescopePresentationFeedback,
             uint64_t runtimeStateRevision,
             bool swapchainMaintenance1Enabled);
+
+        [[nodiscard]] bool needsGpuLoadMonitor() const {
+            return this->profile.gpu_headroom_percent > 0 &&
+                this->profile.frame_generation_enabled && this->instance &&
+                !this->gpuLoadMonitorInitialized;
+        }
+        void setGpuLoadMonitor(std::shared_ptr<present_diagnostics::GpuLoadMonitor> monitor) {
+            this->gpuLoadMonitor = std::move(monitor);
+            // An unavailable device or failed setup must not retry every frame.
+            this->gpuLoadMonitorInitialized = true;
+        }
 
         /// present a frame
         /// @param vk vulkan instance
@@ -468,6 +480,11 @@ namespace mako::layer {
         GamescopePresentationFeedback gamescopePresentationFeedback;
         FixedRefreshBudget fixedRefreshBudget;
         RealFramePacer realFramePacer;
+        std::shared_ptr<present_diagnostics::GpuLoadMonitor> gpuLoadMonitor;
+        bool gpuLoadMonitorInitialized{false};
+        GpuHeadroomController gpuHeadroom;
+        GpuHeadroomController::Result gpuHeadroomResult;
+        std::optional<std::chrono::steady_clock::time_point> lastGpuHeadroomDiagnostic;
         // Actual scheduled batch, including the real image; never the user's
         // unproven maximum multiplier. Reset before native/history fallbacks.
         size_t bridgeOutputBatchSize{1};

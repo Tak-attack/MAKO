@@ -62,6 +62,17 @@ class ConfigurationBoundaryTests(unittest.TestCase):
             "/home/deck/.local/share/mako/vkbasalt.d"
         )
 
+    def test_gpu_headroom_presets_and_recovery_exclusion(self):
+        for reserve in (0, 5, 10, 15, 20):
+            value = ConfigurationManager.validate_config({"gpu_headroom_percent": reserve})
+            self.assertEqual(value["gpu_headroom_percent"], reserve)
+        for invalid in (-5, 7, 21, 5.5, True, "ten"):
+            with self.subTest(invalid=invalid), self.assertRaises((ValueError, TypeError)):
+                ConfigurationManager.validate_config({"gpu_headroom_percent": invalid})
+        value = ConfigurationManager.validate_config({"gpu_headroom_percent": 15, "dynamic_cadence_recovery": True})
+        self.assertEqual(value["gpu_headroom_percent"], 0)
+        self.assertEqual(ConfigurationManager.validate_config({})["gpu_headroom_percent"], 0)
+
     def test_default_profile_name_comes_from_the_shared_contract(self):
         self.assertEqual(DEFAULT_PROFILE_NAME, SHARED_DEFAULT_PROFILE_NAME)
         self.assertEqual(DEFAULT_PROFILE_NAME, "mako")

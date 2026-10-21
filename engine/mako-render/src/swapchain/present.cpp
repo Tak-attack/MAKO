@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <locale>
 #include <optional>
 #include <sstream>
 #include <span>
@@ -143,6 +144,57 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
 
     const auto limiterArrival = DiagnosticsClock::now();
     this->applyGamescopeFocus(limiterArrival);
+    if (this->profile.gpu_headroom_percent > 0 || this->gpuHeadroomResult.state != "off") {
+        const bool headroomEnabled = this->profile.gpu_headroom_percent > 0 &&
+            !this->steamMenuSuspended && !this->destinationImages.empty() &&
+            !this->recoveryState.orderedAcquireRecovery.active() &&
+            effectiveFrameGenerationEnabled(this->profile, this->gamescopeRefreshHz);
+        const auto headroomLoad = headroomEnabled && this->gpuLoadMonitor
+            ? this->gpuLoadMonitor->latest() : GpuHeadroomLoad{};
+        // Sample first: a worker publication between the old arrival clock
+        // and this load must not look like invalid future telemetry.
+        const auto headroomNow = DiagnosticsClock::now();
+        const double headroomFloor = std::max(20.0, this->profile.adaptive
+            ? static_cast<double>(this->profile.target_fps) / static_cast<double>(
+                std::max(size_t{1}, std::min(this->profile.adaptive_max_multiplier,
+                    std::min(this->destinationImages.size(),
+                        this->adaptiveOrderedWsiGeneratedCapacityLimit.value_or(this->destinationImages.size())) + 1)))
+            : 20.0);
+        const auto previousHeadroom = this->gpuHeadroomResult;
+        const double previousHeadroomCeiling = this->gpuHeadroom.sourceCeilingFps();
+        this->gpuHeadroomResult = this->gpuHeadroom.update(headroomNow,
+            headroomEnabled ? this->profile.gpu_headroom_percent : 0, headroomLoad, headroomFloor);
+        if (!headroomEnabled && this->profile.gpu_headroom_percent > 0)
+            this->gpuHeadroomResult.state = "inactive";
+        if (this->profile.adaptive && this->adaptiveScheduler && previousHeadroom.capFps > 0 &&
+                this->gpuHeadroomResult.capFps == 0 &&
+                (this->gpuHeadroomResult.state == "within-budget" ||
+                 this->gpuHeadroomResult.state == "telemetry-unavailable"))
+            this->adaptiveScheduler->requestHeadroomRecovery(headroomNow, previousHeadroomCeiling);
+        if (previousHeadroom.state != this->gpuHeadroomResult.state)
+            this->publishRuntimeStatus("gpu-headroom");
+        if ((previousHeadroom.capFps > 0) != (this->gpuHeadroomResult.capFps > 0))
+            this->realFramePacer.reset();
+        if (presentDiagnosticsEnabled() && this->profile.gpu_headroom_percent > 0 &&
+                (!this->lastGpuHeadroomDiagnostic ||
+                 limiterArrival - *this->lastGpuHeadroomDiagnostic >= std::chrono::seconds(2))) {
+            this->lastGpuHeadroomDiagnostic = limiterArrival;
+            std::ostringstream line;
+            line.imbue(std::locale::classic());
+            line << "MAKO Renderer: present diagnostics: operation=gpu-headroom"
+                 << " context=" << this->diagnosticsState.contextId
+                 << " state=" << this->gpuHeadroomResult.state
+                 << " reserve_percent=" << this->profile.gpu_headroom_percent
+                 << " target_utilization_percent=" << 100 - this->profile.gpu_headroom_percent
+                 << " gpu_scope=application-device gpu_metrics_scope=whole-device"
+                 << " measured_utilization_percent=";
+            if (headroomLoad.percent) line << *headroomLoad.percent;
+            else line << "unknown";
+            line << " source_cap_fps=" << this->gpuHeadroomResult.capFps
+                 << " source_floor_fps=" << headroomFloor << '\n';
+            std::cerr << line.str();
+        }
+    }
     AdaptiveSchedulerSnapshot schedulerSnapshot;
     std::optional<size_t> handoffGenerationLimit;
     bool cadenceBaseCapEligible = false;
@@ -161,7 +213,7 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
             this->recoveryState.orderedAcquireRecovery.active(),
             this->gamescopeRefreshHz,
             this->gamescopePresentationFeedback
-        ) && !automaticBaseCapSuppressed;
+        ) && !automaticBaseCapSuppressed && this->gpuHeadroomResult.capFps <= 0;
         handoffGenerationLimit = smoothCadencePacerHandoffGenerationLimit(
             this->profile,
             this->privateOrderedTransport,
@@ -205,7 +257,8 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
                 : "scheduler-or-transport-guard-restored"
         );
     }
-    const bool plannedVrrProbePause = !handoffGenerationLimit &&
+    const bool plannedVrrProbePause = this->gpuHeadroomResult.capFps <= 0 &&
+        !handoffGenerationLimit &&
         smoothCadencePacerHandoffPlannedProbe(
             this->profile,
             this->privateOrderedTransport,
@@ -215,6 +268,8 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
             this->gamescopePresentationFeedback,
             this->smoothCadencePacerHandoff.activeGenerationLimit()
         );
+    if (this->gpuHeadroomResult.capFps > 0)
+        handoffGenerationLimit.reset();
     const auto handoff = this->smoothCadencePacerHandoff.update(
         limiterArrival, handoffGenerationLimit, plannedVrrProbePause
     );
@@ -240,7 +295,7 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
                     : "guard-restored-long-retry")
         );
     }
-    const double baseFpsCap = this->steamMenuSuspended || handoff.active
+    double baseFpsCap = this->steamMenuSuspended || handoff.active
         ? 0.0
         : cadenceBaseCap.framesPerSecond.value_or(
             effectiveBaseFpsCap(
@@ -248,8 +303,11 @@ VkResult Swapchain::present(const vk::Vulkan& vk,
                 this->gamescopePresentationFeedback, this->gamescopeRefreshHz
             )
         );
+    if (this->gpuHeadroomResult.capFps > 0)
+        baseFpsCap = baseFpsCap > 0 ? std::min(baseFpsCap, this->gpuHeadroomResult.capFps)
+            : this->gpuHeadroomResult.capFps;
     const auto limiterDeadline = this->realFramePacer.schedule(
-        limiterArrival, baseFpsCap
+        limiterArrival, baseFpsCap, this->gpuHeadroomResult.capFps > 0
     );
     const bool ownedTimingControlsOutput = this->presentTiming.controlsOutput(
         this->gamescopeRefreshHz.value_or(0));

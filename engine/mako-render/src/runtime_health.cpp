@@ -250,9 +250,7 @@ RuntimeHealthSample readRuntimeHealth(const RuntimeHealthPaths& paths) {
     if (paths.gpu) {
         const auto device = paths.sys / "dev/char" /
             (std::to_string(paths.gpu->major) + ':' + std::to_string(paths.gpu->minor)) / "device";
-        sample.gpuBusyPercent = readNumber<uint64_t>(device / "gpu_busy_percent");
-        if (sample.gpuBusyPercent && *sample.gpuBusyPercent > 100)
-            sample.gpuBusyPercent.reset();
+        sample.gpuBusyPercent = readGpuBusyPercent(paths);
         sample.vramUsedBytes = readNumber<uint64_t>(device / "mem_info_vram_used");
         sample.vramTotalBytes = readNumber<uint64_t>(device / "mem_info_vram_total");
         sample.gttUsedBytes = readNumber<uint64_t>(device / "mem_info_gtt_used");
@@ -274,6 +272,90 @@ RuntimeHealthSample readRuntimeHealth(const RuntimeHealthPaths& paths) {
         }
     }
     return sample;
+}
+
+std::optional<uint64_t> readGpuBusyPercent(const RuntimeHealthPaths& paths) {
+    if (!paths.gpu)
+        return {};
+    const auto device = paths.sys / "dev/char" /
+        (std::to_string(paths.gpu->major) + ':' + std::to_string(paths.gpu->minor)) / "device";
+    const auto value = readNumber<uint64_t>(device / "gpu_busy_percent");
+    return value && *value <= 100 ? value : std::nullopt;
+}
+
+GpuLoadMonitor::GpuLoadMonitor(RuntimeHealthPaths paths) : paths(std::move(paths)) {}
+
+GpuLoadMonitor::~GpuLoadMonitor() {
+    worker.request_stop();
+    wake.notify_all();
+}
+
+void GpuLoadMonitor::setEnabled(const bool value) {
+    std::lock_guard lock(mutex);
+    const bool requested = value && paths.gpu.has_value();
+    if (enabled == requested)
+        return;
+    // Start first so a thread-creation failure leaves the disabled state intact.
+    if (requested && !worker.joinable())
+        worker = std::jthread([this](std::stop_token stop) { run(stop); });
+    enabled = requested;
+    ++epoch;
+    packed.store(1023, std::memory_order_release);
+    wake.notify_all();
+}
+
+GpuHeadroomLoad GpuLoadMonitor::latest() const {
+    const auto value = packed.load(std::memory_order_acquire);
+    if ((value & 1023) == 1023)
+        return {};
+    return {Clock::time_point(std::chrono::milliseconds(value >> 10)),
+        static_cast<double>(value & 1023) / 10.0};
+}
+
+void GpuLoadMonitor::run(const std::stop_token stop) {
+    std::array<uint64_t, 10> samples{};
+    size_t count{}, index{};
+    uint64_t observedEpoch{};
+    std::unique_lock lock(mutex);
+    while (!stop.stop_requested()) {
+        wake.wait(lock, stop, [&] { return enabled; });
+        if (stop.stop_requested())
+            break;
+        if (epoch != observedEpoch) {
+            observedEpoch = epoch;
+            count = index = 0;
+        }
+        lock.unlock();
+        const auto started = Clock::now();
+        std::optional<uint64_t> value;
+        try { value = readGpuBusyPercent(paths); } catch (...) {}
+        const auto finished = Clock::now();
+        lock.lock();
+        if (!enabled || observedEpoch != epoch)
+            continue;
+        const bool slow = finished - started > std::chrono::milliseconds(25);
+        if (!value || slow) {
+            count = index = 0;
+            packed.store(1023, std::memory_order_release);
+        } else {
+            samples[index] = *value;
+            index = (index + 1) % samples.size();
+            count = std::min(count + 1, samples.size());
+            if (count == samples.size()) {
+                uint64_t total{};
+                for (const auto sample : samples) total += sample;
+                const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    finished.time_since_epoch()).count();
+                packed.store((static_cast<uint64_t>(milliseconds) << 10) | total,
+                    std::memory_order_release);
+            }
+        }
+        // Slightly varying intervals avoid phase-locking with display cadence.
+        // Missing/slow driver telemetry backs off without blocking a frame.
+        const auto delay = !value || slow ? std::chrono::milliseconds(5000)
+            : std::chrono::milliseconds(index % 2 ? 197 : 211);
+        wake.wait_for(lock, stop, delay, [&] { return !enabled || epoch != observedEpoch; });
+    }
 }
 
 std::chrono::milliseconds runtimeHealthDelay(const std::chrono::milliseconds normal,

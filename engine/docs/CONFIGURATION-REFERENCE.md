@@ -101,13 +101,24 @@ See [Adaptive validation](ADAPTIVE-VALIDATION.md) for scheduling details.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `gpu_headroom_percent` | `0` | GPU Headroom reserve: `0` (Off), `5`, `10`, `15`, or `20` percent. Live, Frame Generation only; see below. |
 | `flow_scale` | `0.8` | LSFG motion-estimation resolution from 0.25–1.0. Lower values reduce GPU cost and may reduce quality. |
 | `performance_mode` | `false` | Uses the lighter LSFG model. |
 | `ultra_performance` | `false` | Restart-bound lighter preset using 70% Flow Scale, the lighter model and LS1 Performance when scaling is enabled. Respects the global precision choice. |
 | `gpu` | Automatic | Optional GPU name, vendor/device ID, or PCI bus ID. Cross-GPU Frame Generation is unsupported. |
 | `pacing` | `none` | Compatibility field; `none` is the only supported value. |
 
-See [Runtime transitions](RUNTIME-TRANSITIONS.md) for when edits take effect.
+### GPU Headroom
+
+GPU Headroom is a soft utilization target for the application's Vulkan GPU. A 10% reserve aims for roughly 90% utilization. It requires readable AMD `gpu_busy_percent` telemetry for that exact DRM render node; unsupported devices, missing permissions and stale readings retain normal pacing. Gamescope is not required. Readings cover the whole GPU, including the compositor and other applications, so this is neither a game-only meter nor a power or temperature limit.
+
+Changes apply live while Frame Generation is active. Off stops Headroom sampling and removes only its additional cap; existing manual and Adaptive caps still apply. Brief spikes may reach 100%. Loading pauses and unavailable telemetry release the extra cap so stale measurements cannot keep throttling a new scene.
+
+Fixed retains its selected multiplier, so reserving capacity may lower both real and output FPS. Releasing Headroom does not force a native-frame probe: ordinary Fixed/FIFO pacing can retain that generated workload after the scene becomes lighter, including with Headroom Off. Use Adaptive when restoring a higher real-frame rate after load changes is important. Adaptive can use more generated frames within its configured ceiling and existing qualification rules. Neither policy changes model quality, Flow Scale or clocks. The controller never deliberately caps below 20 real FPS; Adaptive additionally respects `Target FPS / available maximum multiplier`. For example, a 90 FPS target with a 2× ceiling cannot trade away real frames below 45 FPS. A higher permitted multiplier allows more room but can increase interpolation artifacts and input latency. The utilization target is not guaranteed when generation is expensive, another process consumes the GPU, or the floor is reached.
+
+GPU Headroom is dormant with Frame Generation disabled or refresh-paused, during confirmed Steam-menu suspension, and during ordered-acquire recovery. It does not independently control scaling or shaders. Dynamic Cadence Recovery is mutually exclusive: enabling Headroom in either UI disables Recovery; enabling Recovery clears Headroom. Profile and separate power-mode settings preserve the reserve. Live Status distinguishes unavailable telemetry and a reached real-frame floor; diagnostics record decisions independently of the saved setting.
+
+See [Adaptive validation](ADAPTIVE-VALIDATION.md#gpu-headroom) for controller sampling and recovery, and [Runtime transitions](RUNTIME-TRANSITIONS.md) for when edits take effect.
 
 ## Explicit launch selection
 
@@ -118,6 +129,8 @@ MAKO_CONFIG="$HOME/.config/mako-render/conf.toml" MAKO_PROFILE="My game" ~/.loca
 `DISABLE_MAKO=1` bypasses MAKO. Native Remote Play uses `MAKO_FOLLOW_CURRENT_PROFILE=1` to follow a valid root `current_profile` selection on reload, falling back to `MAKO_PROFILE`. Ordinary game launchers use normal matching. See the [Remote Play lifecycle](../../plugin/docs/BACKEND-ARCHITECTURE.md#native-remote-play-lifecycle) for shared selection and shader-cache ownership.
 
 ## Environment-only configuration
+
+With `MAKO_ENV=1`, `MAKO_GPU_HEADROOM_PERCENT=0|5|10|15|20` selects the same reserve. Other values are rejected.
 
 Set `MAKO_ENV=1` to build one profile from environment variables instead of TOML:
 

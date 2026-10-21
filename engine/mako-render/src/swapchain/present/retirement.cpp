@@ -45,7 +45,8 @@ VkResult Swapchain::queuePresentWithRetirementFence(
         this->profile, this->gamescopeRefreshHz,
         this->adaptiveScheduler && !this->steamMenuSuspended &&
                 fractionalNativePresentationEligible(this->profile)
-            ? this->adaptiveScheduler->snapshot() : AdaptiveSchedulerSnapshot{});
+            ? this->adaptiveScheduler->snapshot() : AdaptiveSchedulerSnapshot{},
+        this->gpuHeadroomResult.capFps);
     VkPresentTimeGOOGLE presentTime{};
     VkPresentTimesInfoGOOGLE presentTimes{
         .sType = VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE,
@@ -79,7 +80,8 @@ VkResult Swapchain::queuePresentWithRetirementFence(
         const auto policy = gamescopeBridgeOutputPolicy(this->profile, ceiling,
             this->adaptiveScheduler && !this->steamMenuSuspended &&
                     fractionalNativePresentationEligible(this->profile)
-                ? this->adaptiveScheduler->snapshot() : AdaptiveSchedulerSnapshot{});
+                ? this->adaptiveScheduler->snapshot() : AdaptiveSchedulerSnapshot{},
+            this->gpuHeadroomResult.capFps);
         this->wsiPresentTimeline.observeSourceBatch(DiagnosticsClock::now(), this->frameState.realFrameIndex);
         const auto slot = this->wsiPresentTimeline.schedule(DiagnosticsClock::now(),
             this->presentTiming.outputRate(policy.outputFps), refresh,

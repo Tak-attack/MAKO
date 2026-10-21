@@ -1306,15 +1306,24 @@ namespace mako::layer {
         }
 
         [[nodiscard]] TimePoint schedule(
-                const TimePoint now, const double framesPerSecond) {
+                const TimePoint now, const double framesPerSecond,
+                const bool preserveRatePhase = false) {
             if (!std::isfinite(framesPerSecond) || framesPerSecond <= 0.0) {
                 this->reset();
                 return now;
             }
 
             if (this->activeFramesPerSecond != framesPerSecond) {
-                this->nextFrameAt.reset();
-                this->resetOutputs();
+                if (preserveRatePhase && this->activeFramesPerSecond > 0.0 && this->nextFrameAt) {
+                    // A governor's small rate adjustment belongs to the same
+                    // pacing episode. Move its next boundary without granting
+                    // a free frame or discarding the Adaptive output clock.
+                    *this->nextFrameAt += std::chrono::duration_cast<Clock::duration>(
+                        std::chrono::duration<double>(1.0 / framesPerSecond - 1.0 / this->activeFramesPerSecond));
+                } else {
+                    this->nextFrameAt.reset();
+                    this->resetOutputs();
+                }
                 this->activeFramesPerSecond = framesPerSecond;
             }
 

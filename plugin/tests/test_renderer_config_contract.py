@@ -12,6 +12,7 @@ from shared_config import (
     BASE_FPS_CAP_MAX,
     BASE_FPS_CAP_MIN,
     CONFIG_SCHEMA_DEF,
+    GPU_HEADROOM_PERCENT_VALUES,
     DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS_MAX,
     DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS_MIN,
     DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS_VALUES,
@@ -64,6 +65,13 @@ RENDERER_CONFIG_SOURCE = (
 
 
 class RendererConfigContractTests(unittest.TestCase):
+    def test_gpu_headroom_presets_match_native_renderer(self):
+        source = (REPOSITORY_ROOT / "engine/mako-common/include/mako-common/configuration/config.hpp").read_text()
+        presets = re.search(r"gpuHeadroomPercentPresets\{([^}]+)\}", source)
+        self.assertIsNotNone(presets)
+        self.assertEqual(tuple(int(value.strip()) for value in presets[1].split(",")), GPU_HEADROOM_PERCENT_VALUES)
+        self.assertEqual(CONFIG_SCHEMA_DEF["gpu_headroom_percent"]["default"], 0)
+
     def test_launcher_exclusions_match_renderer_activation_guard(self):
         source = (REPOSITORY_ROOT /
                   "engine/mako-common/src/configuration/launcher_exclusions_generated.hpp").read_text()

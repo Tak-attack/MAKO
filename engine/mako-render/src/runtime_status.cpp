@@ -270,6 +270,7 @@ namespace {
                << ",\"hdr_quality\":\"" << ls::hdrQualityName(profile.hdr_quality) << "\""
                << ",\"frame_generation_refresh_threshold\":"
                << profile.frame_generation_refresh_threshold
+               << ",\"gpu_headroom_percent\":" << profile.gpu_headroom_percent
                << ",\"base_fps_cap\":" << profile.base_fps_cap
                << ",\"adaptive\":" << profile.adaptive
                << ",\"adaptive_auto_base_fps_cap\":"
@@ -344,6 +345,7 @@ std::string mako::layer::runtimeStatusJson(
            << status.appliedGeneratedCapacity
            << ",\"frame_generation_active\":"
            << status.frameGenerationActive
+           << ",\"gpu_headroom_state\":" << jsonString(status.gpuHeadroomState)
            << ",\"spatial_scaling\":{"
            << "\"active\":" << scalingActive
            << ",\"activation_supported\":"

@@ -162,6 +162,7 @@ describe("fractional Adaptive preset", () => {
   test("encodes every cap and Recovery interaction as an atomic patch", () => {
     expect(dynamicCadenceRecoveryChanges(true)).toEqual({
       dynamic_cadence_recovery: true,
+      gpu_headroom_percent: 0,
       adaptive_auto_base_fps_cap: false,
       adaptive_fractional_real_frame_priority:
         ADAPTIVE_FRACTIONAL_REAL_FRAME_PRIORITY_AUTO,

@@ -27,6 +27,7 @@ from shared_config import (
     BASE_FPS_CAP_MAX,
     BASE_FPS_CAP_MIN,
     BASE_FPS_CAP_UI_MAX,
+    GPU_HEADROOM_PERCENT_VALUES,
     CONFIG_SCHEMA_DEF,
     DEFAULT_PROFILE_NAME,
     DYNAMIC_CADENCE_PROBE_INTERVAL_SECONDS_MAX,
@@ -159,6 +160,7 @@ def generate_typescript_schema():
         f"export const BASE_FPS_CAP_MIN = {BASE_FPS_CAP_MIN} as const;",
         f"export const BASE_FPS_CAP_MAX = {BASE_FPS_CAP_MAX} as const;",
         f"export const BASE_FPS_CAP_UI_MAX = {BASE_FPS_CAP_UI_MAX} as const;",
+        f"export const GPU_HEADROOM_PERCENT_VALUES = {list(GPU_HEADROOM_PERCENT_VALUES)} as const;",
         f"export const TARGET_FPS_MIN = {TARGET_FPS_MIN} as const;",
         f"export const TARGET_FPS_MAX = {TARGET_FPS_MAX} as const;",
         "export const ADAPTIVE_MAX_MULTIPLIER_MIN = "

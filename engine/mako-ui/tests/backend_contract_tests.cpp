@@ -302,6 +302,7 @@ void test_lossless_scaling_is_optional() {
 }
 
 void test_power_profile_editor() {
+    require_property("gpu_headroom_percent", "uint", true, false);
     require_property("adaptive_target_refresh_rate", "bool", true, false);
     require_property("separate_power_modes", "bool", true, false);
     require_property("power_mode", "int", true, false);
@@ -330,6 +331,10 @@ void test_power_profile_editor() {
         require(backend.getTargetFPS() == 90, "Handheld did not clone shared settings");
         backend.targetFPSUpdated(60);
         backend.baseFPSCapUpdated(30);
+        backend.gpuHeadroomPercentUpdated(15);
+        require(backend.getGpuHeadroomPercent() == 15, "Headroom setter failed");
+        backend.gpuHeadroomPercentUpdated(7);
+        require(backend.getGpuHeadroomPercent() == 15, "Invalid headroom must be rejected");
         backend.scalingEnabledUpdated(true);
         backend.scalingMethodUpdated(QStringLiteral("mako"));
         backend.scalingSharpnessUpdated(0.2F);
@@ -338,7 +343,8 @@ void test_power_profile_editor() {
         require(!backend.getAdaptiveTargetRefreshRate(),
             "Handheld refresh targeting changed Docked settings");
         require(backend.getTargetFPS() == 90, "Handheld edits changed Docked settings");
-        require(backend.getBaseFPSCap() == ls::GameConfDefaults::baseFpsCap &&
+        require(backend.getGpuHeadroomPercent() == 0 &&
+                backend.getBaseFPSCap() == ls::GameConfDefaults::baseFpsCap &&
                 !backend.getScalingEnabled() &&
                 backend.getFlowScale() == ls::GameConfDefaults::flowScale,
             "Handheld live tuning leaked into Docked settings");
@@ -358,6 +364,7 @@ void test_power_profile_editor() {
     const auto& base = saved.profiles().front();
     require(base.name == "renamed" && base.active_in.size() == 2 &&
             base.power_profiles[0].target_fps == 60 &&
+            base.power_profiles[0].gpu_headroom_percent == 15 &&
             base.power_profiles[0].adaptive_target_refresh_rate &&
             !base.power_profiles[1].adaptive_target_refresh_rate &&
             !base.adaptive_target_refresh_rate &&
@@ -544,9 +551,9 @@ void test_feature_group_order_and_ownership() {
         frame_generation_group_start,
         group_start - frame_generation_group_start
     );
-    require(frame_generation_group.count(QStringLiteral("GroupEntry {")) == 15 &&
+    require(frame_generation_group.count(QStringLiteral("GroupEntry {")) == 14 &&
             frame_generation_group.count(QStringLiteral(
-                "visible: backend.frame_generation_provisioned")) == 14,
+                "visible: backend.frame_generation_provisioned")) == 13,
         "Frame Generation must retain its provisioning switch while keeping live controls visible at 0x");
     require(frame_generation_group.contains(QStringLiteral(
                 "title: t.gamescopeVrrMode")),

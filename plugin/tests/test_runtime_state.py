@@ -128,6 +128,23 @@ class RuntimeStateTests(unittest.TestCase):
         path.write_text(json.dumps(record), encoding="utf-8")
         return path
 
+    def test_gpu_headroom_status_and_older_renderer_defaults(self):
+        record = self._record()
+        path = self._write("headroom.json", record)
+        context = self.service._read_context(path)
+        self.assertIsNotNone(context)
+        self.assertEqual(context["gpu_headroom_state"], "unavailable")
+        self.assertEqual(context["applied"]["gpu_headroom_percent"], 0)
+        record["gpu_headroom_state"] = "frame-rate-floor"
+        record["applied"]["gpu_headroom_percent"] = 15
+        self._write("headroom.json", record)
+        context = self.service._read_context(path)
+        self.assertEqual(context["gpu_headroom_state"], "frame-rate-floor")
+        self.assertEqual(context["applied"]["gpu_headroom_percent"], 15)
+        record["gpu_headroom_state"] = 42
+        self._write("headroom.json", record)
+        self.assertIsNone(self.service._read_context(path))
+
     def test_valid_contexts_are_filtered_sorted_and_aggregated(self):
         self._write(
             "fg.json",

@@ -62,6 +62,14 @@ With **Fractional Adaptive** and **Automatic** Real Frame Priority, sustained na
 
 For games switching between 30 FPS cutscenes and 60 FPS gameplay on a 60 Hz display, try **Fractional Adaptive**, a **2x** ceiling, and a **60 FPS** target (or **Match Display Refresh Rate**). Enable **Dynamic Cadence Recovery** under **Tweaks**. Recovery clears base caps and selects **Automatic** Real Frame Priority; keep those settings to let gameplay reach its native rate. Start with the default two-second probe interval; checks can briefly lower output FPS or hitch.
 
+## GPU Headroom
+
+Under **Performance**, enable **GPU Headroom** and choose a 5%, 10%, 15% or 20% reserve. It defaults to Off; enabling it selects 10%, targeting roughly 90% utilization of the game's GPU, including the compositor and other applications. The toggle and reserve apply live while Frame Generation is active. Off removes its additional cap and stops its utilization sampling. This is a smoothed target: brief spikes can still reach 100%, and a lower utilization percentage does not guarantee lower power consumption.
+
+MAKO gradually limits real frames while Frame Generation is active. **Adaptive** can replace them within **Maximum Adaptive Multiplier**; **Fixed** keeps its multiplier and can lower output FPS. Existing caps still apply. Fixed keeps its usual generated workload after Headroom releases its cap; Adaptive is preferable when you want to regain a higher real-frame rate as scenes become lighter. Adaptive at 90 FPS with a 2× ceiling cannot reduce real frames below 45 FPS; allowing 3× creates more room but may reduce responsiveness or increase interpolation artifacts. A 20 real-FPS safety floor also applies. Dynamic Cadence Recovery is disabled when enabling Headroom and clears Headroom when enabled itself.
+
+Supported AMD GPU telemetry is required. Gamescope is optional, but the driver and sandbox must expose readings for the game's GPU. Unavailable readings leave normal pacing active; **Live Status** reports unavailable telemetry or a reached floor. The setting is dormant with Frame Generation off and does not independently regulate scaling or shaders. Each power profile can save its own reserve.
+
 ## Spatial Scaling
 
 Turn on **Enable Scaling (Restart)**. Gamescope/Game Mode is recommended. Set Steam's **Game Resolution** to the display maximum, then lower the in-game resolution until **Live Status** shows **Input** smaller than **Display**.
@@ -119,6 +127,7 @@ Unchecking retains a shader for reuse. **Delete selected custom shaders** remove
 | **Disable Steam Overlay (Restart)** | On by default. May reduce stutter; disables Steam's in-game overlay and FPS counter and may affect Steam Input. Gaming Mode menus and performance overlay remain available. |
 | **Ultra Performance (Restart)** | Uses 70% Flow Scale, the lighter FG model, and LS1 Performance when scaling is enabled. |
 | **Flow Scale** | 25–100% motion-estimation resolution; lower saves GPU work at a quality cost. Ultra Performance fixes it at 70%. |
+| **GPU Headroom** | Live, Frame Generation-only control that reduces real FPS to target spare GPU capacity; see [GPU Headroom](#gpu-headroom). Off by default. |
 | **Lighter FG Model** | Reduces GPU work, with potentially more artifacts; forced on by Ultra Performance. |
 | **Allow FP16 (Restart)** | Global precision: FP16 for supported Frame Generation models and MAKO Scaler; off uses FP32. LS1 always uses FP32. |
 | **Lossless.dll Path (Restart)** | Global override; leave empty for automatic detection. |
@@ -130,7 +139,7 @@ Keep defaults unless a game needs a change.
 
 | Control | Use it for |
 | --- | --- |
-| **Dynamic Cadence Recovery** | Off by default. Rechecks games that change native FPS by briefly reducing generated work; these checks can lower output FPS or cause hitches under sustained GPU load. Clears base caps and resets Real Frame Priority. Changing a cap or priority turns Recovery off. |
+| **Dynamic Cadence Recovery** | Off by default. Rechecks games that change native FPS by briefly reducing generated work; these checks can lower output FPS or cause hitches under sustained GPU load. Clears base caps and GPU Headroom, and resets Real Frame Priority. Changing a cap or priority, or enabling GPU Headroom, turns Recovery off. |
 | **Cadence Probe Interval** | 0.1–3 seconds between recovery checks; default 2 seconds. Shorter intervals react sooner but can hitch more often. |
 | **Gamescope WSI (Restart)** | Coloured or pixelated motion artifacts in supported 64-bit host Gamescope games. |
 | **Game Swapchain Images (Restart)** | Games that fail to start with MAKO; may reduce generated-frame availability. |
